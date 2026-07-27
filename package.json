@@ -1,0 +1,16 @@
+{
+  "name": "plan-orchestrator",
+  "version": "0.1.0",
+  "description": "Parallel lane execution for TDD implementation plans. Parses a plan into a DAG, runs disjoint lanes in isolated git worktrees via headless agent processes, and checkpoints every task so a dead session resumes exactly where it stopped.",
+  "bin": {
+    "plo": "./bin/plo.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "type": "commonjs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
