@@ -12,8 +12,8 @@ task so a dead session resumes exactly where it stopped.
 ## The flow
 
     plo analyze   --plan <plan.md> --max-lanes 3   # read-only; prints the DAG for review
-    # ...human corrects it in .plan-lanes.json, re-run analyze until right...
-    plo init      --plan <plan.md> --max-lanes 3   # writes .plan-state.json
+    # ...human corrects it in .plan-lanes-<plan>.json, re-run analyze until right...
+    plo init      --plan <plan.md> --max-lanes 3   # writes .plan-state-<plan>.json
     plo run       --plan <plan.md>                 # worktrees + concurrent lanes
     plo resume    --plan <plan.md>                 # after a crash / limit / API error
     plo integrate --plan <plan.md>                 # merge -> barriers -> FULL suite -> cross-lane review
@@ -48,7 +48,7 @@ it does not guess.
 | write-write | two tasks declare the same path in `**Files:**` | hard |
 | interface | a `Consumes:`/`Produces:` block names another task | hard |
 | semantic | docs-only and no-writes heuristics, or an LLM pass | soft, reviewable |
-| override | `.plan-lanes.json` | wins over everything |
+| override | `.plan-lanes-<plan>.json` | wins over everything |
 
 Rule 0 runs first: already-completed tasks leave the graph. A conflict against
 merged work is not a conflict.
@@ -62,7 +62,8 @@ Two details that matter in practice:
 
 ## Correcting the DAG
 
-Write `.plan-lanes.json` beside the plan:
+Write `.plan-lanes-<plan>.json` beside the plan (`.plan-lanes-auth-refactor.json` for
+`auth-refactor.md`):
 
 ```json
 {
@@ -71,8 +72,32 @@ Write `.plan-lanes.json` beside the plan:
 }
 ```
 
-Commit this file — it documents a real decision. Do not commit `.plan-state.json`;
-that is run state.
+Commit this file — it documents a real decision. Do not commit the
+`.plan-state-*.json` checkpoint; that is run state.
+
+## One state file per plan
+
+Both sidecars are named after the plan, not the directory:
+
+    docs/superpowers/plans/auth-refactor.md
+    docs/superpowers/plans/.plan-state-auth-refactor.json
+    docs/superpowers/plans/.plan-lanes-auth-refactor.json
+
+Plans conventionally share a folder, and a directory-wide name made them collide:
+`init` on a second plan refused against the first one's state, and `run` matched
+task **numbers** across two unrelated plans — reporting the other plan's finished
+tasks as "already complete" and skipping them. Several plans can now sit in one
+folder and run independently.
+
+Two guards back the naming, because a name alone is not a check:
+
+- `load` refuses any state file whose recorded plan is a different file, rather
+  than matching task numbers across plans.
+- A pre-existing `.plan-state.json` is migrated to the per-plan name on first
+  load — but only when it is that plan's. Another plan's is left untouched.
+
+The directory may legitimately differ (repo moved, fresh clone, worktree); the
+plan file may not.
 
 ## Execution model
 
@@ -92,7 +117,7 @@ it.
 
 ## Resume
 
-`.plan-state.json` is written by the CLI (never by an agent) before a task starts
+`.plan-state-<plan>.json` is written by the CLI (never by an agent) before a task starts
 and again the moment it exits. On resume:
 
 - a task left `running` becomes `interrupted`

@@ -67,8 +67,14 @@ function resolveDone(plan, st, args) {
 }
 
 function loadOverrides(planPath, args) {
-  const p = args.overrides ? path.resolve(args.overrides) : path.join(path.dirname(planPath), '.plan-lanes.json');
-  if (!fs.existsSync(p)) return { file: null, overrides: {} };
+  const dir = path.dirname(planPath);
+  // Per-plan name first; the directory-wide legacy name only as a fallback, so
+  // two plans sharing a folder cannot inherit each other's corrections.
+  const candidates = args.overrides
+    ? [path.resolve(args.overrides)]
+    : [path.join(dir, `.plan-lanes-${state.planSlug(planPath)}.json`), path.join(dir, '.plan-lanes.json')];
+  const p = candidates.find((c) => fs.existsSync(c));
+  if (!p) return { file: null, overrides: {} };
   try {
     return { file: p, overrides: JSON.parse(fs.readFileSync(p, 'utf8')) };
   } catch (e) {
@@ -145,7 +151,7 @@ async function cmdRun(args, { resuming = false } = {}) {
   const { abs, contents, plan } = loadPlan(args.plan);
   let st = state.load(abs);
   if (!st) {
-    if (!resuming) { cmdInit(args); st = state.load(abs); } else fail('no .plan-state.json — run `plo init` first.', EXIT.USAGE);
+    if (!resuming) { cmdInit(args); st = state.load(abs); } else fail(`no state at ${state.statePathFor(abs)} — run \`plo init\` first.`, EXIT.USAGE);
   }
 
   const notes = state.reconcile(st, {
@@ -204,7 +210,7 @@ async function cmdRun(args, { resuming = false } = {}) {
 async function cmdIntegrate(args) {
   const { abs, contents, plan } = loadPlan(args.plan);
   const st = state.load(abs);
-  if (!st) fail('no .plan-state.json — nothing to integrate.', EXIT.USAGE);
+  if (!st) fail(`no state at ${state.statePathFor(abs)} — nothing to integrate.`, EXIT.USAGE);
 
   const res = await integrate(abs, st, plan, {
     model: args.model,
@@ -222,7 +228,7 @@ async function cmdIntegrate(args) {
 function cmdStatus(args) {
   const { abs, contents, plan } = loadPlan(args.plan);
   const st = state.load(abs);
-  if (!st) { out('no .plan-state.json yet — run `plo analyze` then `plo init`.'); return EXIT.OK; }
+  if (!st) { out(`no state at ${state.statePathFor(abs)} yet — run \`plo analyze\` then \`plo init\`.`); return EXIT.OK; }
   if (args.json) { out(JSON.stringify(st, null, 2)); return EXIT.OK; }
   out(render.status(plan, st));
   return EXIT.OK;
@@ -231,7 +237,7 @@ function cmdStatus(args) {
 function cmdClean(args) {
   const { abs } = loadPlan(args.plan);
   const st = state.load(abs);
-  if (!st) fail('no .plan-state.json — nothing to clean.', EXIT.USAGE);
+  if (!st) fail(`no state at ${state.statePathFor(abs)} — nothing to clean.`, EXIT.USAGE);
 
   const unmerged = st.lanes.filter((l) => l.branch && wt.laneCommits(st.repoRoot, st.base.commit, l.branch).length
     && !st.integration.mergedLanes.includes(l.id));
@@ -256,7 +262,7 @@ USAGE
 COMMANDS
   analyze     Parse the plan, build the DAG, print the lane plan for review.
               Changes nothing. Run this first, correct it, then init.
-  init        Write .plan-state.json from the approved lane plan.
+  init        Write the plan's state file from the approved lane plan.
   run         Create lane worktrees and execute lane tasks concurrently.
   resume      Reconcile state with git and continue where the last run stopped.
   integrate   Merge lanes -> barrier tasks -> FULL suite -> cross-lane review.
@@ -267,7 +273,7 @@ OPTIONS
   --plan <file>          the plan markdown (required)
   --max-lanes <n>        concurrency ceiling (default 3)
   --done <1,2>           mark tasks complete on top of the plan's checkboxes
-  --overrides <file>     lane corrections (default: .plan-lanes.json beside the plan)
+  --overrides <file>     lane corrections (default: .plan-lanes-<plan>.json beside the plan)
   --no-infer             disable the docs/wrap-up barrier heuristics
   --dry-run              with run/resume: show what would execute, spawn nothing
   --json                 machine-readable output (analyze, status)

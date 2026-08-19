@@ -137,3 +137,67 @@ test('summarize counts by status', () => {
   assert.equal(s.done, 1);
   assert.equal(s.counts[state.STATUS.FAILED], 1);
 });
+
+// --- state files are per plan, not per directory -------------------------
+//
+// Plans conventionally share one folder. A directory-scoped checkpoint made
+// `plo run --plan b.md` read plan A's state and report A's finished task
+// numbers as B's "already complete" — silently skipping B's work.
+
+function tmpPlansDir(...names) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plo-multi-'));
+  return names.map((n) => {
+    const p = path.join(dir, n);
+    fs.writeFileSync(p, `# ${n}\n`);
+    return p;
+  });
+}
+
+test('two plans in one directory get separate state files', () => {
+  const [a, b] = tmpPlansDir('plan-a.md', 'plan-b.md');
+  assert.notEqual(state.statePathFor(a), state.statePathFor(b));
+
+  state.save(a, mkState(a));
+  assert.equal(state.load(b), null, 'plan B must not see plan A state');
+
+  const stB = mkState(b);
+  stB.tasks['1'].status = state.STATUS.DONE;
+  state.save(b, stB);
+
+  assert.equal(state.load(a).tasks['1'].status, state.STATUS.PENDING);
+  assert.equal(state.load(b).tasks['1'].status, state.STATUS.DONE);
+});
+
+test('load refuses a state file belonging to a different plan', () => {
+  const [a, b] = tmpPlansDir('plan-a.md', 'plan-b.md');
+  // A state file carrying plan A, sitting where plan B's would live.
+  fs.writeFileSync(state.statePathFor(b), JSON.stringify(mkState(a)));
+  assert.throws(() => state.load(b), /belongs to plan-a\.md, not plan-b\.md/);
+});
+
+test('a legacy .plan-state.json migrates when it is this plan\'s', () => {
+  const [a] = tmpPlansDir('plan-a.md');
+  const legacy = state.legacyStatePathFor(a);
+  const st = mkState(a);
+  st.tasks['2'].status = state.STATUS.DONE;
+  fs.writeFileSync(legacy, JSON.stringify(st));
+
+  const loaded = state.load(a);
+  assert.equal(loaded.tasks['2'].status, state.STATUS.DONE, 'checkpoint survives migration');
+  assert.ok(fs.existsSync(state.statePathFor(a)), 'moved to the per-plan name');
+  assert.ok(!fs.existsSync(legacy), 'legacy file is gone, not duplicated');
+});
+
+test('a legacy .plan-state.json is never adopted by another plan', () => {
+  const [a, b] = tmpPlansDir('plan-a.md', 'plan-b.md');
+  fs.writeFileSync(state.legacyStatePathFor(a), JSON.stringify(mkState(a)));
+  assert.throws(() => state.load(b), /belongs to plan-a\.md/);
+  assert.ok(fs.existsSync(state.legacyStatePathFor(a)), 'plan A checkpoint left intact');
+});
+
+test('the state path survives a moved repo but not a renamed plan', () => {
+  const [a] = tmpPlansDir('plan-a.md');
+  const st = mkState('/somewhere/else/plan-a.md'); // same plan, different absolute dir
+  fs.writeFileSync(state.statePathFor(a), JSON.stringify(st));
+  assert.ok(state.load(a), 'directory may differ — repo moved, worktree, clone');
+});

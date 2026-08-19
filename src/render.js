@@ -97,7 +97,7 @@ function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
   }
 
   lines.push(rule('TO CORRECT THIS PLAN'));
-  lines.push('  Write .plan-lanes.json beside the plan file:');
+  lines.push(`  Write .plan-lanes-${planPath ? state.planSlug(planPath) : '<plan>'}.json beside the plan file:`);
   lines.push('');
   lines.push('    {');
   lines.push('      "dropEdges": ["3->8"],');
