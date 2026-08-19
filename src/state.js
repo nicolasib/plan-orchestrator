@@ -32,7 +32,21 @@ const isSettled = (s) => s === STATUS.DONE;
 /** Re-runnable on resume: the work is unfinished and nothing is holding it. */
 const isResumable = (s) => s === STATUS.PENDING || s === STATUS.INTERRUPTED || s === STATUS.FAILED;
 
-const statePathFor = (planPath) => path.join(path.dirname(planPath), '.plan-state.json');
+/**
+ * The state file is named per PLAN, not per directory.
+ *
+ * Plans conventionally share one folder (docs/superpowers/plans/), so a
+ * directory-scoped name made every plan in that folder fight over one
+ * checkpoint: `init` on the second plan refused against the first's state, and
+ * `run` matched task NUMBERS across two unrelated plans — silently reporting
+ * another plan's finished tasks as "already complete" and skipping them.
+ */
+const planSlug = (planPath) => path.basename(planPath).replace(/\.md$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-');
+
+const statePathFor = (planPath) => path.join(path.dirname(planPath), `.plan-state-${planSlug(planPath)}.json`);
+
+/** Pre-per-plan name. Read once, migrated on load, never written again. */
+const legacyStatePathFor = (planPath) => path.join(path.dirname(planPath), '.plan-state.json');
 
 const hashPlan = (contents) => crypto.createHash('sha256').update(contents).digest('hex').slice(0, 16);
 
@@ -68,19 +82,50 @@ function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxL
   };
 }
 
-function load(planPath) {
-  const p = statePathFor(planPath);
-  if (!fs.existsSync(p)) return null;
+function readState(p) {
   const raw = fs.readFileSync(p, 'utf8');
   let state;
   try {
     state = JSON.parse(raw);
   } catch (e) {
-    throw new Error(`.plan-state.json is corrupt (${e.message}). Move it aside and re-run \`plo analyze\`.`);
+    throw new Error(`${path.basename(p)} is corrupt (${e.message}). Move it aside and re-run \`plo analyze\`.`);
   }
   if (state.schema !== SCHEMA) {
-    throw new Error(`.plan-state.json schema ${state.schema} != ${SCHEMA}. This CLI cannot read it.`);
+    throw new Error(`${path.basename(p)} schema ${state.schema} != ${SCHEMA}. This CLI cannot read it.`);
   }
+  return state;
+}
+
+/**
+ * Never return a state that belongs to a different plan. Task numbers are only
+ * meaningful within one plan; matching them across plans silently skips work.
+ * The directory may legitimately differ (repo moved, worktree), the plan file
+ * itself may not.
+ */
+function assertSamePlan(state, planPath, statefile) {
+  if (!state.plan) return;
+  if (path.basename(state.plan) === path.basename(planPath)) return;
+  throw new Error(
+    `${path.basename(statefile)} belongs to ${path.basename(state.plan)}, not ${path.basename(planPath)}. `
+    + 'Task numbers are not comparable across plans. Finish and `plo clean` that plan first, '
+    + 'or give each plan its own folder.',
+  );
+}
+
+function load(planPath) {
+  const p = statePathFor(planPath);
+  if (fs.existsSync(p)) {
+    const state = readState(p);
+    assertSamePlan(state, planPath, p);
+    return state;
+  }
+
+  // Migrate a pre-per-plan checkpoint, but only if it is this plan's.
+  const legacy = legacyStatePathFor(planPath);
+  if (!fs.existsSync(legacy)) return null;
+  const state = readState(legacy);
+  assertSamePlan(state, planPath, legacy);
+  fs.renameSync(legacy, p);
   return state;
 }
 
@@ -198,7 +243,7 @@ function summarize(state) {
 }
 
 module.exports = {
-  SCHEMA, STATUS, statePathFor, hashPlan,
+  SCHEMA, STATUS, statePathFor, legacyStatePathFor, planSlug, hashPlan,
   create, load, save, updateTask, reconcile, readyTasks, summarize,
   isSettled, isResumable,
 };

@@ -31,7 +31,7 @@ Hard rules:
   conflict that a human has to untangle.
 - **Never merge, rebase, pull, or switch branches.** Commit to \`${branch}\` and stop.
   Integration is a separate phase that runs after every lane finishes.
-- **Never edit the plan file, and never edit \`.plan-state.json\`.** The orchestrator
+- **Never edit the plan file, and never edit the \`.plan-state-*.json\` checkpoint.** The orchestrator
   owns that file; anything you write there is overwritten and lost.
 - If the task cannot be completed, stop and say so plainly in your final message.
   A clear failure is useful; a half-finished lane that reports success is not.`;
