@@ -116,6 +116,13 @@
   @media (min-width: 1680px) { :root { --rail: 440px } }
 
   .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  /* The column spaces itself, and nothing in it carries a top margin.
+     With the spacing on the blocks, the first one pushed itself down and the
+     rail beside it did not — the two columns started on different lines, by
+     16px with an alert on screen and by 26px without one, because the offset
+     was whichever block happened to be first. A gap belongs to the container:
+     it cannot appear above the first child. */
+  .shell > main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
   .shell > main { min-width: 0; }
   @media (min-width: 900px) {
     .shell { grid-template-columns: minmax(0, 1fr) var(--rail); align-items: start; }
@@ -219,7 +226,7 @@
   }
 
   /* -------------------------------------------------------------- alerts */
-  .alerts { display: grid; gap: 8px; margin-top: 16px; }
+  .alerts { display: grid; gap: 8px; }
   .alerts:empty { display: none; }
   .alert {
     display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
@@ -247,7 +254,7 @@
        thing alive on the page, and it should own the width instead of
        floating in half a screen of nothing. A wide card is a wide feed. */
     display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
-    gap: 12px; margin-top: 16px; align-items: start;
+    gap: 12px; align-items: start;
   }
   .board:empty { display: none; }
   .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
@@ -375,7 +382,7 @@
   }
 
   /* ------------------------------------------------------------ sections */
-  section { margin-top: 26px; }
+  section { min-width: 0; }
   h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
   .list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
   /* Columns, not two clumps pinned to the far edges. Comparing $7.87 against
