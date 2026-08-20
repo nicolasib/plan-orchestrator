@@ -19,6 +19,8 @@ task so a dead session resumes exactly where it stopped.
     plo integrate --plan <plan.md>                 # merge -> barriers -> FULL suite -> cross-lane review
     plo clean     --plan <plan.md>                 # remove lane worktrees
 
+    plo serve     --plan <plan.md>                 # in another terminal: live dashboard
+
 `analyze` changes nothing on disk. Nothing runs until you approve the lane plan.
 
 ## What it assumes about a plan
@@ -114,6 +116,39 @@ SDD's rule "never dispatch multiple implementers in parallel" is a rule about
 **one checkout**. Per-lane worktrees remove the shared state it protects. Within
 any single worktree the rule still holds absolutely, and the scheduler enforces
 it.
+
+## Watching a run
+
+`plo run` prints one line per task boundary, which is all the checkpoint knows.
+Everything else — the tool a lane is on right now, the turn count, the usage
+limit that killed it — is already on disk in `.plo-logs/task-<n>.jsonl`, because
+`spawn.js` writes the agent's raw stdout before parsing it.
+
+    plo serve --plan <plan.md>          # http://127.0.0.1:7331
+    plo serve --plan <plan.md> --port 8080 --open
+
+A second window, not a second run: read-only, loopback-bound, no dependency and
+no build step. Cards follow the work — a lane with nothing left collapses to one
+line, and the barrier running during integration gets a card of its own, because
+by then it is the only thing working. Click any task for its record: commits,
+session id, declared writes, plan steps, and the full activity tail.
+
+Status reads as a shape before a colour, the way an issue tracker does: an empty
+ring is waiting, a half-filled one is running, a filled check is done, a crossed
+ring failed. It follows the system light/dark setting and holds WCAG AA contrast
+in both.
+
+Two things it is careful about:
+
+- **It stays quiet when nothing changed.** The payload carries timestamps, never
+  elapsed times, so two identical reads compare equal and produce no frame.
+  Polling runs only while a tab is open.
+- **It never becomes part of the run.** No writes, no locks, `POST` refused. A
+  plan deleted or a checkpoint replaced mid-read is displayed as an error rather
+  than crashing the server.
+
+`--interval <seconds>` slows the re-read; `--host` binds elsewhere, which you
+want only if you actually mean to expose it.
 
 ## Resume
 
