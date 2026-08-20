@@ -131,8 +131,16 @@ A second window, not a second run: read-only, loopback-bound, no dependency and
 no build step. Cards follow the work — a lane with nothing left collapses to one
 line, and the barrier running during integration gets a card of its own, because
 by then it is the only thing working. Settled lanes drop to a table that closes
-with its own totals, so the turns, commits and dollars in the topbar add up
+with its own totals, so the turns, commits and tokens in the topbar add up
 under the column that composed them.
+
+It counts output tokens, not dollars. The agent reports `total_cost_usd` and
+that is an API price; nobody running this off a subscription pays it, so on
+this page it was a number about someone else's bill. Tokens are what the run
+spends and what a usage limit is counted in. The CLI records the figure the
+agent reports at the end of each spawn, summed across attempts — a task the fix
+loop ran five times spent five spawns' worth. A task that never reported one
+shows `—`, never `0`.
 
 Across the top, the run is a pipeline: `run → merge → barriers → full suite →
 cross-lane review`, in the only order they can happen. A failure lands on the

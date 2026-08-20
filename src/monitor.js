@@ -117,6 +117,9 @@ function emptyDigest() {
     attempts: 0,
     toolCount: 0,
     outputTokens: 0,
+    /** Only ever set from a result event: the spawn's own total, not a sum
+     *  over whatever messages happened to fall inside the tail. */
+    reportedTokens: null,
     costUsd: null,
     rateLimit: null,
     result: null,
@@ -240,6 +243,12 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
         text: ev.result ? oneLine(ev.result, TEXT_MAX) : null,
       };
       if (typeof ev.total_cost_usd === 'number') d.costUsd = ev.total_cost_usd;
+      // The spawn's own total, which replaces the running sum rather than
+      // adding to it. A finished task's log is tens of megabytes and this
+      // digest sees its last half-megabyte, so adding up `usage` message by
+      // message reports a fraction of the truth. The result event carries the
+      // whole spawn, and it sits at the end of the file — inside the tail.
+      if (ev.usage && typeof ev.usage.output_tokens === 'number') d.reportedTokens = ev.usage.output_tokens;
       if (ev.session_id) d.sessionId = ev.session_id;
       // A result event carries no timestamp, so in a feed six of them stack at
       // one instant reading the same polite sentence. What separates them is
@@ -294,6 +303,17 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     turns: live ? live.turns : (rec.turns || 0),
     commits: rec.commits || [],
     costUsd: rec.costUsd ?? (live ? live.costUsd : null),
+    // The checkpoint first, because the CLI wrote it from the agent's own
+    // report. The log second, and only the figure a result event carried, so
+    // runs recorded before `plo` kept this still have a number.
+    //
+    // Never the digest's running sum: a task writes tens of megabytes and this
+    // reads half of one, so adding up `usage` message by message reports a
+    // fraction. Measured on a blocked barrier whose log has no result event in
+    // its tail — the sum said 377 output tokens for 842 turns. Null, never
+    // zero and never a fraction: a task that has not reported did not spend
+    // nothing.
+    outputTokens: rec.outputTokens ?? (digest ? digest.reportedTokens : null),
     error: rec.error || null,
     reconciled: Boolean(rec.reconciled),
     startedAt: rec.startedAt || null,
@@ -542,6 +562,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
   const counts = {};
   for (const t of all) counts[t.status] = (counts[t.status] || 0) + 1;
   const costUsd = all.reduce((sum, t) => sum + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+  const outputTokens = all.reduce((sum, t) => sum + (typeof t.outputTokens === 'number' ? t.outputTokens : 0), 0);
   const startedAts = all.map((t) => t.startedAt).filter(Boolean).sort();
 
   // Any lane reporting a non-"allowed" limit is the single fact most likely to
@@ -567,6 +588,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
       interrupted: counts[state.STATUS.INTERRUPTED] || 0,
       pending: counts[state.STATUS.PENDING] || 0,
       costUsd,
+      outputTokens,
       firstStartedAt: startedAts[0] || null,
       active: (counts[state.STATUS.RUNNING] || 0) > 0,
     },
@@ -602,7 +624,7 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
     lastText: digest ? digest.lastText : null,
     result: digest ? digest.result : null,
     model: digest ? digest.model : null,
-    outputTokens: digest ? digest.outputTokens : 0,
+    outputTokens: digest ? digest.reportedTokens : null,
     truncated: digest ? digest.truncated : false,
     files: task ? { writes: task.writes || [], excluded: task.excludedPaths || [] } : null,
     steps: task ? task.steps : [],

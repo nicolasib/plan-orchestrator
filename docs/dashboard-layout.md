@@ -498,3 +498,28 @@ nos dois temas nos seis estados de bloco (pior caso 4.72:1 escuro, 4.73:1
 claro); clique num bloco e num chip da fila abrindo a task e escrevendo
 `#task=N`; a run real continua cabendo em 1080 sem rolar, e a fixture ficou 9px
 mais baixa do que era com o `Lane plan`.
+
+---
+
+## 11. Nota — o custo vira tokens (20/08/2026)
+
+Fora do plano, a pedido: `$19.67 spent` na topbar e a coluna `COST` da tabela
+passam a contar **output tokens**. `total_cost_usd` é preço de API; quem roda
+isto numa assinatura não paga aquilo, então era um número sobre a conta de
+outra pessoa. Token é o que a run gasta e é a unidade em que um limite de uso
+é contado.
+
+O número não existia. `spawn.js` já lia `usage` do evento `result` e não usava;
+agora `run.js` grava no checkpoint ao lado do `costUsd`, **somado entre as
+tentativas** — uma task que o loop de correção rodou cinco vezes gastou cinco
+spawns.
+
+Uma armadilha registrada: **não dá para contar isso lendo o log**. Uma task
+escreve 51MB e o digest lê os últimos 512KB, então somar `usage` mensagem a
+mensagem reporta uma fração. Medido num barrier bloqueado cujo tail não tem
+evento `result`: a soma dizia **377 output tokens para 842 turns**. O único
+número confiável é o que o evento `result` carrega, e ele fica no fim do
+arquivo — dentro do tail. Runs gravadas antes desta mudança continuam
+mostrando um número por causa disso; a task que morreu antes de emitir o
+`result` mostra `—`, que é a verdade.
+

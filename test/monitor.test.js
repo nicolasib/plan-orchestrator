@@ -436,6 +436,42 @@ test('a plan with no barrier tasks has four stages, not a fifth that is always d
   assert.equal(stages[0].status, 'pending', 'a run where nothing started has not started');
 });
 
+// ---------------------------------------------------------------- tokens
+
+test('a token count comes from what the agent reported, never from a running sum', () => {
+  const { planPath, logFile } = fixture();
+
+  // The sample log accumulates 52 output tokens across its assistant
+  // messages and never closes with a result event — exactly the shape of a
+  // task that died mid-stream. A digest reads a tail, so that sum is a
+  // fraction of a log that can be tens of megabytes.
+  assert.equal(monitor.digestLog(SAMPLE_LOG).outputTokens, 52);
+  assert.equal(monitor.digestLog(SAMPLE_LOG).reportedTokens, null);
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, null, 'a fraction is worse than nothing');
+
+  fs.appendFileSync(logFile, ev({
+    type: 'result', subtype: 'success', total_cost_usd: 1.25,
+    usage: { output_tokens: 12864, input_tokens: 60, cache_read_input_tokens: 2219083 },
+  }));
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'the spawn reports its own total');
+});
+
+test('the checkpoint outranks the log, and the totals add up the run', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  // What `run.js` writes: summed across attempts, so a retried task counts
+  // every spawn it took.
+  st.tasks['1'].outputTokens = 40000;
+  st.tasks['2'].outputTokens = 17760;
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.lanes[0].tasks[0].outputTokens, 40000);
+  assert.equal(s.lanes[0].tasks[1].outputTokens, 17760, 'the checkpoint wins over anything read from the log');
+  assert.equal(s.totals.outputTokens, 57760);
+  assert.equal(s.barriers[0].outputTokens, null, 'a task that never ran reported nothing');
+});
+
 // -------------------------------------------------------------- timeline
 
 // The fixture's clock: T1 ran 11:00–11:20, T2 started at 12:00, T3 never did.

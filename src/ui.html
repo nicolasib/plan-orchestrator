@@ -115,7 +115,7 @@
   @media (min-width: 1280px) { :root { --rail: 380px } }
   @media (min-width: 1680px) { :root { --rail: 440px } }
 
-  .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 16px; }
   /* The column spaces itself, and nothing in it carries a top margin.
      With the spacing on the blocks, the first one pushed itself down and the
      rail beside it did not — the two columns started on different lines, by
@@ -720,7 +720,7 @@
   <div class="grow"></div>
   <div class="stats">
     <span class="stat"><b id="m-progress">–</b> done</span>
-    <span class="stat"><b id="m-cost">–</b> spent</span>
+    <span class="stat"><b id="m-cost">–</b> tokens</span>
     <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
     <button class="railbtn" id="open-feed" aria-controls="panel">Activity</button>
     <span class="live off" id="live"><i class="pip"></i><span id="live-text">connecting…</span></span>
@@ -840,9 +840,24 @@ function dur(ms) {
 const since = (iso) => (iso ? dur(Date.now() + skew - Date.parse(iso)) : '–');
 /** A settled task gets the time it took, not a clock that keeps running. */
 const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date.parse(t.startedAt)) : t.startedAt ? since(t.startedAt) : '–');
-// Cost lands only when a process exits, so zero means "not reported yet",
-// not "this was free". Saying $0.00 there is a lie the reader acts on.
-const money = (v) => (typeof v === 'number' && v > 0 ? `$${v.toFixed(2)}` : '—');
+/**
+ * Output tokens, not dollars.
+ *
+ * The agent reports `total_cost_usd` and it is an API price. Nobody running
+ * this off a subscription pays it, so on this page it was a number with no
+ * referent — precise to the cent and about someone else's bill. Tokens are
+ * what the run actually spends, and what a usage limit is counted in.
+ *
+ * Same rule as the cost it replaces: a task that has not reported did not
+ * spend nothing, so nothing is `—` and never `0`.
+ */
+const tokens = (v) => {
+  if (typeof v !== 'number' || v <= 0) return '—';
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
+};
 
 // ------------------------------------------------------------ status marks
 
@@ -943,7 +958,7 @@ function render(s) {
   ].filter(Boolean).join('<span class="sep">·</span>');
 
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
-  $('m-cost').textContent = money(s.totals.costUsd);
+  $('m-cost').textContent = tokens(s.totals.outputTokens);
   // This page is made to sit in a background tab; the tab strip should report.
   const stuck = s.totals.failed + s.totals.blocked;
   document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
@@ -1129,7 +1144,7 @@ function currentOf(tasks) {
 
 const sumTurns = (tasks) => tasks.reduce((n, t) => n + (t.turns || 0), 0);
 const sumCommits = (tasks) => tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0);
-const sumCost = (tasks) => tasks.reduce((n, t) => n + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+const sumTokens = (tasks) => tasks.reduce((n, t) => n + (typeof t.outputTokens === 'number' ? t.outputTokens : 0), 0);
 
 function chipsHtml(tasks) {
   return `<div class="chips">${tasks.map((t) => {
@@ -1228,7 +1243,7 @@ function cardHtml({ kind, label, sub, subTitle, copy, tasks, current }) {
     <div class="foot">
       <span>${plural(sumTurns(tasks), 'turn')}</span>
       <span>${plural(sumCommits(tasks), 'commit')}</span>
-      <span>${money(sumCost(tasks))}</span>
+      <span>${sumTokens(tasks) ? `${tokens(sumTokens(tasks))} tokens` : '—'}</span>
     </div>`;
 }
 
@@ -1287,7 +1302,7 @@ function renderBoard(s) {
       <span role="columnheader">Branch</span>
       <span class="num" role="columnheader">Turns</span>
       <span class="num" role="columnheader">Commits</span>
-      <span class="num" role="columnheader">Cost</span>
+      <span class="num" role="columnheader">Tokens</span>
     </div>`;
   paint($('settled'), !settled.length ? '' : `<div class="grid" role="rowgroup">` + head + settled.map((lane) => `<div class="row lane" role="row">
       <span class="ic" role="cell">${statusIcon('done')}</span>
@@ -1298,7 +1313,7 @@ function renderBoard(s) {
         : ''}</span>
       <span class="num" role="cell"><b>${sumTurns(lane.tasks)}</b></span>
       <span class="num" role="cell"><b>${sumCommits(lane.tasks)}</b></span>
-      <span class="num" role="cell"><b>${money(sumCost(lane.tasks))}</b></span>
+      <span class="num" role="cell"><b>${tokens(sumTokens(lane.tasks))}</b></span>
     </div>`).join('') + totalsRow(settled, s.lanes.length) + '</div>');
 }
 
@@ -1317,7 +1332,7 @@ function totalsRow(lanes, allLanes) {
       <span class="mono" role="cell">${esc(note)}</span>
       <span class="num" role="cell"><b>${sumTurns(tasks)}</b></span>
       <span class="num" role="cell"><b>${sumCommits(tasks)}</b></span>
-      <span class="num" role="cell"><b>${money(sumCost(tasks))}</b></span>
+      <span class="num" role="cell"><b>${tokens(sumTokens(tasks))}</b></span>
     </div>`;
 }
 
@@ -1557,8 +1572,7 @@ function drawTask(t) {
     ['Duration', t.status === 'running' && t.startedAt ? `<span data-since="${esc(t.startedAt)}">–</span>` : esc(span(t))],
     ['Turns', String(t.turns || 0)],
     ['Attempts', String(t.attempts || 0)],
-    ['Output tokens', (t.outputTokens || 0).toLocaleString()],
-    ['Cost', money(t.costUsd)],
+    ['Output tokens', typeof t.outputTokens === 'number' ? t.outputTokens.toLocaleString() : '—'],
     ['Model', `<span class="mono">${esc(t.model || '—')}</span>`],
     ['Session', t.sessionId
       ? `<span class="v-cp"><span class="mono">${esc(t.sessionId)}</span>${copyBtnHtml(t.sessionId, 'the session id')}</span>`
