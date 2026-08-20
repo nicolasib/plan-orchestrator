@@ -130,8 +130,17 @@ limit that killed it — is already on disk in `.plo-logs/task-<n>.jsonl`, becau
 A second window, not a second run: read-only, loopback-bound, no dependency and
 no build step. Cards follow the work — a lane with nothing left collapses to one
 line, and the barrier running during integration gets a card of its own, because
-by then it is the only thing working. Click any task for its record: commits,
-session id, declared writes, plan steps, and the full activity tail.
+by then it is the only thing working.
+
+The right-hand rail carries the run in one chronological feed: time, lane, tool,
+target, and how long the call took. Each lane writes its own log, so this is the
+only place that answers "what happened, in what order" — the `git checkout -b`
+that failed inside the barrier is a red row here and nowhere else. Click any
+task and the rail switches to its record: commits, session id, declared writes,
+plan steps, and the full activity tail. Below 900px there is no room for two
+columns, so the rail becomes a drawer over the page — and only then does it
+behave as a dialog, with the scrim, the focus trap and `aria-modal` that would
+be a lie beside a board you can still read and click.
 
 Status reads as a shape before a colour, the way an issue tracker does: an empty
 ring is waiting, a half-filled one is running, a filled check is done, a crossed

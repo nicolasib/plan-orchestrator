@@ -244,8 +244,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
 
 1. ~~**Fase 1 — o vão**~~ **— feita em 20/08/2026** (itens 2, 3, 4, 8). Ver a
    nota ao final. Meio dia.
-2. **Fase 2 — o trilho** (itens 1, 7, 9): o painel lado a lado e o feed da run.
-   É onde a tela deixa de ser um relatório e vira um monitor.
+2. ~~**Fase 2 — o trilho**~~ **— feita em 20/08/2026** (itens 1, 7, 9). Ver a
+   nota ao final.
 3. **Fase 3 — a pipeline** (itens 5, 10, 11, 12, 13): estágios, busca no log,
    totais, ações.
 4. **Fase 4 — a timeline** (item 6): a swimlane. Cara, e a única que responde à
@@ -279,3 +279,75 @@ Verificado no browser (headless, CDP) contra a run real e contra a fixture de
 colunas do cabeçalho alinhadas às células ao pixel, `subgrid` com fallback
 declarado, tabela rolando dentro de si em 320px, drawer abrindo por clique e
 por teclado, e AA nos dois temas (cabeçalho 5.62:1 no escuro, 4.87:1 no claro).
+
+---
+
+## 8. Registro — fase 2
+
+Feito: trilho permanente acima de 900px com o drawer modal preservado abaixo
+(1), feed unificado da run (7), feed em colunas com o argumento inteiro (9).
+
+O trilho ganhou um morador: `Run activity` é a run inteira em ordem, com hora,
+lane, tool, alvo e duração. No caso da integração — o mais vazio da tela — são
+60 eventos do barrier, com os `git checkout -b` que falharam em fundo vermelho.
+Era a explicação do bloqueio da T4, e não estava em lugar nenhum da página.
+
+Quatro escolhas que se afastam do que o documento propunha:
+
+- **O feed veio pelo `snapshot`, não por `activityLimit` nem por `/api/feed`.**
+  O documento oferecia as duas saídas; nenhuma serve. Subir o limite não
+  resolve porque `taskView` só devolve `activity` de task *rodando* — durante a
+  integração o feed nasceria vazio. E um endpoint separado leria os logs de
+  novo, a cada segundo. O `snapshot` já digere todo log a cada leitura: a
+  fusão sai de graça em cima do que ele já leu, e viaja no frame que já existe.
+- **O trilho herda a altura da coluna; não impõe a sua.** `height: 100vh` num
+  elemento sticky dentro de uma linha de grid empurra o documento para além da
+  janela em toda página que caberia nela — rolagem morta depois de um trilho
+  que já tinha parado, exatamente o custo que a fase 1 removeu. `align-self:
+  stretch` + `contain: size` + `max-height` devolve o comportamento certo.
+- **A etiqueta de lane no feed não é botão.** O wireframe sugeria clicar; 60
+  botões quase idênticos são 60 paradas de tab, e a mesma task está a uma tecla
+  de distância no board, nos alertas e na tabela de lanes.
+- **A coluna de duração exigiu um dado que não existia.** O documento pedia
+  `resultado/duração` e o log não guardava quando uma chamada voltou — só
+  quando saiu. `digestLog` passa a registrar o `doneAt`. Rendeu mais do que a
+  coluna: os sete `result` do log real da 1.11.0 não têm timestamp nenhum e
+  empilham no mesmo relógio dizendo "Aguardando." — a duração é a única coisa
+  que os separa (09:11, 04:23, 01:02, 00:47…).
+
+Seis defeitos, todos encontrados rodando, nenhum lendo o diff:
+
+1. `map(activityHtml)` entrega o índice como segundo argumento. O `who` ficava
+   verdadeiro a partir da segunda linha e os cards desenhavam `Tundefined`
+   numa coluna que eles não têm.
+2. Colunas do feed desalinhadas — cada linha era o seu próprio grid. Mesma
+   armadilha da tabela de lanes na fase 1, mesma correção (`subgrid`, com a
+   margem negativa devolvendo o padding).
+3. A rolagem vertical morta do trilho de altura fixa (acima).
+4. A 320px a coluna do alvo colapsava para 15px enquanto o nome do tool ficava
+   com 132: um track `auto` dimensiona pelo conteúdo mais largo e ganha de
+   `1fr` quando falta espaço. `fit-content(88px)` põe o teto onde deve estar.
+5. Contraste. A hora em `--text-faint` dava 2.89:1 — o token é para separador,
+   não para informação. E o fundo de erro clareia a linha o bastante para
+   derrubar as colunas discretas para 3.98:1 no escuro e 4.28:1 no claro; em
+   claro `--text-2` e `--text-3` são o mesmo valor, então subir um degrau não
+   fazia nada. Daí o token novo `--text-on-fail`.
+6. O trilho sticky escorregava 52px por baixo da topbar no fim da rolagem: o
+   `padding-bottom` do `.wrap` fica fora da linha do grid, então a coluna
+   acabava antes da página. O padding mudou para dentro do `main`.
+
+Verificado no browser (headless, CDP) contra a run real da 1.11.0 e contra a
+fixture de 11 tasks: 102 testes passando; zero erro de console e zero overflow
+horizontal em 1728/1280/900/320 nas duas runs; a página da 1.11.0 continua
+cabendo exata em 1080 (`scrollHeight` 1080); colunas do feed alinhadas ao pixel
+nos quatro viewports e a coluna do alvo com ≥118px em todos os breakpoints do
+trilho; o trilho gruda em 59px até o fim da rolagem; AA nos dois temas com o
+pior caso em 4.61:1 (dark) e 4.87:1 (light), medido compondo as camadas
+translúcidas, não a cor de baixo.
+
+E a acessibilidade que o item 1 exigia, verificada nas duas direções: acima de
+900px o painel não tem `role="dialog"`, `aria-modal`, `aria-hidden` nem `inert`,
+não prende Tab e não rouba o foco da linha clicada; abaixo, tem todos, o scrim
+volta, o foco vai para o botão de fechar e volta para quem abriu no Esc.
+Atravessar os 900px com uma task aberta mantém o painel aberto e troca só as
+semânticas — nas duas direções.

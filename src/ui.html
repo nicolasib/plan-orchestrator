@@ -28,6 +28,7 @@
     --text-2: #8a8f98;      /* 5.86:1 on surface */
     --text-3: #787d87;      /* 4.61:1 — the floor for anything readable */
     --text-faint: #5b606a;  /* decorative only: separators, empty glyphs */
+    --text-on-fail: #8a8f98; /* the dim tone that still clears AA on a red row */
 
     --accent: #5e6ad2;
     --accent-ink: #8b95e8;  /* the accent when it has to be small text */
@@ -66,6 +67,9 @@
       --text-2: #6b6f76;
       --text-3: #6b6f76;
       --text-faint: #9aa0a8;
+      /* Light --text-2 and --text-3 are the same value, so stepping between
+         them buys nothing here; the fail tint needs its own darker tone. */
+      --text-on-fail: #5f636b;
 
       --accent-ink: #4a54b8;
       --accent-soft: rgba(94, 106, 210, .12);
@@ -104,6 +108,24 @@
      grows is the board and the tables, which is where the reading happens. */
   .wrap { max-width: 1840px; margin: 0 auto; padding: 0 20px 72px; }
   .grow { flex: 1 1 auto; min-width: 0; }
+  [hidden] { display: none !important; }
+
+  /* The panel is a column of the page on a desk and a modal drawer on a
+     phone. Only its width changes between the two desk sizes. */
+  :root { --rail: 320px; --top: 49px; }
+  @media (min-width: 1280px) { :root { --rail: 380px } }
+  @media (min-width: 1680px) { :root { --rail: 440px } }
+
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .shell > main { min-width: 0; }
+  @media (min-width: 900px) {
+    .shell { grid-template-columns: minmax(0, 1fr) var(--rail); align-items: start; }
+    /* The page's bottom padding moves inside the column. Left on the wrapper
+       it sits below the grid row, and a sticky rail stops following 72px
+       before the page does — sliding under the topbar at full scroll. */
+    .wrap { padding-bottom: 0; }
+    .shell > main { padding-bottom: 72px; }
+  }
 
   /* ------------------------------------------------------------- topbar */
   .topbar {
@@ -216,15 +238,74 @@
   .now .meta .clock { font-variant-numeric: tabular-nums; color: var(--text-2); }
   .now .meta .tool { font-family: var(--mono); font-size: 11px; }
 
-  .feed { margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-2); max-height: 208px; overflow: auto; }
-  .feed .ln { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  /* time · [who] · result · tool · target · duration.
+     A log viewer's columns, for the same reason: the slow call is a glance
+     down the right edge instead of a hunt, and the eleven seconds a test run
+     took is a fact the old single-line row could not hold at all. */
+  .feed {
+    /* `fit-content` on the tool name, not `auto`: an auto track sizes to its
+       widest content and wins against `1fr` when space runs out, which at
+       320px gave `error_during_execution` 132px and left the target — the
+       column with the answer in it — fifteen. */
+    --feed-cols: 50px 12px fit-content(88px) minmax(0, 1fr) 36px;
+    --feed-pad: 10px;
+    /* The feed is one grid and the rows borrow its tracks. Rows that each own
+       their grid do not make columns: `auto` only ever agrees with itself, so
+       `Read` and `TodoWrite` pushed the target column 20px apart per line —
+       the same defect the lane table had before subgrid. */
+    display: grid; grid-template-columns: var(--feed-cols); align-content: start;
+    column-gap: 7px; padding: 0 var(--feed-pad);
+    margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 8px;
+    background: var(--surface-2); max-height: 208px; overflow: auto;
+  }
+  .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(88px) minmax(0, 1fr) 36px; --feed-pad: 12px; }
+  .feed .ln {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: var(--feed-cols); column-gap: 7px; align-items: center;
+    height: 26px; border-bottom: 1px solid var(--line-soft); white-space: nowrap;
+    /* A subgrid's own padding is taken out of the tracks it inherits; the
+       negative margin hands it back so the row's ground still reaches the
+       feed's edges. */
+    margin-inline: calc(-1 * var(--feed-pad)); padding: 0 var(--feed-pad);
+  }
+  @supports (grid-template-columns: subgrid) {
+    .feed .ln { grid-template-columns: subgrid; }
+  }
   .feed .ln:last-child { border-bottom: 0; }
-  .feed .ico { flex: 0 0 auto; display: grid; place-items: center; width: 12px; }
-  .feed .name { font-size: 12px; font-weight: 500; flex: 0 0 auto; }
+  /* A failed call is the line you came to find. Vercel gives it its own
+     ground rather than a coloured glyph you have to spot. The tint lightens
+     the row, which dropped the dim columns on it to 3.98:1 — so on a red row
+     they step up one token and clear AA again. */
+  .feed .ln.bad { background: var(--fail-soft); }
+  .feed .ln.bad .at, .feed .ln.bad .arg, .feed .ln.bad .took { color: var(--text-on-fail); }
+  /* --text-faint is for separators and empty glyphs; a timestamp is a fact
+     the reader reads, so it takes the lowest token that still clears AA. */
+  .feed .at { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+  .feed .who.barrier { color: var(--accent-ink); }
+  .feed .ico { display: grid; place-items: center; width: 12px; }
+  .feed .name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
   .feed .name.sub { color: var(--text-2); font-weight: 400; }
   .feed .arg { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
-  .feed .say { font-size: 12px; color: var(--text-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
-  .feed .empty { display: flex; align-items: center; height: 40px; padding: 0 10px; color: var(--text-3); font-size: 12px; }
+  .feed .arg .why { color: var(--fail); }
+  .feed .took { text-align: right; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .feed .say { grid-column: span 3; font-size: 12px; color: var(--text-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
+  .feed .empty { grid-column: 1 / -1; padding: 12px 0; color: var(--text-3); font-size: 12px; }
+  /* On a phone the duration is the first thing to go: it is the only column
+     whose absence costs nothing, and dropping it buys the target 36px. */
+  @media (max-width: 639px) {
+    .feed { --feed-cols: 50px 12px fit-content(70px) minmax(0, 1fr); }
+    .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(70px) minmax(0, 1fr); }
+    .feed .took { display: none; }
+    .feed .say { grid-column: span 2; }
+  }
+  /* The 320px rail cannot hold six columns either — same trade, same reason.
+     Only the rail: the cards at this width are in a 844px column. */
+  @media (min-width: 900px) and (max-width: 1279px) {
+    .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(70px) minmax(0, 1fr); }
+    .feed.run .took { display: none; }
+    .feed.run .say { grid-column: span 2; }
+  }
 
   .card > .foot {
     display: flex; gap: 14px; flex-wrap: wrap; padding: 9px 14px;
@@ -310,7 +391,7 @@
 
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
 
-  /* -------------------------------------------------------------- drawer */
+  /* --------------------------------------------------------------- panel */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .14s ease; z-index: 4; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   aside {
@@ -326,10 +407,37 @@
   }
   aside.open { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
   @media (prefers-reduced-motion: reduce) { aside, .scrim, .row, .chip { transition: none } }
-  aside .head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+
+  /* Above 900px the panel stops covering the board and becomes the column
+     beside it. The dialog semantics leave with the scrim: a panel you can
+     read past must not trap Tab, and `aria-modal` on it would tell a screen
+     reader the rest of the page is unavailable when it plainly is not.
+     `applyPanel()` sets and clears those attributes per mode. */
+  @media (min-width: 900px) {
+    .scrim { display: none; }
+    aside {
+      position: sticky; top: calc(var(--top) + 10px); right: auto; z-index: 1;
+      width: auto; transform: none; visibility: visible; transition: none;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      /* The rail takes the column's height rather than setting it. A fixed
+         `height: 100vh` here would make the document taller than the window
+         on every page short enough to fit — dead scroll past a rail that had
+         already stopped, which is the exact cost the last pass removed.
+         `contain: size` keeps the sixty rows inside from voting on it. */
+      align-self: stretch; contain: size;
+      max-height: calc(100vh - var(--top) - 30px); min-height: 340px;
+    }
+  }
+  aside .head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  aside .count { flex: 0 0 auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  aside #p-feed {
+    flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto;
+    margin: 0; border: 0; border-radius: 0; background: transparent;
+  }
+  aside #p-feed .ln:last-child { border-bottom: 1px solid var(--line-soft); }
   aside h2#d-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text); min-width: 0; }
   aside h2#d-title .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  aside .body { overflow: auto; padding: 12px 0 48px; }
+  aside .body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 0 48px; }
   aside h3 { margin: 22px 16px 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
   aside .pad { padding: 0 16px; }
   aside pre { margin: 0 16px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-2); font: 400 11.5px/1.6 var(--mono); }
@@ -338,6 +446,15 @@
     padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px;
   }
   .close:hover { background: var(--hover); color: var(--text); }
+  /* Below 900px there is no rail, so the run feed needs a door of its own. */
+  .railbtn {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center;
+    min-height: 26px; padding: 3px 10px; margin-left: 4px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+    font-size: 11.5px; color: var(--text-2); white-space: nowrap;
+  }
+  .railbtn:hover { background: var(--hover); color: var(--text); }
+  @media (min-width: 900px) { .railbtn { display: none } }
   kbd {
     font-family: var(--ui); font-size: 10.5px; line-height: 1; padding: 3px 5px;
     border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
@@ -360,6 +477,7 @@
     <span class="stat"><b id="m-progress">–</b> done</span>
     <span class="stat"><b id="m-cost">–</b> spent</span>
     <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
+    <button class="railbtn" id="open-feed" aria-controls="panel">Activity</button>
     <span class="live off" id="live"><i class="pip"></i><span id="live-text">connecting…</span></span>
   </div>
 </header>
@@ -371,6 +489,7 @@
   </div>
   <div class="subline" id="plan-sub"></div>
 
+  <div class="shell">
   <main>
     <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
 
@@ -398,17 +517,22 @@
       </section>
     </div>
   </main>
+
+  <aside id="panel" aria-labelledby="d-title">
+    <div class="head">
+      <button class="close" id="p-back" hidden>&larr; Activity</button>
+      <h2 id="d-title">Run activity</h2>
+      <div class="grow"></div>
+      <span class="count" id="p-count"></span>
+      <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
+    </div>
+    <div class="feed run" id="p-feed"></div>
+    <div class="body" id="d-body" hidden></div>
+  </aside>
+  </div>
 </div>
 
 <div class="scrim" id="scrim"></div>
-<aside id="drawer" role="dialog" aria-modal="true" aria-hidden="true" inert aria-labelledby="d-title">
-  <div class="head">
-    <h2 id="d-title">Task</h2>
-    <div class="grow"></div>
-    <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
-  </div>
-  <div class="body" id="d-body"></div>
-</aside>
 
 <script>
 'use strict';
@@ -417,8 +541,13 @@ const $ = (id) => document.getElementById(id);
 
 let snap = null;       // last snapshot payload
 let skew = 0;          // serverNow - clientNow, so timers agree with the run
-let openTask = null;   // task number shown in the drawer
+let openTask = null;   // task number shown in the panel, or null for the feed
 let openedFrom = null; // element that opened it, to hand focus back on close
+let modalOpen = false; // only meaningful below 900px, where the panel is modal
+
+/** The one query the panel's two personalities hang off. */
+const wide = window.matchMedia('(min-width: 900px)');
+const panelOn = () => wide.matches || modalOpen;
 
 /**
  * Rewriting innerHTML that did not change is not just wasted work: it destroys
@@ -439,7 +568,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
  * An agent that blocks writes a report, not a sentence — headings, bold, the
  * whole account. A banner takes its first real line; the rest is one click
- * away in the drawer, where there is room for it.
+ * away in the panel, where there is room for it.
  */
 function gist(text, max = 150) {
   const line = String(text || '')
@@ -541,6 +670,7 @@ function render(s) {
     paint($('bar'), '');
     paint($('verdict'), '');
     paint($('alerts'), '');
+    renderFeed(s);
     for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
     return;
   }
@@ -563,6 +693,7 @@ function render(s) {
   paint($('verdict'), verdictHtml(s));
 
   renderAlerts(s);
+  renderFeed(s);
   renderBoard(s);
   renderBarriers(s);
   renderIntegration(s);
@@ -596,6 +727,26 @@ function verdictHtml(s) {
   return statusIcon(mark, 17) + parts.join('<span class="sep">·</span>');
 }
 
+/**
+ * The run in one column, in order.
+ *
+ * Each lane writes its own log, so a per-card tail can say what a lane is
+ * doing but never what happened across the run — which is the question the
+ * empty right half of this page was refusing to answer.
+ */
+function renderFeed(s) {
+  const feed = (s && s.ready && s.feed) || [];
+  $('p-count').textContent = feed.length ? plural(feed.length, 'event') : '';
+  const host = $('p-feed');
+  // Repainted every second: a reader who scrolled back must not be yanked to
+  // the top by an event they were not reading.
+  const top = host.scrollTop;
+  const changed = paint(host, feed.length
+    ? feed.slice().reverse().map((a) => activityHtml(a, true)).join('')
+    : '<div class="empty">no agent events yet</div>');
+  if (changed) host.scrollTop = top;
+}
+
 function renderAlerts(s) {
   const out = [];
   if (s.rateLimit) {
@@ -606,7 +757,7 @@ function renderAlerts(s) {
     out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div></div>`);
   }
   for (const t of [...s.lanes.flatMap((l) => l.tasks), ...s.barriers].filter((t) => t.status === 'failed' || t.status === 'blocked')) {
-    out.push(`<div class="alert bad" data-task="${t.n}" role="button" tabindex="0" aria-haspopup="dialog">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div><span class="more">Details</span></div>`);
+    out.push(`<div class="alert bad" data-task="${t.n}" role="button" tabindex="0" aria-controls="panel">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div><span class="more">Details</span></div>`);
   }
   paint($('alerts'), out.join(''));
 }
@@ -625,15 +776,54 @@ const sumCost = (tasks) => tasks.reduce((n, t) => n + (typeof t.costUsd === 'num
 function chipsHtml(tasks) {
   return `<div class="chips">${tasks.map((t) => {
     const name = `Task ${t.n}, ${esc(t.title)}, ${esc(STATUS_WORD[t.status] || t.status)}`;
-    return `<button class="chip ${t.status}" data-task="${t.n}" aria-haspopup="dialog" aria-label="${name}" title="${name}">${statusIcon(t.status, 13)}${t.n}</button>`;
+    return `<button class="chip ${t.status}" data-task="${t.n}" aria-controls="panel" aria-label="${name}" title="${name}">${statusIcon(t.status, 13)}${t.n}</button>`;
   }).join('')}</div>`;
 }
 
-function activityHtml(a) {
-  if (a.kind === 'text') return `<div class="ln"><span class="ico"></span><span class="say">${esc(a.text)}</span></div>`;
-  if (a.kind === 'run') return `<div class="ln"><span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
-  if (a.kind === 'result') return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg">${esc(a.text || '')}</span></div>`;
-  return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span><span class="arg">${esc(a.target || '')}</span></div>`;
+const clock = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', { hour12: false }) : '';
+};
+
+/**
+ * How long a call took, once its result came back. Anything under a second
+ * gets nothing: a column of "0s" hides the one line this is for, which is the
+ * test run that sat there for four minutes.
+ */
+function took(a) {
+  if (!a.at || !a.doneAt) return '';
+  const ms = Date.parse(a.doneAt) - Date.parse(a.at);
+  if (!isFinite(ms) || ms < 1000) return '';
+  return ms < 60000 ? `${Math.round(ms / 1000)}s` : dur(ms);
+}
+
+/** Where an event came from, two characters wide. A barrier has no lane, so
+ *  it reads `T3` — the shape itself says "this one is not a lane". */
+const whoLabel = (a) => (a.lane ? `${String(a.lane).toUpperCase()}${a.n}` : `T${a.n}`);
+const whoTitle = (a) => (a.lane ? `Lane ${String(a.lane).toUpperCase()} · Task ${a.n}` : `Barrier · Task ${a.n}`);
+
+function activityHtml(a, who = false) {
+  const at = `<span class="at">${esc(clock(a.at))}</span>`;
+  // Deliberately not a button: sixty of them would be sixty tab stops through
+  // near-identical labels, and the same task is one keystroke away on the
+  // board, the alerts and the lane table.
+  const tag = who ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(whoTitle(a))}">${esc(whoLabel(a))}</span>` : '';
+  const bad = a.ok === false ? ' bad' : '';
+  const open = `<div class="ln${bad}">${at}${tag}`;
+
+  if (a.kind === 'text') return `${open}<span class="ico"></span><span class="say" title="${esc(a.text)}">${esc(a.text)}</span></div>`;
+  if (a.kind === 'run') return `${open}<span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
+  if (a.kind === 'result') {
+    const ran = a.durationMs > 1000 ? dur(a.durationMs) : '';
+    return `${open}<span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg" title="${esc(a.text || '')}">${esc(a.text || '')}</span><span class="took">${esc(ran)}</span></div>`;
+  }
+  // A failed call's preview is the whole reason the line is red; it rides in
+  // the target column after the target, and the tooltip carries both in full.
+  const why = a.ok === false && a.preview ? `<span class="why"> ${esc(a.preview)}</span>` : '';
+  return `${open}<span class="ico">${resultIcon(a.ok)}</span>`
+    + `<span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span>`
+    + `<span class="arg" title="${esc([a.target, a.ok === false ? a.preview : ''].filter(Boolean).join(' — '))}">${esc(a.target || '')}${why}</span>`
+    + `<span class="took">${esc(took(a))}</span></div>`;
 }
 
 function feedPlaceholder(t) {
@@ -651,7 +841,7 @@ function feedPlaceholder(t) {
 function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
   const live = current && current.status === 'running';
   const feed = live && current.activity.length
-    ? current.activity.slice().reverse().map(activityHtml).join('')
+    ? current.activity.slice().reverse().map((a) => activityHtml(a)).join('')
     : `<div class="empty">${current ? esc(feedPlaceholder(current)) : 'every task settled'}</div>`;
 
   return `
@@ -754,7 +944,7 @@ function rowHtml(t) {
   if (t.turns) bits.push(plural(t.turns, 'turn'));
   if (t.attempts > 1) bits.push(`${t.attempts} attempts`);
   if (t.reconciled) bits.push('reconciled from git');
-  return `<div class="row task" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
+  return `<div class="row task" data-task="${t.n}" tabindex="0" role="button" aria-controls="panel">
     <span class="ic">${statusIcon(t.status)}</span>
     <span class="tag">T${t.n}</span>
     <span class="cell">
@@ -807,25 +997,79 @@ function tick() {
 setInterval(tick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 
-// ------------------------------------------------------------------ drawer
+// ------------------------------------------------------------------- panel
 
-async function showTask(n, trigger) {
-  if (trigger) openedFrom = trigger;
-  const firstOpen = openTask == null;
-  openTask = n;
-  $('drawer').classList.add('open');
-  $('drawer').setAttribute('aria-hidden', 'false');
-  $('drawer').removeAttribute('inert');
-  $('scrim').classList.add('open');
-  if (firstOpen) $('d-close').focus();
+/**
+ * The panel has two personalities and only one of them is a dialog.
+ *
+ * Beside the board it is a region: it takes no focus, holds no scrim, and
+ * must not trap Tab — a reader can see and use the page behind it, and
+ * `aria-modal` there would tell a screen reader otherwise. Below 900px there
+ * is no room for two columns, it covers the page, and every one of those
+ * attributes becomes true again. This is the only place they are set.
+ */
+function applyPanel() {
+  const modal = !wide.matches;
+  const open = panelOn();
+  const panel = $('panel');
+  const onTask = openTask != null;
+
+  panel.classList.toggle('open', open);
+  $('scrim').classList.toggle('open', modal && modalOpen);
+
+  if (modal) {
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) panel.removeAttribute('inert');
+    else panel.setAttribute('inert', '');
+  } else {
+    for (const attr of ['role', 'aria-modal', 'aria-hidden', 'inert']) panel.removeAttribute(attr);
+  }
+
+  $('p-feed').hidden = onTask;
+  $('d-body').hidden = !onTask;
+  $('p-back').hidden = !onTask;
+  $('p-count').hidden = onTask;
+  $('d-close').hidden = !modal;
+  if (!onTask) $('d-title').textContent = 'Run activity';
+}
+
+/** Fetch and draw, without touching what is open. The stream calls this once
+ *  a second: a task that finishes while its record is up should say so. */
+async function loadTask(n) {
   try {
     const r = await fetch(`/api/task?n=${encodeURIComponent(n)}`);
     const body = await r.json();
+    if (openTask !== n) return; // a newer click already won the panel
     if (!r.ok) { $('d-body').innerHTML = `<pre>${esc(body.error || r.statusText)}</pre>`; return; }
     drawTask(body.task);
   } catch (e) {
-    $('d-body').innerHTML = `<pre>${esc(e.message)}</pre>`;
+    if (openTask === n) $('d-body').innerHTML = `<pre>${esc(e.message)}</pre>`;
   }
+}
+
+function showTask(n, trigger) {
+  if (trigger) openedFrom = trigger;
+  const wasModal = modalOpen;
+  openTask = n;
+  modalOpen = true;
+  applyPanel();
+  // Only a modal takes the reader's focus. In the rail the panel simply
+  // changes what it shows, and yanking focus off the row they clicked would
+  // cost them their place in the list.
+  if (!wide.matches && !wasModal) $('d-close').focus();
+  loadTask(n);
+}
+
+/** The panel's resting state, and the only way into it below 900px. */
+function showFeed(trigger) {
+  if (trigger) openedFrom = trigger;
+  openTask = null;
+  modalOpen = true;
+  applyPanel();
+  renderFeed(snap);
+  if (!wide.matches) $('d-close').focus();
 }
 
 function drawTask(t) {
@@ -864,31 +1108,41 @@ function drawTask(t) {
     parts.push(`<h3>Plan steps</h3><ul class="steps">${t.steps.map((s) => `<li class="${s.checked ? 'on' : ''}">${s.checked ? '☑' : '☐'} ${esc(s.text)}</li>`).join('')}</ul>`);
   }
   parts.push(`<h3>Activity${t.truncated ? ' · tail' : ''}</h3><div class="pad"><div class="feed" style="margin:0;max-height:none">${
-    t.activity.length ? t.activity.slice().reverse().map(activityHtml).join('') : '<div class="empty">no agent events recorded</div>'
+    t.activity.length ? t.activity.slice().reverse().map((a) => activityHtml(a)).join('') : '<div class="empty">no agent events recorded</div>'
   }</div></div>`);
 
   $('d-body').innerHTML = parts.join('');
 }
 
-function closeDrawer() {
-  if (openTask == null) return;
+/** Back to the run feed, keeping the panel where it is. */
+function backToFeed() {
   openTask = null;
+  applyPanel();
+  renderFeed(snap);
+  $('p-feed').scrollTop = 0;
+}
+
+/** Esc and the close button: dismiss the modal below 900px, fall back to the
+ *  feed above it, where there is no such thing as a closed panel. */
+function closePanel() {
+  if (openTask == null && !modalOpen) return;
+  openTask = null;
+  modalOpen = false;
   // Focus must not stay inside a container that is about to be aria-hidden.
   if (openedFrom && document.contains(openedFrom)) openedFrom.focus();
   openedFrom = null;
-  $('drawer').classList.remove('open');
-  $('drawer').setAttribute('aria-hidden', 'true');
-  // Off-screen is not out of the tab order: without inert the drawer's
-  // controls stay focusable behind an aria-hidden container.
-  $('drawer').setAttribute('inert', '');
-  $('scrim').classList.remove('open');
+  applyPanel();
+  renderFeed(snap);
 }
 
-/** Keep Tab inside the drawer while it is open — a modal that leaks focus
- *  behind its own scrim is worse than one that never claimed to be modal. */
+wide.addEventListener('change', applyPanel);
+
+/** Keep Tab inside the panel while it is modal — a modal that leaks focus
+ *  behind its own scrim is worse than one that never claimed to be modal.
+ *  Above 900px there is nothing to trap: the page behind it is in use. */
 function trapTab(e) {
-  if (openTask == null || e.key !== 'Tab') return;
-  const focusable = $('drawer').querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])');
+  if (wide.matches || !modalOpen || e.key !== 'Tab') return;
+  const focusable = [...$('panel').querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')].filter((el) => !el.hidden && el.offsetParent !== null);
   if (!focusable.length) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
@@ -897,16 +1151,20 @@ function trapTab(e) {
 }
 
 document.addEventListener('click', (e) => {
+  if (e.target.closest('#p-back')) { backToFeed(); return; }
+  if (e.target.closest('#open-feed')) { showFeed(e.target.closest('#open-feed')); return; }
   const hit = e.target.closest('[data-task]');
   if (hit) { showTask(Number(hit.dataset.task), hit); return; }
-  if (e.target.id === 'scrim' || e.target.closest('#d-close')) closeDrawer();
+  if (e.target.id === 'scrim' || e.target.closest('#d-close')) closePanel();
 });
 document.addEventListener('keydown', (e) => {
   trapTab(e);
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key === 'Escape') closePanel();
   const hit = e.target.closest && e.target.closest('[data-task][tabindex]');
   if (hit && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showTask(Number(hit.dataset.task), hit); }
 });
+
+applyPanel();
 
 // --------------------------------------------------------------- transport
 
@@ -922,9 +1180,9 @@ source.addEventListener('snapshot', (e) => {
   skew = payload.now - Date.now();
   lastEventAt = Date.now();
   render(payload.snapshot);
-  // The drawer is a live view too — a task finishing while it is open should
-  // show that, not a frozen snapshot from when it was clicked.
-  if (openTask != null) showTask(openTask);
+  // The panel is a live view too — a task finishing while its record is up
+  // should show that, not a frozen snapshot from when it was clicked.
+  if (openTask != null && panelOn()) loadTask(openTask);
 });
 source.onopen = () => setLive(true, 'live');
 source.onerror = () => setLive(false, 'reconnecting…');

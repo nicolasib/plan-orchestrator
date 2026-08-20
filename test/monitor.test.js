@@ -297,6 +297,69 @@ test('the barrier in flight is named, because during integration it is the only 
   assert.equal(monitor.snapshot(planPath).activeBarrier, null);
 });
 
+// ---------------------------------------------------------------- feed
+
+/** A second log, older than the fixture's, so a merge has something to merge. */
+function withEarlierLog(dir, planPath) {
+  const st = state.load(planPath);
+  const logFile = path.join(dir, '.plo-logs', 'task-1.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, [
+    '\n=== 2026-08-19T11:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    assistantTool('Read', { file_path: 'src/repo.js' }, 'tu_a', '2026-08-19T11:00:05.000Z'),
+    toolResult('tu_a', 'ok', false, '2026-08-19T11:00:06.000Z'),
+  ].join(''));
+  st.tasks['1'].logFile = logFile;
+  state.save(planPath, st);
+  return logFile;
+}
+
+test('the feed merges every task log into one chronological list', () => {
+  const { dir, planPath } = fixture();
+  withEarlierLog(dir, planPath);
+  const snap = monitor.snapshot(planPath);
+
+  const ats = snap.feed.map((a) => a.at);
+  assert.deepEqual([...ats].sort(), ats, 'a run feed out of order is not a run feed');
+
+  const tasks = [...new Set(snap.feed.map((a) => a.n))];
+  assert.deepEqual(tasks, [1, 2], 'the settled task is exactly the one a per-card tail cannot show');
+  assert.equal(snap.feed[0].lane, 'A', 'each entry names where it came from');
+
+  const read = snap.feed.find((a) => a.name === 'Read');
+  assert.equal(read.n, 1);
+  assert.equal(read.target, 'src/repo.js');
+});
+
+test('a tool entry records when its result came back, so the feed can time it', () => {
+  const d = monitor.digestLog(SAMPLE_LOG);
+  const bash = d.activity.find((a) => a.name === 'Bash');
+  assert.equal(bash.at, '2026-08-19T12:00:20.000Z');
+  assert.equal(bash.doneAt, '2026-08-19T12:00:31.000Z', '11 seconds is the fact the feed is for');
+});
+
+test('the feed keeps the tail of the run, not its opening', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath, { feedLimit: 2 });
+  assert.equal(snap.feed.length, 2);
+  assert.equal(snap.feed[snap.feed.length - 1].text, 'Fixing the failing assertion.', 'the newest event must survive the cut');
+});
+
+test('feedLimit 0 turns the feed off without disturbing the cards', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath, { feedLimit: 0 });
+  assert.deepEqual(snap.feed, []);
+  assert.equal(snap.lanes[0].tasks[1].activity.length > 0, true, 'the running card still has its own tail');
+});
+
+test('the merge scaffolding never reaches the payload', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath);
+  const all = [...snap.lanes.flatMap((l) => l.tasks), ...snap.barriers];
+  assert.equal(all.some((t) => 'recent' in t), false, 'a per-task copy of the feed would double the frame');
+  assert.equal(JSON.stringify(monitor.snapshot(planPath)), JSON.stringify(snap), 'the feed must not make two equal reads differ');
+});
+
 // ---------------------------------------------------------------- detail
 
 test('taskDetail returns full history for a finished task', () => {

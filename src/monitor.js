@@ -27,6 +27,9 @@ const { parsePlan } = require('./parse-plan');
 /** Read the log's tail, not the log. A long task writes tens of MB. */
 const TAIL_BYTES = 512 * 1024;
 const ACTIVITY_LIMIT = 40;
+/** How much of the run the merged feed keeps. Long enough to scroll back
+ *  through the last few minutes, short enough to ship every second. */
+const FEED_LIMIT = 60;
 const TEXT_MAX = 400;
 
 function tailFile(file, bytes = TAIL_BYTES) {
@@ -216,6 +219,9 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
         if (entry) {
           entry.ok = !block.is_error;
           entry.preview = preview;
+          // The call already carries when it started; this is when it came
+          // back. A feed without it can say what ran, never that it took 11s.
+          entry.doneAt = at;
           pending.delete(block.tool_use_id);
         } else {
           push({ kind: 'tool', at, sub, name: 'result', target: '', ok: !block.is_error, preview });
@@ -235,7 +241,13 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
       };
       if (typeof ev.total_cost_usd === 'number') d.costUsd = ev.total_cost_usd;
       if (ev.session_id) d.sessionId = ev.session_id;
-      push({ kind: 'result', at, ok: !d.result.isError, label: ev.subtype || 'result', text: d.result.text });
+      // A result event carries no timestamp, so in a feed six of them stack at
+      // one instant reading the same polite sentence. What separates them is
+      // the turn they closed: keep its length.
+      push({
+        kind: 'result', at, ok: !d.result.isError, label: ev.subtype || 'result',
+        text: d.result.text, durationMs: d.result.durationMs,
+      });
     }
   }
 
@@ -257,17 +269,22 @@ function readTaskLog(logFile, opts = {}) {
 
 const laneLabel = (id) => String(id).toUpperCase();
 
-function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true } = {}) {
+function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true } = {}) {
   const rec = st.tasks[String(n)] || {};
   const task = plan.tasks.find((t) => t.n === Number(n));
-  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit }) : null;
+  // One read serves both granularities. The card wants the last few events of
+  // a task that is running; the run feed wants many more, from every task,
+  // finished ones included. Digesting twice would double the tail read for
+  // every task on every poll.
+  const limit = Math.max(activityLimit, feedLimit);
+  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit: limit }) : null;
 
   // The checkpoint is authoritative for status; the log is authoritative for
   // what is happening inside a task that is still running.
   const live = rec.status === state.STATUS.RUNNING ? digest : null;
   const lastTool = live && [...live.activity].reverse().find((a) => a.kind === 'tool');
 
-  return {
+  const view = {
     n: Number(n),
     title: task ? task.title.replace(/`/g, '') : `Task ${n}`,
     status: rec.status || state.STATUS.PENDING,
@@ -289,8 +306,37 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true
     // Not gated on `live`: the run this most needs to report is the one that
     // already died of a usage limit, and a dead task is by definition not live.
     rateLimit: digest ? digest.rateLimit : null,
-    activity: live ? live.activity : [],
+    activity: live ? live.activity.slice(-activityLimit) : [],
   };
+
+  // Scaffolding for the run feed, not payload: `snapshot` merges these and
+  // strips the field before the object is serialised.
+  if (feedLimit && digest) view.recent = digest.activity.slice(-feedLimit);
+  return view;
+}
+
+/**
+ * One chronological feed for the whole run.
+ *
+ * Parallel lanes are the point of this tool and each writes its own log file,
+ * so no single tail can answer "what happened, in what order". Entries are
+ * tagged with the task they came from and merged on their own timestamps —
+ * nothing here reads a clock, so two identical reads still compare equal.
+ */
+function buildFeed(tasks, limit) {
+  if (!limit) return [];
+  const out = [];
+  for (const t of tasks) {
+    // An event that carries no timestamp inherits the last one seen, so it
+    // stays beside the call it belongs to instead of sorting to the very top.
+    let at = t.startedAt || null;
+    for (const a of t.recent || []) {
+      at = a.at || at;
+      out.push({ ...a, at, n: t.n, lane: t.lane, barrier: t.barrier });
+    }
+  }
+  out.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+  return out.slice(-limit);
 }
 
 const isTerminal = (s) => s === state.STATUS.DONE;
@@ -303,7 +349,7 @@ const isTerminal = (s) => s === state.STATUS.DONE;
  * differs on every tick, which would defeat the change detection the stream
  * uses to stay quiet.
  */
-function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
+function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = true } = {}) {
   const abs = path.resolve(planPath);
   const contents = fs.readFileSync(abs, 'utf8');
   const plan = parsePlan(contents);
@@ -320,7 +366,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
   }
 
   const lanes = st.lanes.map((lane) => {
-    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, logs }));
+    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, feedLimit, logs }));
     return {
       id: lane.id,
       label: laneLabel(lane.id),
@@ -333,7 +379,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
       tasks,
     };
   });
-  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, logs }));
+  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, feedLimit, logs }));
 
   // During integration every lane is finished and the only live work is a
   // barrier. Naming it lets the page give it a lane's worth of attention
@@ -341,6 +387,8 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
   const activeBarrier = barriers.find((t) => t.status !== state.STATUS.PENDING && !isTerminal(t.status));
 
   const all = [...lanes.flatMap((l) => l.tasks), ...barriers];
+  const feed = buildFeed(all, feedLimit);
+  for (const t of all) delete t.recent;
   const counts = {};
   for (const t of all) counts[t.status] = (counts[t.status] || 0) + 1;
   const costUsd = all.reduce((sum, t) => sum + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
@@ -374,6 +422,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
     },
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
+    feed,
     lanes,
     barriers,
     integration: st.integration,
@@ -409,4 +458,4 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
