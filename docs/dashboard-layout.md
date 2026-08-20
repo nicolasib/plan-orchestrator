@@ -242,8 +242,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
 
 ## 6. Ordem sugerida
 
-1. **Fase 1 — o vão** (itens 2, 3, 4, 8): quatro mudanças pequenas, quase todas
-   CSS, que sozinhas recuperam a metade vazia da tela. Meio dia.
+1. ~~**Fase 1 — o vão**~~ **— feita em 20/08/2026** (itens 2, 3, 4, 8). Ver a
+   nota ao final. Meio dia.
 2. **Fase 2 — o trilho** (itens 1, 7, 9): o painel lado a lado e o feed da run.
    É onde a tela deixa de ser um relatório e vira um monitor.
 3. **Fase 3 — a pipeline** (itens 5, 10, 11, 12, 13): estágios, busca no log,
@@ -253,3 +253,29 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
 
 Nenhum item exige tocar em `run.js`, `spawn.js`, `state.js` ou `integrate.js`.
 O item 7 é o único que mexe no servidor, e só para elevar `activityLimit`.
+
+---
+
+## 7. Registro — fase 1
+
+Feito: `.board` com `1fr` (2), shell fluido até 1840px (3), linhas em colunas
+alinhadas (4), verdict line (8). A página do takz `1.11.0` passou de **1330px
+de altura com metade da largura vazia** para caber inteira em 1080 sem rolar.
+
+Dois desvios do plano, ambos consequência de alargar o shell:
+
+- **`Integration` e `Lane plan` foram pareadas em duas colunas** (`.pair`).
+  Alargar o `.wrap` piorou justamente as duas seções mais vazias da página —
+  a correção do vão criava um vão maior. Não antecipa os itens 5 e 6, que
+  refazem o *conteúdo* dessas seções; só para de espalhá-las.
+- **A tabela de lanes usa `subgrid`.** Um track `auto` só concorda consigo
+  mesmo: com cada linha sendo seu próprio grid, o cabeçalho ficava 30px fora
+  da coluna que rotulava. Uma armadilha registrada para quem mexer nisso: um
+  subgrid com `padding` consome as tracks que herda — a coluna de 15px do
+  ícone virou 1px até a margem negativa devolver o espaço.
+
+Verificado no browser (headless, CDP) contra a run real e contra a fixture de
+11 tasks: zero erro de console, zero overflow do documento em 1728/1280/900/320,
+colunas do cabeçalho alinhadas às células ao pixel, `subgrid` com fallback
+declarado, tabela rolando dentro de si em 320px, drawer abrindo por clique e
+por teclado, e AA nos dois temas (cabeçalho 5.62:1 no escuro, 4.87:1 no claro).

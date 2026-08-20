@@ -100,7 +100,9 @@
   ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
-  .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 72px; }
+  /* Fluid to a real desk monitor. Nothing here is a column of prose: what
+     grows is the board and the tables, which is where the reading happens. */
+  .wrap { max-width: 1840px; margin: 0 auto; padding: 0 20px 72px; }
   .grow { flex: 1 1 auto; min-width: 0; }
 
   /* ------------------------------------------------------------- topbar */
@@ -138,14 +140,24 @@
   @media (prefers-reduced-motion: reduce) { .live.on .pip { animation: none } }
 
   /* ------------------------------------------------------------ progress */
-  .summary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px 0 10px; }
-  .track { display: flex; gap: 3px; flex: 1 1 240px; min-width: 180px; height: 4px; }
+  .summary { display: grid; gap: 11px; padding: 18px 0 10px; }
+  /* This page lives on a second monitor. One line has to carry the state of
+     the run at a glance, from across the room, before any of the detail. */
+  .verdict {
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0; min-width: 0;
+    font-size: 15px; font-weight: 600; letter-spacing: -.021em; color: var(--text);
+  }
+  .verdict:empty { display: none; }
+  .verdict svg { flex: 0 0 auto; }
+  .verdict .soft { color: var(--text-2); font-weight: 500; }
+  .verdict .bad { color: var(--fail); }
+  .verdict .sep { color: var(--text-faint); font-weight: 400; }
+  .track { display: flex; gap: 3px; height: 4px; }
   .track i { flex: 1 1 0; border-radius: 2px; background: var(--line); }
   .track i.done { background: var(--accent); }
   .track i.running { background: var(--run); }
   .track i.failed, .track i.blocked { background: var(--fail); }
   .track i.interrupted { background: var(--warn); }
-  .legend { font-size: 12px; color: var(--text-2); white-space: nowrap; }
   .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
   .subline .sep { color: var(--text-faint); }
 
@@ -167,8 +179,11 @@
 
   /* --------------------------------------------------------------- board */
   .board {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 460px));
-    justify-content: start; gap: 12px; margin-top: 16px; align-items: start;
+    /* 1fr, not a 460px cap: during integration a single card is the only
+       thing alive on the page, and it should own the width instead of
+       floating in half a screen of nothing. A wide card is a wide feed. */
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+    gap: 12px; margin-top: 16px; align-items: start;
   }
   .board:empty { display: none; }
   .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
@@ -221,20 +236,54 @@
   section { margin-top: 26px; }
   h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
   .list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  /* Columns, not two clumps pinned to the far edges. Comparing $7.87 against
+     $4.44 used to mean sweeping 750px of empty row; in a column it is one
+     glance down. --num keeps the three numeric tracks the same width. */
+  .row, .list.table .grid {
+    --num: 76px;
+    --lane-cols: 15px minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
+  }
   .row {
-    display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 14px;
+    display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px 14px;
     border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
     transition: background .12s ease;
   }
   .row:last-child { border-bottom: 0; }
+  .row > * { min-width: 0; }
+  .row.task { grid-template-columns: 15px 30px minmax(0, 1fr) minmax(0, auto); }
+  .row.lane { grid-template-columns: var(--lane-cols); }
+  .row.head {
+    min-height: 27px; border-bottom-color: var(--line); background: var(--surface-2);
+    font-size: 10.5px; font-weight: 600; letter-spacing: .045em; text-transform: uppercase; color: var(--text-2);
+  }
   .row[data-task] { cursor: pointer; }
   .row[data-task]:hover { background: var(--hover); }
-  .row .tag { color: var(--text-2); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .mono { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .right { margin-left: auto; display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-  .row .err { color: var(--fail); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .ic, .row .cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .row .tag { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .name, .row .mono, .row .err, .row .right {
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .mono { color: var(--text-3); }
+  .row .err { color: var(--fail); flex: 0 1 auto; }
+  .row .num {
+    text-align: right; white-space: nowrap; color: var(--text-3);
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+  }
+  .row .num b { font-weight: 500; color: var(--text-2); }
+  .row .right { justify-self: end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .row .chips { padding: 0; }
+  /* An `auto` track only agrees with itself: every row being its own grid is
+     why the header sat 30px off its own column. One grid for the table, rows
+     borrowing its tracks via subgrid — and the row still draws its own box,
+     which `display: contents` would have thrown away along with the hover. */
+  .list.table { overflow: auto; }
+  .list.table .grid { display: grid; grid-template-columns: var(--lane-cols); column-gap: 12px; padding: 0 14px; min-width: 600px; }
+  @supports (grid-template-columns: subgrid) {
+    /* The row keeps its own padding so its background and rule still reach the
+       card edges — but a subgrid's padding eats the tracks it inherits (a 15px
+       icon column became 1px). The negative margin gives the padding back. */
+    .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: -14px; }
+  }
 
   .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
   .kv-row:last-child { border-bottom: 0; }
@@ -253,6 +302,11 @@
   .flow .node { font-variant-numeric: tabular-nums; }
   .flow .node.done { color: var(--text-3); }
   .flow .node.running { color: var(--text); font-weight: 600; }
+
+  /* Two key-value tables of four rows each: side by side they cost half the
+     scroll and use the width that widening the shell just handed them. */
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 0 20px; }
+  .pair section { min-width: 0; }
 
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
 
@@ -312,8 +366,8 @@
 
 <div class="wrap">
   <div class="summary">
+    <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
     <div class="track" id="bar" aria-hidden="true"></div>
-    <div class="legend" id="counts" role="status" aria-live="polite"></div>
   </div>
   <div class="subline" id="plan-sub"></div>
 
@@ -324,7 +378,7 @@
 
     <section id="settled-section" hidden>
       <h2>Settled lanes</h2>
-      <div class="list" id="settled"></div>
+      <div class="list table" id="settled" role="table" aria-label="Settled lanes"></div>
     </section>
 
     <section id="barriers-section" hidden>
@@ -332,15 +386,17 @@
       <div class="list" id="barriers"></div>
     </section>
 
-    <section id="integration-section" hidden>
-      <h2>Integration</h2>
-      <div class="list" id="integration"></div>
-    </section>
+    <div class="pair">
+      <section id="integration-section" hidden>
+        <h2>Integration</h2>
+        <div class="list" id="integration"></div>
+      </section>
 
-    <section id="dag-section" hidden>
-      <h2>Lane plan</h2>
-      <div class="list" id="dag"></div>
-    </section>
+      <section id="dag-section" hidden>
+        <h2>Lane plan</h2>
+        <div class="list" id="dag"></div>
+      </section>
+    </div>
   </main>
 </div>
 
@@ -483,7 +539,7 @@ function render(s) {
     $('plan-sub').textContent = s.plan || '';
     paint($('board'), `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`);
     paint($('bar'), '');
-    $('counts').textContent = '';
+    paint($('verdict'), '');
     paint($('alerts'), '');
     for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
     return;
@@ -504,8 +560,7 @@ function render(s) {
   document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
 
   paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
-  $('counts').textContent = ['running', 'failed', 'blocked', 'interrupted', 'pending']
-    .filter((k) => s.totals[k]).map((k) => `${s.totals[k]} ${k}`).join('  ·  ') || 'all tasks settled';
+  paint($('verdict'), verdictHtml(s));
 
   renderAlerts(s);
   renderBoard(s);
@@ -513,6 +568,32 @@ function render(s) {
   renderIntegration(s);
   renderDag(s);
   tick();
+}
+
+/**
+ * The run in one sentence, at the top, in the largest type on the page.
+ * Making the reader count rings to learn "nothing is running and T4 died six
+ * hours ago" is making them work for the one fact they came for.
+ */
+function verdictHtml(s) {
+  const t = s.totals;
+  const all = [...s.lanes.flatMap((l) => l.tasks), ...s.barriers];
+  const hurt = all.filter((x) => x.status === 'failed' || x.status === 'blocked' || x.status === 'interrupted');
+  const running = all.filter((x) => x.status === 'running');
+  const complete = t.done === t.total;
+
+  const parts = [complete ? `All ${plural(t.total, 'task')} done` : `${t.done} of ${t.total} done`];
+  for (const x of hurt.slice(0, 2)) {
+    const word = esc((STATUS_WORD[x.status] || x.status).toLowerCase());
+    const held = x.endedAt ? `<span class="soft"> for <span data-since="${esc(x.endedAt)}">–</span></span>` : '';
+    parts.push(`<span class="bad">T${x.n} ${word}${held}</span>`);
+  }
+  if (hurt.length > 2) parts.push(`<span class="soft">+${hurt.length - 2} more</span>`);
+  if (running.length) parts.push(`<span class="soft">${plural(running.length, 'task')} running</span>`);
+  else if (!complete) parts.push('<span class="soft">nothing running</span>');
+
+  const mark = hurt.length ? hurt[0].status : running.length ? 'running' : complete ? 'done' : 'pending';
+  return statusIcon(mark, 17) + parts.join('<span class="sep">·</span>');
 }
 
 function renderAlerts(s) {
@@ -647,17 +728,24 @@ function renderBoard(s) {
 
   const settled = s.lanes.filter((l) => l.settled);
   $('settled-section').hidden = !settled.length;
-  paint($('settled'), settled.map((lane) => `<div class="row">
-      ${statusIcon('done')}
-      <span class="tag">Lane ${esc(lane.label)}</span>
-      ${chipsHtml(lane.tasks)}
-      <span class="mono">${esc(lane.branch || '')}</span>
-      <span class="right">
-        <span>${plural(sumTurns(lane.tasks), 'turn')}</span>
-        <span>${plural(sumCommits(lane.tasks), 'commit')}</span>
-        <span>${money(sumCost(lane.tasks))}</span>
-      </span>
-    </div>`).join(''));
+  const head = `<div class="row lane head" role="row">
+      <span role="columnheader" aria-label="Status"></span>
+      <span role="columnheader">Lane</span>
+      <span role="columnheader">Tasks</span>
+      <span role="columnheader">Branch</span>
+      <span class="num" role="columnheader">Turns</span>
+      <span class="num" role="columnheader">Commits</span>
+      <span class="num" role="columnheader">Cost</span>
+    </div>`;
+  paint($('settled'), !settled.length ? '' : `<div class="grid" role="rowgroup">` + head + settled.map((lane) => `<div class="row lane" role="row">
+      <span class="ic" role="cell">${statusIcon('done')}</span>
+      <span class="tag" role="cell">Lane ${esc(lane.label)}</span>
+      <span class="cell" role="cell">${chipsHtml(lane.tasks)}</span>
+      <span class="mono" role="cell" title="${esc(lane.branch || '')}">${esc(lane.branch || '')}</span>
+      <span class="num" role="cell"><b>${sumTurns(lane.tasks)}</b></span>
+      <span class="num" role="cell"><b>${sumCommits(lane.tasks)}</b></span>
+      <span class="num" role="cell"><b>${money(sumCost(lane.tasks))}</b></span>
+    </div>`).join('') + '</div>');
 }
 
 function rowHtml(t) {
@@ -666,11 +754,13 @@ function rowHtml(t) {
   if (t.turns) bits.push(plural(t.turns, 'turn'));
   if (t.attempts > 1) bits.push(`${t.attempts} attempts`);
   if (t.reconciled) bits.push('reconciled from git');
-  return `<div class="row" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
-    ${statusIcon(t.status)}
+  return `<div class="row task" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
+    <span class="ic">${statusIcon(t.status)}</span>
     <span class="tag">T${t.n}</span>
-    <span class="name">${esc(t.title)}</span>
-    ${t.error ? `<span class="err">${esc(gist(t.error, 70))}</span>` : ''}
+    <span class="cell">
+      <span class="name">${esc(t.title)}</span>
+      ${t.error ? `<span class="err">${esc(gist(t.error, 70))}</span>` : ''}
+    </span>
     <span class="right">${esc(bits.join('  ·  '))}</span>
   </div>`;
 }
