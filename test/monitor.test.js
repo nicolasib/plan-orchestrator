@@ -239,6 +239,19 @@ test('snapshot flags a plan edited after init', () => {
   assert.equal(monitor.snapshot(planPath).planChanged, true);
 });
 
+test('a rate limit on a task that already died is still reported', () => {
+  const { planPath, logFile } = fixture();
+  fs.appendFileSync(logFile, ev({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }));
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.FAILED;
+  st.tasks['2'].error = 'agent error: usage limit reached';
+  state.save(planPath, st);
+
+  const snap = monitor.snapshot(planPath);
+  assert.equal(snap.rateLimit.status, 'rejected', 'the limit that killed a lane is exactly the one worth showing');
+  assert.deepEqual(snap.lanes[0].tasks[1].activity, [], 'a settled task still shows no live feed');
+});
+
 test('snapshot hoists a non-allowed rate limit to the top level', () => {
   const { planPath, logFile } = fixture();
   fs.appendFileSync(logFile, ev({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1787211000 } }));

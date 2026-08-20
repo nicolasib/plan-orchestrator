@@ -286,7 +286,9 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true
     lastActivityAt: digest ? digest.lastActivityAt : null,
     lastTool: lastTool ? { name: lastTool.name, target: lastTool.target, ok: lastTool.ok } : null,
     lastText: live ? live.lastText : null,
-    rateLimit: live ? live.rateLimit : null,
+    // Not gated on `live`: the run this most needs to report is the one that
+    // already died of a usage limit, and a dead task is by definition not live.
+    rateLimit: digest ? digest.rateLimit : null,
     activity: live ? live.activity : [],
   };
 }

@@ -9,6 +9,7 @@ const state = require('../src/state');
 const wt = require('../src/worktrees');
 const { runLanes, prepareLanes } = require('../src/run');
 const { integrate } = require('../src/integrate');
+const { serve } = require('../src/serve');
 const render = require('../src/render');
 
 /**
@@ -225,6 +226,34 @@ async function cmdIntegrate(args) {
   return res.ok ? EXIT.OK : EXIT.INTEGRATION;
 }
 
+/**
+ * A dashboard for a run in flight. Read-only, loopback-bound, and in its own
+ * process: `plo run` already owns a terminal, and the thing you actually want
+ * to know mid-run — which lane is stuck on what — is only visible by reading
+ * the logs the run is already writing.
+ */
+async function cmdServe(args) {
+  const { abs } = loadPlan(args.plan);
+  const { server } = await serve({
+    planPath: abs,
+    port: args.port === undefined ? undefined : Number(args.port),
+    host: args.host,
+    open: args.open === true || args.open === 'true',
+    pollMs: args.interval ? Number(args.interval) * 1000 : undefined,
+    log: out,
+  });
+
+  await new Promise((resolve) => {
+    // Hang up on the watchers first: an open SSE connection would otherwise
+    // keep `close` pending forever, and Ctrl-C would not return the prompt.
+    const stop = () => server.plo.shutdown().then(resolve, resolve);
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    server.once('close', resolve);
+  });
+  return EXIT.OK;
+}
+
 function cmdStatus(args) {
   const { abs, contents, plan } = loadPlan(args.plan);
   const st = state.load(abs);
@@ -267,6 +296,7 @@ COMMANDS
   resume      Reconcile state with git and continue where the last run stopped.
   integrate   Merge lanes -> barrier tasks -> FULL suite -> cross-lane review.
   status      Print per-task status from the checkpoint file.
+  serve       Local web dashboard for a run in flight (read-only).
   clean       Remove lane worktrees (refuses if a lane has unmerged commits).
 
 OPTIONS
@@ -287,6 +317,10 @@ OPTIONS
   --test-command <cmd>   override the test command parsed from the plan
   --integrate            with run: continue straight into integration
   --delete-branches      with clean: delete lane branches too
+  --port <n>             with serve: port to bind (default 7331, steps up if taken)
+  --host <addr>          with serve: interface to bind (default 127.0.0.1)
+  --interval <seconds>   with serve: how often to re-read state and logs (default 1)
+  --open                 with serve: open the dashboard in the default browser
 
 ENVIRONMENT
   PLO_AGENT_BIN          agent CLI to spawn (default: claude)
@@ -311,6 +345,7 @@ async function main() {
     case 'resume': return cmdRun(args, { resuming: true });
     case 'integrate': return cmdIntegrate(args);
     case 'status': return cmdStatus(args);
+    case 'serve': return cmdServe(args);
     case 'clean': return cmdClean(args);
     default:
       fail(`unknown command \`${cmd}\`. Run \`plo --help\`.`, EXIT.USAGE);
