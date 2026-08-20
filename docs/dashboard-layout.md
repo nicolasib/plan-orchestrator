@@ -254,6 +254,9 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
    A tela tinha a paleta do Linear e não a forma. Ver a nota ao final.
 6. ~~**Fase 6 — o orçamento de acento**~~ **— feita em 20/08/2026**, também
    fora do plano. O acento tinha sete significados. Ver a nota ao final.
+7. ~~**Fase 7 — o painel de detalhe**~~ **— feita em 20/08/2026**, fora do
+   plano. Checkbox de verdade, ícones no registro e Markdown renderizado —
+   e o achado de que o relatório chegava com 400 caracteres e sem quebras.
 
 Nenhum item exige tocar em `run.js`, `spawn.js`, `state.js` ou `integrate.js`.
 O item 7 é o único que mexe no servidor, e só para elevar `activityLimit`.
@@ -699,7 +702,102 @@ lados).
 
 ---
 
-## 13. Nota — o custo vira tokens (20/08/2026)
+## 13. Registro — fase 7, o painel de detalhe (20/08/2026)
+
+Três pedidos sobre o mesmo painel, e um deles não tinha conserto na página.
+
+### Plan steps
+
+`☐` e `☑` eram glifos de fonte — cada família desenha num tamanho e numa
+altura diferentes, e o glifo se senta na linha de base do texto. Numa lista
+com `padding-left: 30px`, um step que quebrava em duas linhas voltava a correr
+por baixo da própria caixa. Agora a caixa é desenhada (SVG) e a linha tem duas
+tracks: uma para a caixa, uma para o texto — a segunda linha de um step longo
+começa debaixo da primeira. Os `**` e as crases sumiram porque o texto passa
+pelo renderizador inline: o que era `**Step 3: Implementar `planDayClose`**`
+vira negrito com um chip de código dentro.
+
+### O registro
+
+`.pad` saiu. As linhas estavam recuadas 12px dentro de um painel que já tem
+uma calha, então **todo fio entre elas parava antes da borda que dividia** —
+uma tabela desenhada dentro de uma margem em vez de uma tabela desenhada no
+painel. O padding foi para a linha, onde separa o texto e não o chão.
+
+E cada linha ganhou um glifo. Dez marcas diferentes aparecendo **uma vez cada**
+são uma legenda; é o oposto exato do que a fase 6 tirou do board, que era a
+mesma marca doze vezes. Todas em `currentColor`, então herdam o tom do rótulo
+e não introduzem cor nenhuma. A coluna do rótulo encolheu de 150 para 128px
+para pagar o glifo, o que devolveu 22px ao valor — o session id mostra 12
+caracteres a mais.
+
+### Markdown
+
+O relatório final de um agente é Markdown; não existe modo em que não seja.
+Imprimi-lo cru colocava `**marcada**` e `` `lib/day-close.ts` `` na tela como
+pontuação literal, que é a única renderização garantidamente errada. O
+renderizador é pequeno e sem dependência — este CLI não tem nenhuma, e um
+monitor que precisa de `npm install` para observar uma run que já está
+queimando token é um monitor que ninguém abre.
+
+A segurança vem da **ordem**, não de uma lista de proibições: a fonte é
+escapada primeiro, então quando qualquer regra roda não existe mais um `<` na
+string, e as únicas tags na saída são as que estas regras colocaram. Verificado
+com nove casos, entre eles `<script>` e `[x](javascript:…)` — o primeiro sai
+como texto escapado, o segundo continua sendo os colchetes que era, porque o
+esquema é testado e só `http(s)` vira `<a>`.
+
+E a prosa deixou de morar numa caixa monoespaçada com borda. Aquilo estava
+certo quando o conteúdo era uma lista de caminhos e ficou errado no instante
+em que virou o relatório: uma caixa em volta de texto corrido diz "isto é um
+literal", que é a única coisa que ele não é. `Declared writes` e
+`Excluded by negation` continuam em `<pre>` — lá é literal mesmo, e um
+renderizador comeria os underscores.
+
+### O achado, que era o problema de verdade
+
+Nenhum renderizador conserta uma tabela cujas linhas foram destruídas antes de
+ele ver o texto. `monitor.js` guardava `result.text = oneLine(ev.result, 400)`
+— **colapsa todo espaço em branco e corta em 400 caracteres** — e o mesmo campo
+servia dois consumidores: a linha do feed, onde colapsar é o certo, e o painel,
+onde Markdown *é feito* de quebras de linha.
+
+Medido na 1.11.0: o relatório da T4 tem **1702 caracteres e 17 quebras**, e o
+painel mostrava 400 sem nenhuma — **menos de um quarto do texto, como um
+parágrafo corrido de pipes**. `d.result` passa a ter os dois: `text` para o
+feed e `body` para o painel, com teto de 8000 e um `clipped` que a página
+exibe, porque um teto que o leitor não vê é um teto que mente. Duas regras
+novas, dois testes.
+
+Com as quebras de volta o conteúdo passou a ter uma tabela de verdade, então
+o renderizador ganhou a regra — com a guarda de que **uma corrida de pipes só
+é tabela se a segunda linha for a régua**. Sem isso, `rode a | b | c` viraria
+um `<table>`, que é uma mentira pior que o parágrafo corrido que ela substitui.
+
+### Um defeito que fica aberto, e não é desta camada
+
+`run.js:140` guarda o relatório de uma task bloqueada como
+`(outcome.result || '').slice(0, 500)` — **no checkpoint, na hora de
+escrever**. O painel não tem como recuperar o que nunca foi gravado, e é por
+isso que o "Why it stopped" da T4 termina no meio de uma frase. Consertar isso
+é mexer no formato do checkpoint, que é outra caixa; fica registrado aqui.
+
+### Verificado
+
+118 testes (dois novos, sobre a separação feed/painel e sobre o teto que se
+anuncia). Nove casos no renderizador, auditados por tag produzida e não por
+substring — inclusive dois em que a checagem ingênua acusa injeção justamente
+onde o comportamento está certo. O painel aberto em `#task=2` e `#task=4`,
+em 1728/1280/900/640/390/320 × claro/escuro: zero erro de página, zero rolagem
+horizontal do documento (a tabela rola dentro da própria caixa, como a faixa
+de estágios e a tabela de lanes já faziam) e AA nos dois temas, com o único par
+abaixo do piso sendo o `·` decorativo de sempre. As dez linhas do registro
+encostam nas duas bordas do painel (1px à esquerda, que é a borda dele), as dez
+carregam glifo, e nenhum `**` ou crase sobrou no texto renderizado.
+
+---
+
+## 14. Nota — o custo vira tokens (20/08/2026)
 
 Fora do plano, a pedido: `$19.67 spent` na topbar e a coluna `COST` da tabela
 passam a contar **output tokens**. `total_cost_usd` é preço de API; quem roda

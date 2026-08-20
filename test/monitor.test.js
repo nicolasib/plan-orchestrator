@@ -122,6 +122,27 @@ test('digestLog pairs each tool_result back onto its tool call', () => {
   assert.match(tools[1].preview, /FAIL/);
 });
 
+test("digestLog keeps the report's line breaks for the panel and collapses them only for the feed", () => {
+  const report = ['# Head', '', '| Fase | Resultado |', '|---|---|', '| Review | ok |'].join('\n');
+  const log = JSON.stringify({ type: 'result', subtype: 'success', num_turns: 2, result: report }) + '\n';
+  const d = monitor.digestLog(log);
+
+  // The feed row is one line and stays one line.
+  assert.ok(!d.result.text.includes('\n'), 'the feed line must not carry newlines');
+  assert.match(d.result.text, /# Head \| Fase \| Resultado \|/);
+
+  // The panel renders Markdown, and Markdown is made of line breaks.
+  assert.equal(d.result.body, report, 'the panel copy is the report as written');
+  assert.equal(d.result.clipped, false);
+});
+
+test('digestLog reports it when a report is longer than the panel budget', () => {
+  const long = 'x'.repeat(9000);
+  const d = monitor.digestLog(JSON.stringify({ type: 'result', subtype: 'success', result: long }) + '\n');
+  assert.equal(d.result.body.length, 8000);
+  assert.equal(d.result.clipped, true, 'a cap the reader cannot see is a cap that lies');
+});
+
 test('digestLog surfaces the rate limit event verbatim', () => {
   const d = monitor.digestLog(SAMPLE_LOG);
   assert.equal(d.rateLimit.rateLimitType, 'five_hour');

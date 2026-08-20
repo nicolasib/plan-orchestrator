@@ -555,9 +555,12 @@
     .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: calc(-1 * var(--pad)); }
   }
 
-  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px var(--pad); border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  /* The record only ever renders inside the rail, so it takes the rail's
+     gutter — one vertical line with the head above it and the feed below. */
+  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px var(--rail-pad, var(--pad)); border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
   .kv-row:last-child { border-bottom: 0; }
-  .kv-row .k { color: var(--text-2); width: 150px; flex: 0 0 auto; }
+  .kv-row .k { display: flex; align-items: center; gap: 8px; color: var(--text-2); width: 128px; flex: 0 0 auto; }
+  .kv-row .k svg { flex: 0 0 auto; opacity: .8; }
   .kv-row .v { overflow-wrap: anywhere; min-width: 0; }
   .pill {
     display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
@@ -725,6 +728,43 @@
   aside h3 { margin: 22px var(--rail-pad) 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
   aside .pad { padding: 0 var(--rail-pad); }
   aside pre { margin: 0 var(--rail-pad); padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-2); font: 400 11.5px/1.6 var(--mono); }
+
+  /* Rendered prose, so it is set as prose: the sans face, a reading measure,
+     and no box. The bordered monospace panel was right when the content was a
+     path list and wrong the moment it became the agent's report — a box around
+     running text says "this is a literal", which is the one thing it is not.
+     A fenced block inside it keeps its box, because that part *is* literal. */
+  aside .md { padding: 0 var(--rail-pad); font-size: 12.5px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+  aside .md > :first-child { margin-top: 0; }
+  aside .md > :last-child { margin-bottom: 0; }
+  aside .md p { margin: 0 0 9px; }
+  aside .md strong { color: var(--text); font-weight: 600; }
+  aside .md em { font-style: italic; }
+  aside .md del { text-decoration: line-through; color: var(--text-3); }
+  aside .md h4, aside .md h5 { margin: 15px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  aside .md h5 { color: var(--text-2); }
+  aside .md ul, aside .md ol { margin: 0 0 9px; padding-left: 17px; }
+  aside .md li { margin: 2px 0; }
+  aside .md ul.tick, aside .md ol.tick { padding-left: 0; margin-bottom: 9px; }
+  aside .md blockquote { margin: 0 0 9px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--text-3); }
+  aside .md hr { border: 0; border-top: 1px solid var(--line-soft); margin: 13px 0; }
+  aside .md a { color: var(--accent-ink); }
+  aside .md pre { margin: 0 0 9px; }
+  /* A table in a 320px column scrolls inside its own box rather than dragging
+     the page sideways — the same trade the stage strip and the lane table
+     already make. */
+  aside .md-table { margin: 0 0 10px; overflow-x: auto; }
+  aside .md table { border-collapse: collapse; font-size: 11.5px; }
+  /* `overflow-wrap: anywhere` is right for a paragraph carrying a 90-character
+     path and wrong inside a cell: a column narrow enough will break a word in
+     half rather than admit it needs more room. Here the cell asks for the room
+     and the box scrolls if the panel cannot give it. */
+  aside .md th, aside .md td { padding: 5px 10px 5px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-soft); overflow-wrap: normal; word-break: normal; }
+  aside .md th { font-weight: 600; color: var(--text-2); white-space: nowrap; }
+  aside .md tbody tr:last-child td { border-bottom: 0; }
+  /* Inside a block that is already monospace on its own ground, the inline
+     chip would be a second box saying the same thing. */
+  aside .md pre code { padding: 0; background: none; font-size: inherit; color: inherit; }
   /* `all: unset` re-inherits `white-space`, so "← Activity" broke over two
      lines the moment the title beside it got long and made the whole head
      47px → 71px. It is a control, not prose: it does not wrap and it does not
@@ -792,9 +832,22 @@
     border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
     background: var(--surface-2); color: var(--text-2);
   }
-  ul.steps { margin: 0; padding: 0 var(--rail-pad) 0 30px; color: var(--text-2); font-size: 12.5px; }
-  ul.steps li { margin: 3px 0; }
-  ul.steps li.on { color: var(--text); }
+  /* A checklist, drawn as one. `padding-left: 30px` with a `☐` in the text was
+     a bullet list wearing a glyph: the box sat on the text baseline, at
+     whatever size the font felt like, and a step that wrapped ran back under
+     it. Two tracks fix both — the box has a column and the text has a column,
+     and the second line of a long step starts under the first. */
+  .steps, .md ul.tick, .md ol.tick { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+  .steps { padding: 0 var(--rail-pad); font-size: 12.5px; }
+  .steps li, .md .tick li {
+    display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 9px;
+    align-items: start; padding: 4px 0; margin: 0; color: var(--text);
+  }
+  /* Done recedes here too: the box carries the state and the tone agrees with
+     it, so what is left to do is what reads first. */
+  .steps li.on, .md .tick li.on { color: var(--text-2); }
+  .steps svg, .md .tick svg { margin-top: 2px; }
+  .steps strong, .md .tick strong { font-weight: 500; color: inherit; }
 
   /* --text-3 is calibrated against --surface, where it reads 4.63:1, and it
      lands at 4.42 on --surface-2 — the tinted grounds: the branch chip, a
@@ -936,6 +989,106 @@ function paint(el, html) {
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const short = (sha) => String(sha || '').slice(0, 7);
+
+/**
+ * The smallest Markdown that covers what an agent actually writes back.
+ *
+ * An agent's final report is Markdown — it is written to be read as Markdown
+ * and there is no mode where it is not. Printing it raw put `**marcada**` and
+ * `` `lib/day-close.ts` `` on screen as literal punctuation, which is the one
+ * rendering guaranteed to be wrong.
+ *
+ * No dependency, because this CLI has none and a monitor that needs an
+ * install to watch a run is a monitor nobody starts. Safety comes from order:
+ * the source is escaped **first**, so by the time any rule runs there is no
+ * `<` left in the string and nothing the content can do produces a tag. The
+ * only tags in the output are the ones these rules put there.
+ */
+const MD_FENCE = '\u0000';
+const MD_CODE = '\u0001';
+
+/** Runs on already-escaped text. Code spans are held out first: a backtick
+ *  span is literal, and `a**b` must not come back bold. */
+function mdInline(t) {
+  const held = [];
+  let out = String(t).replace(/`([^`]+)`/g, (_, c) => { held.push(c); return `${MD_CODE}${held.length - 1}${MD_CODE}`; });
+  out = out
+    // Only http(s). The scheme survives escaping intact, so this test is on
+    // the real thing, and anything else stays the text it already was.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noreferrer noopener">${label}</a>`)
+    .replace(/\*\*(\S[^*]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/~~(\S[^~]*?)~~/g, '<del>$1</del>')
+    // A lone marker needs a non-word neighbour on both sides, or `snake_case`
+    // and `a * b` become emphasis in the middle of a path or an expression.
+    .replace(/(^|[^*\w])\*(\S[^*]*?)\*(?![*\w])/g, '$1<em>$2</em>')
+    .replace(/(^|[^_\w])_(\S[^_]*?)_(?![_\w])/g, '$1<em>$2</em>');
+  return out.replace(new RegExp(MD_CODE + '(\\d+)' + MD_CODE, 'g'), (_, i) => `<code>${held[+i]}</code>`);
+}
+
+function md(src) {
+  const raw = String(src == null ? '' : src).replace(/\r\n?/g, '\n').trim();
+  if (!raw) return '';
+  const fenced = [];
+  const lines = esc(raw)
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, (_, body) => { fenced.push(body.replace(/\n+$/, '')); return `${MD_FENCE}${fenced.length - 1}${MD_FENCE}`; })
+    .split('\n');
+
+  const out = [];
+  let para = [];
+  let list = null;
+  let quote = [];
+  let table = null;
+  const closePara = () => { if (para.length) { out.push(`<p>${mdInline(para.join('\n')).replace(/\n/g, '<br>')}</p>`); para = []; } };
+  const closeList = () => {
+    if (!list) return;
+    out.push(`<${list.tag}${list.tick ? ' class="tick"' : ''}>` + list.items.map((i) => (i.box == null
+      ? `<li>${mdInline(i.text)}</li>`
+      : `<li class="${i.box ? 'on' : ''}">${checkbox(i.box)}<span>${mdInline(i.text)}</span></li>`)).join('') + `</${list.tag}>`);
+    list = null;
+  };
+  const closeQuote = () => { if (quote.length) { out.push(`<blockquote>${mdInline(quote.join(' '))}</blockquote>`); quote = []; } };
+  const RULE = /^\|[\s:|-]+\|$/;
+  const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => mdInline(c.trim()));
+  const closeTable = () => {
+    if (!table) return;
+    const rows = table.slice();
+    // A run of pipes is only a table if the second line is the rule. Without
+    // it this is prose that happens to contain a pipe, and a `<table>` around
+    // it would be a worse lie than the run-on paragraph it replaces.
+    const head = rows.length > 1 && RULE.test(rows[1].trim()) ? (rows.splice(1, 1), rows.shift()) : null;
+    const body = rows.filter((r) => !RULE.test(r.trim()));
+    out.push('<div class="md-table"><table>'
+      + (head ? `<thead><tr>${cells(head).map((c) => `<th>${c}</th>`).join('')}</tr></thead>` : '')
+      + `<tbody>${body.map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    table = null;
+  };
+  const close = () => { closePara(); closeList(); closeQuote(); closeTable(); };
+  const item = (tag, text) => {
+    closePara(); closeQuote(); closeTable();
+    if (!list || list.tag !== tag) closeList(), list = { tag, items: [], tick: false };
+    const box = text.match(/^\[([ xX])\]\s+(.*)$/);
+    if (box) { list.tick = true; list.items.push({ box: box[1] !== ' ', text: box[2] }); }
+    else list.items.push({ box: null, text });
+  };
+
+  for (const line of lines) {
+    const fence = line.match(new RegExp('^' + MD_FENCE + '(\\d+)' + MD_FENCE + '$'));
+    if (fence) { close(); out.push(`<pre><code>${fenced[+fence[1]]}</code></pre>`); continue; }
+    if (!line.trim()) { close(); continue; }
+    let m;
+    // A panel column is not a document: an agent's `#` is a run of prose, not
+    // a page title, so every level lands on one of two sizes.
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { close(); out.push(`<h${m[1].length <= 2 ? 4 : 5}>${mdInline(m[2])}</h${m[1].length <= 2 ? 4 : 5}>`); continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { close(); out.push('<hr>'); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) { closePara(); closeList(); closeQuote(); (table || (table = [])).push(line.trim()); continue; }
+    if ((m = line.match(/^\s*&gt;\s?(.*)$/))) { closePara(); closeList(); closeTable(); quote.push(m[1]); continue; }
+    if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { item('ul', m[1]); continue; }
+    if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { item('ol', m[1]); continue; }
+    closeList(); closeQuote(); closeTable(); para.push(line);
+  }
+  close();
+  return out.join('');
+}
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
@@ -1057,6 +1210,35 @@ const mergeIcon = () => `<svg width="13" height="13" viewBox="0 0 13 13" aria-hi
   <path d="M2.8 1.6 v2.6 c0 2.2 1.5 2.9 3.2 2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
   <path d="M2.8 11.4 v-2.6 c0-2.2 1.5-2.9 3.2-2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
   <circle cx="10.2" cy="6.5" r="1.7" fill="currentColor" /></svg>`;
+
+/** A drawn box, not `☐` — the glyph is a font's opinion and it lands at a
+ *  different size and baseline in every one of them. */
+const checkbox = (on) => (on
+  ? `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
+      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="var(--done-soft)" stroke="var(--done)" stroke-width="1.15" />
+      <path d="M3.5 6.6 L5.5 8.6 L9.5 4.5" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+  : `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
+      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="none" stroke="var(--idle)" stroke-width="1.15" /></svg>`);
+
+/**
+ * One glyph per row of the record, in `currentColor` so they stay the label's
+ * tone. Ten different marks appearing once each is a legend; it is the
+ * opposite of the same mark repeated twelve times, which is what this pass
+ * took out of the board.
+ */
+const kvSvg = (body) => `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+const KV_ICON = {
+  Status: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><circle cx="6.5" cy="6.5" r="1.9" fill="currentColor" stroke="none" />'),
+  Lane: kvSvg('<path d="M1.6 3.3 h9.8 M1.6 6.5 h6.4 M1.6 9.7 h8.2" />'),
+  Duration: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><path d="M6.5 3.6 V6.7 L8.6 8.1" />'),
+  Turns: kvSvg('<path d="M11 6.5a4.5 4.5 0 1 1-1.6-3.4" /><path d="M11.2 1.9 V4.1 H9" />'),
+  Attempts: kvSvg('<path d="M2 6.5a4.5 4.5 0 1 0 1.6-3.4" /><path d="M1.8 1.9 V4.1 H4" />'),
+  'Output tokens': kvSvg('<path d="M2.4 10.6 V7.4 M6.5 10.6 V4.6 M10.6 10.6 V2.4" stroke-width="1.45" />'),
+  Model: kvSvg('<rect x="3.4" y="3.4" width="6.2" height="6.2" rx="1.4" /><path d="M5.2 1.5v1.9 M7.8 1.5v1.9 M5.2 9.6v1.9 M7.8 9.6v1.9 M1.5 5.2h1.9 M1.5 7.8h1.9 M9.6 5.2h1.9 M9.6 7.8h1.9" />'),
+  Session: kvSvg('<path d="M7.6 2.1 H10a.9.9 0 0 1 .9.9v7a.9.9 0 0 1-.9.9H7.6" /><path d="M5.4 2.1H3a.9.9 0 0 0-.9.9v7a.9.9 0 0 0 .9.9h2.4" /><path d="M4.5 6.5h4" />'),
+  Commits: kvSvg('<circle cx="6.5" cy="6.5" r="2.4" /><path d="M1.4 6.5h2.7 M8.9 6.5h2.7" />'),
+  Log: kvSvg('<path d="M3.1 1.7h4.3l2.5 2.5v7.1H3.1z" /><path d="M7.2 1.8v2.6h2.6 M4.7 7.1h3.6 M4.7 9.2h2.6" />'),
+};
 
 // --------------------------------------------------------------- rendering
 
@@ -1709,22 +1891,32 @@ function drawTask(t) {
       : '<span class="mono">—</span>'],
   ];
 
-  const parts = [`<div class="pad"><div class="list">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div></div>`];
+  // No `.pad` wrapper. The rows were inset 12px from a panel that already has
+  // a gutter, so every rule between them stopped short of the edge it divided
+  // — a table drawn inside a margin instead of a table drawn in the panel.
+  // The padding moved onto the row, where it separates the text and not the
+  // ground under it.
+  const parts = [`<div class="list kv">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${KV_ICON[k] || ''}${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div>`];
 
-  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><pre>${esc(t.error)}</pre>`);
+  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><div class="md">${md(t.error)}</div>`);
   // A blocked task's error IS its final message; printing both twice reads as
   // two findings when there is one.
   // The stored error keeps the report's line breaks; the digest collapses
   // them. Compare on flattened text or the duplicate slips through.
   const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
-  const resultText = t.result && t.result.text;
+  // `body` keeps the report's line breaks; `text` is the feed's one-liner and
+  // only stands in for an old checkpoint that has no body.
+  const resultText = t.result && (t.result.body || t.result.text);
   const duplicated = resultText && t.error
     && (flat(t.error).includes(flat(resultText).slice(0, 60)) || flat(resultText).includes(flat(t.error).slice(0, 60)));
-  if (resultText && !duplicated) parts.push(`<h3>Agent result</h3><pre>${esc(resultText)}</pre>`);
+  // Both of these are the agent's own prose — a blocked task's error IS its
+  // final message — so both are Markdown. The two below stay `<pre>`: a list
+  // of paths is a list of paths, and a renderer would eat the underscores.
+  if (resultText && !duplicated) parts.push(`<h3>Agent result${t.result.clipped ? ' · clipped' : ''}</h3><div class="md">${md(resultText)}</div>`);
   if (t.files && t.files.writes.length) parts.push(`<h3>Declared writes</h3><pre>${t.files.writes.map(esc).join('\n')}</pre>`);
   if (t.files && t.files.excluded.length) parts.push(`<h3>Excluded by negation</h3><pre>${t.files.excluded.map(esc).join('\n')}</pre>`);
   if (t.steps && t.steps.length) {
-    parts.push(`<h3>Plan steps</h3><ul class="steps">${t.steps.map((s) => `<li class="${s.checked ? 'on' : ''}">${s.checked ? '☑' : '☐'} ${esc(s.text)}</li>`).join('')}</ul>`);
+    parts.push(`<h3>Plan steps</h3><ul class="steps tick">${t.steps.map((st) => `<li class="${st.checked ? 'on' : ''}">${checkbox(st.checked)}<span>${mdInline(esc(st.text))}</span></li>`).join('')}</ul>`);
   }
   parts.push(`<h3>Activity${t.truncated ? ' · tail' : ''}</h3><div class="pad"><div class="feed" style="margin:0;max-height:none">${
     t.activity.length ? t.activity.slice().reverse().map((a) => activityHtml(a)).join('') : '<div class="empty">no agent events recorded</div>'

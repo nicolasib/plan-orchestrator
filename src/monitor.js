@@ -31,6 +31,9 @@ const ACTIVITY_LIMIT = 40;
  *  through the last few minutes, short enough to ship every second. */
 const FEED_LIMIT = 60;
 const TEXT_MAX = 400;
+/** The panel's copy of an agent's report. `TEXT_MAX` is a feed line's budget;
+ *  a report is a document and gets a document's. */
+const REPORT_MAX = 8000;
 
 function tailFile(file, bytes = TAIL_BYTES) {
   let fd;
@@ -235,12 +238,22 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
     }
 
     if (ev.type === 'result') {
+      // Two consumers, two shapes. A feed row is one line, so `text` collapses
+      // whitespace and stops at 120 or 400 characters — right there, wrong
+      // everywhere else. The panel renders the same field as Markdown, and
+      // Markdown is made of line breaks: a heading, a list and a table all
+      // stop existing the moment `\s+` becomes a space. The report the agent
+      // wrote was arriving in the drawer as one run-on paragraph of pipes.
+      const report = ev.result == null ? null : String(ev.result).trim();
       d.result = {
         isError: Boolean(ev.is_error || ev.subtype === 'error_max_turns' || ev.subtype === 'error_during_execution'),
         subtype: ev.subtype || null,
         numTurns: typeof ev.num_turns === 'number' ? ev.num_turns : null,
         durationMs: typeof ev.duration_ms === 'number' ? ev.duration_ms : null,
-        text: ev.result ? oneLine(ev.result, TEXT_MAX) : null,
+        text: report ? oneLine(report, TEXT_MAX) : null,
+        body: report ? report.slice(0, REPORT_MAX) : null,
+        // Never a silent cap: if it bit, the panel says so.
+        clipped: Boolean(report && report.length > REPORT_MAX),
       };
       if (typeof ev.total_cost_usd === 'number') d.costUsd = ev.total_cost_usd;
       // The spawn's own total, which replaces the running sum rather than
