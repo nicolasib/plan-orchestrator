@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>plo — run monitor</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235e6ad2'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235e6ad2'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='white'/%3E%3C/svg%3E" />
 <style>
   /*
    * Visual language: Linear. Dense rows, quiet chrome, one indigo accent, and
@@ -23,6 +23,7 @@
     --line: #23242a;
     --line-soft: #191a1e;
     --hover: rgba(255, 255, 255, .045);
+    --code-bg: rgba(255, 255, 255, .07);
 
     --text: #f7f8f8;
     --text-2: #8a8f98;      /* 5.86:1 on surface */
@@ -73,6 +74,7 @@
       --line: #e5e6e8;
       --line-soft: #eeeff1;
       --hover: rgba(0, 0, 0, .035);
+      --code-bg: rgba(17, 24, 39, .055);
 
       --text: #1c1d21;
       --text-2: #6b6f76;
@@ -109,7 +111,19 @@
     letter-spacing: -.011em;
     -webkit-font-smoothing: antialiased;
   }
-  code, .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
+  .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
+  /* `base main at 9142925` is a sentence with three literals in it, and bare
+     monospace inside a sans line is two typefaces arguing about a baseline:
+     different x-height, different width, no boundary saying where the literal
+     starts. The fill draws that boundary — the same job Slack's inline code
+     does, in grey instead of orange. `.92em` and not a fixed size so the chip
+     scales with whatever line it lands in; `--text` and not `--text-2` because
+     the literal is the payload and the word before it is the label. */
+  code {
+    font-family: var(--mono); font-size: .92em; letter-spacing: 0;
+    padding: 1px 5px; border-radius: 4px;
+    background: var(--code-bg); color: var(--text);
+  }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
@@ -182,10 +196,12 @@
   }
   @media (min-width: 900px) { .topbar { position: static; } }
   .crumbs { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  /* A heading beside a badge that spells the same three letters is the word
+     twice. The mark is a heading arrow now — the run has a direction and a
+     current position, which is the only thing this page is about. */
   .badge-app {
     display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 auto;
-    background: var(--accent); color: var(--on-accent); border-radius: 5px;
-    font-size: 9.5px; font-weight: 700; letter-spacing: -.02em;
+    background: var(--accent); border-radius: 6px;
   }
   h1 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -297,7 +313,7 @@
      cannot also be a button itself — nesting one inside the other is the kind
      of ARIA a screen reader is entitled to ignore. */
   .alert .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; align-self: center; flex: 0 0 auto; }
-  .alert code { color: var(--text-2); }
+
 
   /* --------------------------------------------------------------- board */
   .board {
@@ -348,6 +364,9 @@
     font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums;
     transition: background .12s ease, border-color .12s ease, color .12s ease;
   }
+  /* The 6px left inset seats a glyph. Without one the number sat off-centre
+     in its own chip. */
+  .chip.done { padding-left: 8px; }
   .chip:hover { background: var(--hover); color: var(--text); border-color: var(--text-faint); }
   .chip.running { color: var(--text); border-color: color-mix(in srgb, var(--run) 42%, var(--line)); background: var(--run-soft); }
   .chip.failed, .chip.blocked { color: var(--text); border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); background: var(--fail-soft); }
@@ -465,7 +484,7 @@
      glance down. --num keeps the three numeric tracks the same width. */
   .row, .list.table .grid {
     --num: 76px;
-    --lane-cols: 15px minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
+    --lane-cols: minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
   }
   .row {
     display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px var(--pad);
@@ -801,7 +820,7 @@
 
 <header class="topbar">
   <div class="crumbs">
-    <span class="badge-app" aria-hidden="true">plo</span>
+    <span class="badge-app" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" focusable="false"><path d="M6 1.15 L10.2 10.85 L6 8.35 L1.8 10.85 Z" fill="var(--on-accent)" /></svg></span>
     <h1 id="plan-title">…</h1>
   </div>
   <div class="grow"></div>
@@ -973,8 +992,13 @@ function statusIcon(status, size = 15) {
 
   switch (status) {
     case 'done':
-      return `${open}<circle cx="${c}" cy="${c}" r="${c - 0.5}" fill="var(--accent)" />
-        <path d="M${c * 0.6} ${c + c * 0.03} l${c * 0.28} ${c * 0.3} l${c * 0.55} -${c * 0.6}" fill="none" stroke="var(--on-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+      // No disc, and not the accent. A filled accent disc for `done` put the
+      // loudest mark on the page on its least urgent state — eleven of them on
+      // a finished run, against one red ring for the thing that broke. It is
+      // the same check the feed draws for a call that returned, at a bigger
+      // size: one glyph, one meaning, two scales.
+      return `${open}<path d="M${(s * 0.22).toFixed(2)} ${(s * 0.52).toFixed(2)} L${(s * 0.42).toFixed(2)} ${(s * 0.72).toFixed(2)} L${(s * 0.78).toFixed(2)} ${(s * 0.30).toFixed(2)}"
+        fill="none" stroke="var(--done)" stroke-width="${(s / 9.5).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
     case 'running': {
       // Half-filled ring: a pie drawn as one fat dashed stroke, Linear-style.
       const r = (c - 1.25) / 2;
@@ -1244,7 +1268,10 @@ const sumTokens = (tasks) => tasks.reduce((n, t) => n + (typeof t.outputTokens =
 function chipsHtml(tasks) {
   return `<div class="chips">${tasks.map((t) => {
     const name = `Task ${t.n}, ${esc(t.title)}, ${esc(STATUS_WORD[t.status] || t.status)}`;
-    return `<button class="chip ${t.status}" data-task="${t.n}" aria-controls="panel" aria-label="${name}" title="${name}">${statusIcon(t.status, 13)}${t.n}</button>`;
+    // A done chip is a number. Every other status keeps its glyph, so a
+    // glyph inside a chip goes back to meaning "this one, not the others".
+    const mark = t.status === 'done' ? '' : statusIcon(t.status, 13);
+    return `<button class="chip ${t.status}" data-task="${t.n}" aria-controls="panel" aria-label="${name}" title="${name}">${mark}${t.n}</button>`;
   }).join('')}</div>`;
 }
 
@@ -1391,7 +1418,6 @@ function renderBoard(s) {
   const settled = s.lanes.filter((l) => l.settled);
   $('settled-section').hidden = !settled.length;
   const head = `<div class="row lane head" role="row">
-      <span role="columnheader" aria-label="Status"></span>
       <span role="columnheader">Lane</span>
       <span role="columnheader">Tasks</span>
       <span role="columnheader">Branch</span>
@@ -1400,7 +1426,6 @@ function renderBoard(s) {
       <span class="num" role="columnheader">Tokens</span>
     </div>`;
   paint($('settled'), !settled.length ? '' : `<div class="grid" role="rowgroup">` + head + settled.map((lane) => `<div class="row lane" role="row">
-      <span class="ic" role="cell">${statusIcon('done')}</span>
       <span class="tag" role="cell">Lane ${esc(lane.label)}</span>
       <span class="cell" role="cell">${chipsHtml(lane.tasks)}</span>
       <span class="cell" role="cell">${lane.branch
@@ -1421,7 +1446,6 @@ function totalsRow(lanes, allLanes) {
   const tasks = lanes.flatMap((l) => l.tasks);
   const note = lanes.length < allLanes ? `${lanes.length} of ${allLanes} lanes settled` : '';
   return `<div class="row lane foot" role="row">
-      <span role="cell"></span>
       <span class="tag" role="cell">Total</span>
       <span class="cell" role="cell">${plural(tasks.length, 'task')}</span>
       <span class="mono" role="cell">${esc(note)}</span>

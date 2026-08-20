@@ -252,6 +252,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
    ao final.
 5. ~~**Fase 5 — a moldura**~~ **— feita em 20/08/2026**, fora do plano acima.
    A tela tinha a paleta do Linear e não a forma. Ver a nota ao final.
+6. ~~**Fase 6 — o orçamento de acento**~~ **— feita em 20/08/2026**, também
+   fora do plano. O acento tinha sete significados. Ver a nota ao final.
 
 Nenhum item exige tocar em `run.js`, `spawn.js`, `state.js` ou `integrate.js`.
 O item 7 é o único que mexe no servidor, e só para elevar `activityLimit`.
@@ -615,7 +617,82 @@ abriu.
 
 ---
 
-## 12. Nota — o custo vira tokens (20/08/2026)
+## 12. Registro — fase 6, o orçamento de acento (20/08/2026)
+
+Numa run terminada, contei **doze discos roxos idênticos** numa dobra: o
+veredito, três estágios, duas lanes, cinco chips de task — e o badge. Todos o
+mesmo `statusIcon('done')`: disco `--accent` preenchido, check branco. Contra
+eles, **um** anel vermelho para a única coisa que precisava de atenção.
+
+A causa não é o desenho do ícone, é o orçamento. O acento significava sete
+coisas ao mesmo tempo: a marca, o estado `done`, a barra concluída da timeline,
+o barrier, a pill `live`, o toggle pressionado e o anel de foco. Sete
+significados é o mesmo que nenhum — a cor parou de apontar para qualquer coisa.
+
+### O defeito que a contagem revelou
+
+`renderSettled` desenhava `statusIcon('done')` **literal** em toda linha da
+tabela. Mas `settled` é `tasks.every(isTerminal)` (`monitor.js:548`), e terminal
+inclui `failed`, `blocked` e `interrupted`. Uma lane que assentou com uma task
+quebrada exibia um check de concluído. A coluna não era só redundante em três
+casos de quatro: no quarto ela mentia. Foi deletada — quem carrega o estado
+passam a ser os chips, que são por task e não têm como mentir.
+
+### O que mudou
+
+- **`done` perde o disco e o acento, e vira o check verde que o feed já
+  desenha.** Um glifo, um significado, duas escalas: o `resultIcon` de uma
+  chamada que voltou e o `statusIcon` de uma task concluída passam a ser a
+  mesma marca a 11 e a 15px.
+- **Chip `done` fica só com o número.** `running`, `failed` e `blocked` mantêm
+  o glifo — então um glifo dentro de um chip volta a significar "este, não os
+  outros". Na tabela de lanes de uma run quebrada, o X de uma task é agora o
+  único ícone da tabela inteira.
+- **A coluna de status da tabela sumiu**, com a track de 15px do `--lane-cols`.
+- **O badge deixou de soletrar o nome que o `h1` diz ao lado.** Virou a seta de
+  proa: a run tem direção e uma posição atual, que é a única coisa sobre a qual
+  esta página fala. O favicon recebeu a mesma marca — um ícone de aba diferente
+  do badge é outro aplicativo na tira de abas.
+
+E o texto: `base main at 9142925` era uma frase com três literais dentro, em
+monospace nu no meio de uma linha sans. Duas famílias discutindo baseline, com
+x-height e largura diferentes e nenhuma fronteira dizendo onde o literal
+começa. `<code>` ganhou preenchimento cinza e raio 4 — o trabalho que o código
+inline do Slack faz, em cinza no lugar do laranja. `.92em` e não um tamanho
+fixo, para o chip escalar com a linha em que cair; e a tinta é `--text`, não
+`--text-2`, porque o literal é a carga e a palavra antes dele é o rótulo.
+`.mono` ficou de fora: aquilo já mora dentro de um botão de copiar, e um chip
+dentro de um botão é caixa dentro de caixa.
+
+### O que **não** mudou, de propósito
+
+As barras concluídas da timeline continuam em `--accent-soft`. Elas não são
+glifo de estado repetido — são um trecho de tempo, e são o corpo do gráfico:
+pintá-las de verde trocaria um excesso por outro, e apagá-las tiraria do
+gráfico a única cor que separa uma task de um vão. O acento agora significa
+quatro coisas — a marca, o barrier, o bloco de timeline e o foco — e nenhuma
+delas se repete doze vezes numa dobra.
+
+Um custo aceito de olhos abertos: **verde passa a ser a cor mais repetida da
+tela**, porque o feed já desenha ~40 checks verdes. A troca foi escolhida
+sabendo disso; o que ela compra é que a barra de estágios de uma run quebrada
+tem exatamente uma cor forte, e ela está na posição que quebrou.
+
+### Verificado
+
+116 testes. Três runs — a 1.11.0 bloqueada, uma fixture de três lanes vivas e a
+1.12.0 inteira concluída, que é o pior caso desta contagem — em 1728/1280/900/
+640/390/320 × claro/escuro: zero saída de console e zero rolagem horizontal do
+documento em todas. Contraste composto nas três runs × três viewports × dois
+temas: o único par abaixo de AA continua sendo o `·` de `--text-faint`, herdado
+e decorativo. As seis colunas da tabela seguem alinhadas ao pixel entre
+cabeçalho, corpo e rodapé nos seis viewports depois de perder uma track do
+subgrid, e o número dentro do chip sem glifo ficou centrado (9px dos dois
+lados).
+
+---
+
+## 13. Nota — o custo vira tokens (20/08/2026)
 
 Fora do plano, a pedido: `$19.67 spent` na topbar e a coluna `COST` da tabela
 passam a contar **output tokens**. `total_cost_usd` é preço de API; quem roda
