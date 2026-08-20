@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>plo — run monitor</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235e6ad2'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='white'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23dbfc03'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='%23141705'/%3E%3C/svg%3E" />
 <style>
   /*
    * Visual language: Linear. Dense rows, quiet chrome, one indigo accent, and
@@ -34,7 +34,14 @@
     --accent: #5e6ad2;
     --accent-ink: #8b95e8;  /* the accent when it has to be small text */
     --accent-soft: rgba(94, 106, 210, .16);
-    --on-accent: #ffffff;
+
+    /* The mark has its own colour and does not theme. It used to borrow
+       --accent, which is how the badge ended up as one more indigo thing in a
+       fold that already had eleven; a brand that shares the interface's accent
+       cannot be told apart from the interface's state. The ink is near-black
+       because the ground is at 0.85 luminance — white on it would be a hole. */
+    --brand: #dbfc03;
+    --on-brand: #141705;
 
     --done: #4cb782;
     --done-soft: rgba(76, 183, 130, .14);
@@ -201,7 +208,7 @@
      current position, which is the only thing this page is about. */
   .badge-app {
     display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 auto;
-    background: var(--accent); border-radius: 6px;
+    background: var(--brand); border-radius: 6px;
   }
   h1 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -820,7 +827,7 @@
 
 <header class="topbar">
   <div class="crumbs">
-    <span class="badge-app" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" focusable="false"><path d="M6 1.15 L10.2 10.85 L6 8.35 L1.8 10.85 Z" fill="var(--on-accent)" /></svg></span>
+    <span class="badge-app" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" focusable="false"><path d="M6 1.15 L10.2 10.85 L6 8.35 L1.8 10.85 Z" fill="var(--on-brand)" /></svg></span>
     <h1 id="plan-title">…</h1>
   </div>
   <div class="grow"></div>

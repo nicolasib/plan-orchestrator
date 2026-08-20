@@ -653,6 +653,13 @@ passam a ser os chips, que são por task e não têm como mentir.
   proa: a run tem direção e uma posição atual, que é a única coisa sobre a qual
   esta página fala. O favicon recebeu a mesma marca — um ícone de aba diferente
   do badge é outro aplicativo na tira de abas.
+- **E a marca saiu do acento.** `--brand: #dbfc03`, com `--on-brand: #141705`
+  porque o chão está a 0.85 de luminância e branco ali seria um buraco (16.4:1
+  com a tinta escura). Era exatamente por emprestar `--accent` que o badge
+  acabou como mais uma coisa índigo numa dobra que já tinha onze: uma marca que
+  divide o acento da interface não tem como ser distinguida do *estado* da
+  interface. O token `--on-accent` morreu junto — o disco de `done` era o outro
+  usuário dele.
 
 E o texto: `base main at 9142925` era uma frase com três literais dentro, em
 monospace nu no meio de uma linha sans. Duas famílias discutindo baseline, com
