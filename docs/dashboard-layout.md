@@ -250,6 +250,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
    13). Ver a nota ao final.
 4. ~~**Fase 4 — a timeline**~~ **— feita em 20/08/2026** (item 6). Ver a nota
    ao final.
+5. ~~**Fase 5 — a moldura**~~ **— feita em 20/08/2026**, fora do plano acima.
+   A tela tinha a paleta do Linear e não a forma. Ver a nota ao final.
 
 Nenhum item exige tocar em `run.js`, `spawn.js`, `state.js` ou `integrate.js`.
 O item 7 é o único que mexe no servidor, e só para elevar `activityLimit`.
@@ -501,7 +503,119 @@ mais baixa do que era com o `Lane plan`.
 
 ---
 
-## 11. Nota — o custo vira tokens (20/08/2026)
+## 11. Registro — fase 5, a moldura (20/08/2026)
+
+Fora do plano das quatro fases, a pedido: a tela tinha a paleta do Linear e não
+tinha a **forma** dele. Três coisas denunciavam isso, e nenhuma era cor.
+
+1. **Não havia janela.** A topbar era full-bleed com um fio embaixo e o conteúdo
+   encostava na borda do viewport. No Linear sempre há fundo aparecendo em
+   volta de um painel arredondado.
+2. **Sopa de cards.** `Timeline`, `Barrier`, `Settled lanes` e o trilho eram
+   quatro caixas com a mesma borda e o mesmo raio, separadas por 20px de vão.
+   Quatro caixas iguais espaçadas é a forma de um relatório gerado; um plano
+   dividido por fio é a forma de um aplicativo.
+3. **Rótulos soltos.** `Timeline` e `Settled lanes` flutuavam 8px acima da
+   caixa que nomeavam — cabeçalho de seção de documento, não de app.
+
+O shell virou:
+
+```
+body                                     fundo --bg, sem rolagem
+└── .frame        fixed inset:10px · raio 12 · border --line · --surface · shadow-lg
+    ├── header.topbar                    linha fixa; o fio embaixo é o único cromo
+    └── .frame-body                      grid: [ scroller 1fr | rail ]
+        ├── .scroller   overflow:auto    ← o único lugar que rola
+        └── aside#panel                  border-left, rola por dentro
+```
+
+Abaixo de 900px a moldura **dissolve**: sem inset, sem raio, o documento volta
+a rolar e a topbar volta a ser sticky. É a mesma fronteira em que o trilho já
+virava drawer modal — uma fronteira, um comportamento, sem breakpoint novo (a
+fase 3 registrou o custo de chutar um).
+
+### O que isso apagou
+
+`aside#panel` saiu de dentro do `.shell` e virou coluna do `.frame`. Com isso
+**três remendos das fases 2 e 4 deixaram de existir**: o `top: calc(var(--top)
++ 10px)`, o `contain: size` e o `max-height: calc(100vh - var(--top) - 30px)`.
+Todos existiam para fazer uma caixa dentro de um documento que rola se
+comportar como coluna de uma janela. Agora ela é uma. O token `--top` sumiu
+junto, porque não sobrou quem o lesse.
+
+### Cinco escolhas que se afastam do que eu tinha proposto
+
+- **O teto de 1840px do `.wrap` não foi mantido — foi removido.** A moldura já
+  é o teto: ela nasce recuada da janela. Um `max-width` dentro dela terminaria
+  todo fio full-bleed no ar, com painel dos dois lados — uma régua que para
+  antes da borda que ela divide.
+- **Os divisores entre cards são sombra, não borda.** O board troca de eixo:
+  três lanes são colunas a 1728 e uma pilha a 900, e `+ .card { border-left }`
+  não desenha nada quando elas empilham. Cada card leva `box-shadow: -1px 0 0,
+  0 -1px 0`; a sombra esquerda de um card que abre uma fileira cai um pixel
+  fora da faixa, onde a moldura recorta. Uma declaração, dois eixos, e nenhum
+  fio espúrio no primeiro card de uma fileira quebrada.
+- **O separador é `border-top`, nunca `border-bottom`.** Quase toda seção desta
+  página fica escondida quase o tempo todo (`[hidden]`, `:empty`). Com a régua
+  em cima, uma seção escondida leva a régua junto e a pilha nunca termina num
+  fio pendurado em painel vazio.
+- **`.subline` entrou dentro de `.summary`.** O veredito e a linha embaixo dele
+  são uma afirmação só sobre a run; separados viravam duas faixas, e o fio
+  entre elas dizia que não tinham relação.
+- **`--bg` no tema claro deixou de ser branco.** Era o mesmo `#ffffff` de
+  `--surface` — inofensivo numa página sem moldura, fatal no instante em que
+  ela ganha uma: o painel flutuaria sobre a própria cor. `#eceef1` é o único
+  token que esta passagem precisou inventar.
+
+### O que apareceu rodando
+
+1. **Cards empilhados sem divisor.** A 900 e a 1280 o board quebra em uma ou
+   duas colunas e `Lane C` cai na segunda fileira; com `border-left` só, o
+   corte entre `Lane B` e `Lane C` simplesmente não existia. Veio da captura,
+   não do diff — no viewport onde eu tinha olhado primeiro cabiam três colunas
+   e o defeito não tinha como aparecer.
+2. **Contraste, e desta vez para melhor.** A auditoria composta rodou também
+   contra o arquivo **antes** da mudança, que é a única forma de saber o que é
+   regressão e o que é herança. O feed dentro do card saiu de `--surface-2`
+   para `--surface` e subiu de 4.42 para 4.63 — `span.at`, `span.arg`,
+   `span.took`, `span.say` e `div.empty` deixaram de falhar sozinhos. Sobrou o
+   mesmo par em três lugares que a fase 3 não varreu: o chip de branch, o
+   rodapé do card e o cabeçalho/total da tabela. Todos subiram um degrau para
+   `--text-2` (5.73:1). No tema claro `--text-2` e `--text-3` são o mesmo
+   valor, então o degrau custou zero lá e comprou a coluna escura inteira.
+3. **O `·` caiu de 3.16 para 3.02 no escuro** porque o chão dele mudou de
+   `--bg` para `--surface`. É `--text-faint`, que o arquivo declara decorativo
+   ("separators, empty glyphs"), e reprovava AA no arquivo original também
+   (3.16 e 2.64). Fica registrado como o único número desta passagem que
+   piorou, e como o motivo de ele não ser um defeito: um ponto médio entre duas
+   frases não carrega informação que o espaço já não carregue.
+
+E dois defeitos que eram do meu instrumento, não da página, registrados porque
+custaram tempo: `getComputedStyle(el, ':focus-visible')` volta vazio — pseudo-
+**classe** não é pseudo-elemento, e a única medida que vale é
+`CSS.forcePseudoState`, como a fase 4 já tinha descoberto. E medir "a moldura
+não se move ao rolar" num viewport onde a run **cabe** não mede nada: o teste
+passava com `scrollRange = 0`.
+
+### Verificado
+
+116 testes. Varredura por CDP contra a run real da 1.11.0 e contra uma fixture
+de três lanes vivas, em 1728/1280/900/640/390/320 × claro/escuro — 24
+combinações com zero saída de console e zero rolagem horizontal do documento.
+A moldura, a topbar e o trilho ficam parados ao pixel ao longo de 562px de
+rolagem do conteúdo, com `documentElement.scrollTop` em 0 e a altura do
+documento igual à da janela. O trilho rola dentro de si e termina dentro da
+moldura. AA nos dois temas em todo texto informativo, medido compondo as
+camadas translúcidas. Anel de foco de 2px presente nos doze controles
+(distribuídos entre as duas runs, porque nem todos existem na mesma). Clique
+numa linha abre a task no trilho, escreve `#task=1` e **não** rouba o foco da
+linha; atravessar os 900px com essa task aberta troca só as semânticas, nas
+duas direções; e no telefone o Esc fecha o drawer e devolve o foco a quem
+abriu.
+
+---
+
+## 12. Nota — o custo vira tokens (20/08/2026)
 
 Fora do plano, a pedido: `$19.67 spent` na topbar e a coluna `COST` da tabela
 passam a contar **output tokens**. `total_cost_usd` é preço de API; quem roda

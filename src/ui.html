@@ -46,6 +46,13 @@
 
     --radius: 10px;
     --radius-sm: 6px;
+    /* The frame: the pane the app lives in, and the ground it floats on.
+       --pad is the one vertical line the whole pane is aligned to — the
+       topbar's badge, a section heading, a table cell and a feed timestamp
+       all start here. */
+    --radius-frame: 12px;
+    --inset: 10px;
+    --pad: 14px;
     --shadow: 0 1px 2px rgba(0, 0, 0, .28);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, .48), 0 2px 8px rgba(0, 0, 0, .32);
     --scrim: rgba(4, 5, 6, .5);
@@ -56,7 +63,11 @@
 
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #ffffff;
+      /* --bg and --surface used to be the same white, which was harmless
+         while the page had no frame and fatal the moment it got one: the
+         pane would have floated on its own colour. --bg is now the desk the
+         pane sits on, and it is the only token this pass had to invent. */
+      --bg: #eceef1;
       --surface: #ffffff;
       --surface-2: #fafbfc;
       --line: #e5e6e8;
@@ -103,44 +114,73 @@
   ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
-  /* Fluid to a real desk monitor. Nothing here is a column of prose: what
-     grows is the board and the tables, which is where the reading happens. */
-  .wrap { max-width: 1840px; margin: 0 auto; padding: 0 20px 72px; }
+  .wrap { padding-bottom: 56px; }
   .grow { flex: 1 1 auto; min-width: 0; }
   [hidden] { display: none !important; }
 
-  /* The panel is a column of the page on a desk and a modal drawer on a
+  /* The panel is a column of the frame on a desk and a modal drawer on a
      phone. Only its width changes between the two desk sizes. */
-  :root { --rail: 320px; --top: 49px; }
+  :root { --rail: 320px; }
   @media (min-width: 1280px) { :root { --rail: 380px } }
   @media (min-width: 1680px) { :root { --rail: 440px } }
 
-  .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 16px; }
-  /* The column spaces itself, and nothing in it carries a top margin.
-     With the spacing on the blocks, the first one pushed itself down and the
-     rail beside it did not — the two columns started on different lines, by
-     16px with an alert on screen and by 26px without one, because the offset
-     was whichever block happened to be first. A gap belongs to the container:
-     it cannot appear above the first child. */
-  .shell > main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-  .shell > main { min-width: 0; }
+  /* ------------------------------------------------------------- frame */
+  /* On a phone there is no frame: the pane fills the window, the document
+     scrolls, and the topbar sticks to the top of it — the behaviour every
+     earlier pass verified at 640, 390 and 320. */
+  .frame {
+    display: flex; flex-direction: column; min-height: 100vh;
+    background: var(--surface);
+  }
+  .frame-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+  .scroller { min-width: 0; }
+
   @media (min-width: 900px) {
-    .shell { grid-template-columns: minmax(0, 1fr) var(--rail); align-items: start; }
-    /* The page's bottom padding moves inside the column. Left on the wrapper
-       it sits below the grid row, and a sticky rail stops following 72px
-       before the page does — sliding under the topbar at full scroll. */
-    .wrap { padding-bottom: 0; }
-    .shell > main { padding-bottom: 72px; }
+    /* The frame is pinned to the window and nothing moves it. The scroll
+       lives one level in, so the border, the radius and the ground around
+       them are still there at the bottom of a 60-event feed — which is the
+       whole point of a frame and the one thing a bordered `.wrap` cannot do.
+       `overflow: hidden` is what makes the corners actually cut. */
+    html, body { height: 100%; overflow: hidden; }
+    .frame {
+      position: fixed; inset: var(--inset); min-height: 0;
+      border: 1px solid var(--line); border-radius: var(--radius-frame);
+      box-shadow: var(--shadow-lg); overflow: hidden;
+    }
+    /* `minmax(0, 1fr)` and not `auto`: an auto row takes its base size from
+       its content, so a sixty-event feed would make the row taller than the
+       frame, the frame would clip it, and the rail's own scrollbar would
+       never engage. The row is the window's height, and what is inside it
+       scrolls. */
+    .frame-body { display: grid; grid-template-columns: minmax(0, 1fr) var(--rail); grid-template-rows: minmax(0, 1fr); }
+    .scroller { overflow: auto; overscroll-behavior: contain; }
   }
 
+  /* No cap. The frame is the cap: it is already inset from the window, and a
+     max-width inside it would end every full-bleed hairline in mid-air with
+     pane on both sides — a rule that stops before the edge it divides. */
+  main { display: flex; flex-direction: column; min-width: 0; }
+
+  /* Bands, not cards. Four boxes with the same border and the same radius,
+     spaced 20px apart, is the shape of a generated report; one plane divided
+     by a rule is the shape of an application. The separator is a `border-top`
+     and never a `border-bottom` so that a hidden section — most of them are,
+     most of the time — takes its rule with it, and the stack never ends on a
+     line hanging in empty pane. */
+  .stages, main > * { border-top: 1px solid var(--line); }
+
   /* ------------------------------------------------------------- topbar */
+  /* Sticky is the phone's answer, where the document scrolls under it. In the
+     frame the topbar is simply the first row and cannot move at all — the
+     scroll is one level below it. */
   .topbar {
-    position: sticky; top: 0; z-index: 3;
+    position: sticky; top: 0; z-index: 3; flex: 0 0 auto;
     display: flex; align-items: center; gap: 12px;
-    min-height: 48px; padding: 6px 20px;
-    background: var(--bg);
+    min-height: 48px; padding: 6px var(--pad);
+    background: var(--surface);
     border-bottom: 1px solid var(--line);
   }
+  @media (min-width: 900px) { .topbar { position: static; } }
   .crumbs { display: flex; align-items: center; gap: 9px; min-width: 0; }
   .badge-app {
     display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 auto;
@@ -168,7 +208,7 @@
   @media (prefers-reduced-motion: reduce) { .live.on .pip { animation: none } }
 
   /* ------------------------------------------------------------ progress */
-  .summary { display: grid; gap: 11px; padding: 18px 0 10px; }
+  .summary { display: grid; gap: 7px; padding: 16px var(--pad) 14px; }
   /* This page lives on a second monitor. One line has to carry the state of
      the run at a glance, from across the room, before any of the detail. */
   .verdict {
@@ -180,7 +220,11 @@
   .verdict .soft { color: var(--text-2); font-weight: 500; }
   .verdict .bad { color: var(--fail); }
   .verdict .sep { color: var(--text-faint); font-weight: 400; }
-  .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
+  /* The verdict and the line under it are one statement about the run, so
+     they are one band. Apart they were two, and the rule between them said
+     they were unrelated. */
+  .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); }
+  .subline:empty { display: none; }
   .subline .sep { color: var(--text-faint); }
 
   /* --------------------------------------------------------- stage bar */
@@ -193,14 +237,17 @@
     /* Fill the width when there is room, never truncate a label when there is
        not — then the strip scrolls inside its own border instead. */
     display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr);
-    margin: 2px 0 0; padding: 0; list-style: none; overflow-x: auto;
-    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    margin: 0; padding: 0; list-style: none; overflow-x: auto;
+    background: var(--surface);
   }
   /* Positioned so the screen-reader span below stays inside the strip: an
      absolutely positioned child with no positioned ancestor is not clipped by
      the scroller, and at 320px it sat 58px past the right edge of the page —
      dragging the whole document into a horizontal scroll with it. */
-  .stage { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 14px; }
+  .stage { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 14px; }
+  /* The first cell starts on the pane's gutter like every heading below it;
+     the strip no longer has a border of its own to hold it off the edge. */
+  .stage:first-child { padding-left: var(--pad); }
   .stage + .stage { border-left: 1px solid var(--line-soft); }
   .stage svg { flex: 0 0 auto; }
   .stage .st-label { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
@@ -226,13 +273,14 @@
   }
 
   /* -------------------------------------------------------------- alerts */
-  .alerts { display: grid; gap: 8px; }
+  .alerts { display: grid; gap: 0; }
   .alerts:empty { display: none; }
   .alert {
     display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
-    padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
-    background: var(--surface); font-size: 12.5px; color: var(--text);
+    padding: 11px var(--pad);
+    background: var(--surface-2); font-size: 12.5px; color: var(--text);
   }
+  .alert + .alert { border-top: 1px solid var(--line-soft); }
   /* A flex item's default `min-width: auto` is its longest word, and an agent
      error carries words like `error_during_execution`. That set the banner's
      minimum width and pushed the whole document 58px past a 320px screen —
@@ -240,7 +288,10 @@
      buttons drop to their own line before the text is squeezed to nothing. */
   .alert > div:not(.acts) { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
   .alert svg { flex: 0 0 auto; margin-top: 2px; }
-  .alert.bad { border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
+  /* Without a border the tint is the whole signal, so it carries a rule of
+     its own colour on the reading edge — the shape a callout keeps when the
+     box around it goes away. */
+  .alert.bad { background: var(--fail-soft); box-shadow: inset 2px 0 0 var(--fail); }
   .alert b { font-weight: 600; }
   /* Real buttons, not a clickable div: a banner that carries a copy button
      cannot also be a button itself — nesting one inside the other is the kind
@@ -254,11 +305,27 @@
        thing alive on the page, and it should own the width instead of
        floating in half a screen of nothing. A wide card is a wide feed. */
     display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
-    gap: 12px; align-items: start;
+    gap: 0; align-items: stretch;
   }
   .board:empty { display: none; }
-  .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); }
+  /* Lanes running side by side are columns of one board, divided the way a
+     board divides columns. `align-items: stretch` is load-bearing: on `start`
+     the shorter lane's rule stopped where its feed did, and two cards of
+     different heights read as one card and one orphan.
+
+     The rules are shadows, not borders, because the board changes axis: three
+     lanes are columns at 1728 and a stack at 900, and `+ .card { border-left }`
+     draws nothing when they stack. Every card carries a rule above it and one
+     to its left; the left one on a card that begins a row lands one pixel
+     outside the band, where the frame clips it. One declaration, both axes,
+     and no spurious rule on the first card of a wrapped row. */
+  .card {
+    min-width: 0; background: var(--surface); overflow: hidden;
+    box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line);
+  }
+  /* The row of shadows above the first row of cards is the band's own rule. */
+  .board { border-top: 0; }
+  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px var(--pad); border-bottom: 1px solid var(--line-soft); }
   .card .kind { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
   .card .kind.barrier { color: var(--accent-ink); }
   .card .branch {
@@ -273,7 +340,7 @@
   button.branch svg { flex: 0 0 auto; opacity: .7; }
   button.branch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px var(--pad) 2px; }
   .chip {
     all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
     min-height: 24px; padding: 2px 8px 2px 6px; border-radius: var(--radius-sm);
@@ -285,7 +352,7 @@
   .chip.running { color: var(--text); border-color: color-mix(in srgb, var(--run) 42%, var(--line)); background: var(--run-soft); }
   .chip.failed, .chip.blocked { color: var(--text); border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); background: var(--fail-soft); }
 
-  .now { padding: 10px 14px 12px; display: grid; gap: 6px; min-width: 0; }
+  .now { padding: 10px var(--pad) 12px; display: grid; gap: 6px; min-width: 0; }
   .now .title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; }
   .now .title .tno { color: var(--text-2); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
   .now .title .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -303,15 +370,18 @@
        320px gave `error_during_execution` 132px and left the target — the
        column with the answer in it — fifteen. */
     --feed-cols: 50px 12px fit-content(88px) minmax(0, 1fr) 36px;
-    --feed-pad: 10px;
+    --feed-pad: var(--pad);
     /* The feed is one grid and the rows borrow its tracks. Rows that each own
        their grid do not make columns: `auto` only ever agrees with itself, so
        `Read` and `TodoWrite` pushed the target column 20px apart per line —
        the same defect the lane table had before subgrid. */
     display: grid; grid-template-columns: var(--feed-cols); align-content: start;
     column-gap: 7px; padding: 0 var(--feed-pad);
-    margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 8px;
-    background: var(--surface-2); max-height: 208px; overflow: auto;
+    /* Full bleed inside a card that no longer has a border: a rounded, tinted
+       box in there was the only box left, so it read as a card inside a card
+       — the nesting the pane was built to remove. */
+    margin: 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0;
+    background: transparent; max-height: 208px; overflow: auto;
   }
   .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(88px) minmax(0, 1fr) 36px; --feed-pad: var(--rail-pad, 12px); }
   .feed .ln {
@@ -376,15 +446,20 @@
   .feed.wrap .at, .feed.wrap .who, .feed.wrap .ico, .feed.wrap .took { padding-top: 1px; }
 
   .card > .foot {
-    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px 14px;
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px var(--pad);
     border-top: 1px solid var(--line-soft); background: var(--surface-2);
     font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
   }
 
   /* ------------------------------------------------------------ sections */
   section { min-width: 0; }
-  h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
-  .list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
+  /* The label belongs to the band, not to the air above it. Floating over a
+     card with 8px of page showing between them is a document's section
+     heading; sitting on the band's own ground, on the band's own gutter, is
+     an application's. */
+  main > section > h2 { padding: 13px var(--pad) 9px; }
+  .list { background: transparent; overflow: hidden; }
   /* Columns, not two clumps pinned to the far edges. Comparing $7.87 against
      $4.44 used to mean sweeping 750px of empty row; in a column it is one
      glance down. --num keeps the three numeric tracks the same width. */
@@ -393,7 +468,7 @@
     --lane-cols: 15px minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
   }
   .row {
-    display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px 14px;
+    display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px var(--pad);
     border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
     transition: background .12s ease;
   }
@@ -446,15 +521,15 @@
      borrowing its tracks via subgrid — and the row still draws its own box,
      which `display: contents` would have thrown away along with the hover. */
   .list.table { overflow: auto; }
-  .list.table .grid { display: grid; grid-template-columns: var(--lane-cols); column-gap: 12px; padding: 0 14px; min-width: 600px; }
+  .list.table .grid { display: grid; grid-template-columns: var(--lane-cols); column-gap: 12px; padding: 0 var(--pad); min-width: 600px; }
   @supports (grid-template-columns: subgrid) {
     /* The row keeps its own padding so its background and rule still reach the
        card edges — but a subgrid's padding eats the tracks it inherits (a 15px
        icon column became 1px). The negative margin gives the padding back. */
-    .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: -14px; }
+    .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: calc(-1 * var(--pad)); }
   }
 
-  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px var(--pad); border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
   .kv-row:last-child { border-bottom: 0; }
   .kv-row .k { color: var(--text-2); width: 150px; flex: 0 0 auto; }
   .kv-row .v { overflow-wrap: anywhere; min-width: 0; }
@@ -479,8 +554,8 @@
   .tl {
     --tl-cols: max-content minmax(0, 1fr) max-content;
     display: grid; grid-template-columns: var(--tl-cols); align-content: start;
-    column-gap: 10px; padding: 8px 12px 10px;
-    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    column-gap: 10px; padding: 2px var(--pad) 14px;
+    background: transparent;
   }
   /* Same reason the lane table and the feed use it: an `auto` track only ever
      agrees with itself, so per-row grids would put every lane letter in a
@@ -583,19 +658,17 @@
      read past must not trap Tab, and `aria-modal` on it would tell a screen
      reader the rest of the page is unavailable when it plainly is not.
      `applyPanel()` sets and clears those attributes per mode. */
+  /* In the frame the rail is a grid column and nothing more. The sticky
+     offset, the `contain: size` and the viewport `max-height` the last pass
+     needed are all gone with it: they existed to make a box inside a
+     scrolling document behave like a column of a window, and now it is one.
+     What remains is the rule that divides it from the board. */
   @media (min-width: 900px) {
     .scrim { display: none; }
     aside {
-      position: sticky; top: calc(var(--top) + 10px); right: auto; z-index: 1;
-      width: auto; transform: none; visibility: visible; transition: none;
-      border: 1px solid var(--line); border-radius: var(--radius);
-      /* The rail takes the column's height rather than setting it. A fixed
-         `height: 100vh` here would make the document taller than the window
-         on every page short enough to fit — dead scroll past a rail that had
-         already stopped, which is the exact cost the last pass removed.
-         `contain: size` keeps the sixty rows inside from voting on it. */
-      align-self: stretch; contain: size;
-      max-height: calc(100vh - var(--top) - 30px); min-height: 340px;
+      position: static; right: auto; z-index: auto;
+      width: auto; min-height: 0; transform: none; visibility: visible; transition: none;
+      border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
     }
   }
   /* One gutter for the whole rail. The head sat at 16px over a feed whose
@@ -697,6 +770,14 @@
   ul.steps li { margin: 3px 0; }
   ul.steps li.on { color: var(--text); }
 
+  /* --text-3 is calibrated against --surface, where it reads 4.63:1, and it
+     lands at 4.42 on --surface-2 — the tinted grounds: the branch chip, a
+     card's foot, a table's head and its total row. Phase 3 found this exact
+     pair and fixed the two places it had then; these are the rest of them.
+     In the light theme --text-2 and --text-3 are the same value, so stepping
+     up costs nothing there and buys the whole dark column. */
+  .card .branch, .card > .foot, .row.head .num, .row.foot .num { color: var(--text-2); }
+
   /* ------------------------------------------------------------- focus */
   /* Last on purpose, and it has to stay last.
      Every control on this page that resets itself with `all: unset` — the
@@ -711,6 +792,12 @@
 </style>
 </head>
 <body>
+
+<!-- One frame, and everything the page has is inside it. The window chrome
+     is the topbar and the frame's own edge; the only thing that scrolls is
+     `.scroller`, so the border never leaves the screen. Below 900px the
+     frame dissolves back into the document — see the CSS. -->
+<div class="frame">
 
 <header class="topbar">
   <div class="crumbs">
@@ -727,37 +814,44 @@
   </div>
 </header>
 
-<div class="wrap">
-  <div class="summary">
-    <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+<div class="frame-body">
+  <div class="scroller">
+  <div class="wrap">
+    <div class="summary">
+      <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+      <div class="subline" id="plan-sub"></div>
+    </div>
+
+    <ol class="stages" id="stages" aria-label="Run pipeline" hidden></ol>
+
+    <main>
+      <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
+
+      <section id="timeline-section" hidden>
+        <h2>Timeline</h2>
+        <div class="tl" id="timeline" aria-label="Run timeline"></div>
+      </section>
+
+      <div class="board" id="board"></div>
+
+      <section id="settled-section" hidden>
+        <h2>Settled lanes</h2>
+        <div class="list table" id="settled" role="table" aria-label="Settled lanes"></div>
+      </section>
+
+      <section id="barriers-section" hidden>
+        <h2>Barriers</h2>
+        <div class="list" id="barriers"></div>
+      </section>
+
+    </main>
   </div>
-  <div class="subline" id="plan-sub"></div>
+  </div>
 
-  <ol class="stages" id="stages" aria-label="Run pipeline" hidden></ol>
-
-  <div class="shell">
-  <main>
-    <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
-
-    <section id="timeline-section" hidden>
-      <h2>Timeline</h2>
-      <div class="tl" id="timeline" aria-label="Run timeline"></div>
-    </section>
-
-    <div class="board" id="board"></div>
-
-    <section id="settled-section" hidden>
-      <h2>Settled lanes</h2>
-      <div class="list table" id="settled" role="table" aria-label="Settled lanes"></div>
-    </section>
-
-    <section id="barriers-section" hidden>
-      <h2>Barriers</h2>
-      <div class="list" id="barriers"></div>
-    </section>
-
-  </main>
-
+  <!-- The rail is a column of the frame, not of the scrolling document: it
+       reaches the top and the bottom of the window because it *is* the
+       window's height, which is what let the sticky offset, the `contain`
+       and the viewport `max-height` go away. -->
   <aside id="panel" aria-labelledby="d-title">
     <div class="head">
       <button class="close" id="p-back" hidden>&larr; Activity</button>
@@ -779,7 +873,8 @@
     <div class="feed run" id="p-feed"></div>
     <div class="body" id="d-body" hidden></div>
   </aside>
-  </div>
+</div>
+
 </div>
 
 <div class="scrim" id="scrim"></div>
