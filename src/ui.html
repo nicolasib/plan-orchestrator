@@ -14,12 +14,19 @@
     --line: #232a38;
     --ink: #dfe4ec;
     --dim: #8b93a5;
-    --faint: #5d657a;
+    --faint: #7d869c;      /* 4.67:1 on the darkest panel — AA for body text */
     --done: #4ade80;
     --run: #58b6ff;
     --fail: #ff6b6b;
     --warn: #f6c453;
-    --pend: #454d61;
+    --pend: #454d61;       /* fill only: 2.14:1 is too low for a glyph */
+    --feed-bg: var(--feed-bg);
+    --feed-line: var(--feed-line);
+    --scrim: var(--scrim);
+    --on-done: #07230f;
+    --on-run: #041726;
+    --on-fail: #2a0808;
+    --on-warn: #251a00;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
@@ -36,7 +43,7 @@
   h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
   .sub { color: var(--dim); font-size: 12px; }
   .spacer { flex: 1 1 auto; }
-  .metrics { display: flex; gap: 18px; align-items: baseline; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; }
   .metric b { font-weight: 600; font-variant-numeric: tabular-nums; }
   .metric span { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-left: 6px; }
 
@@ -60,23 +67,29 @@
   .alert.bad { border-left-color: var(--fail); }
 
   /* ---------------------------------------------------------- lanes */
-  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 18px; align-items: start; }
+  /* Cards cap their width: when integration leaves a single barrier running,
+     one card should read like a card, not stretch across the whole window. */
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 480px)); justify-content: start; gap: 14px; margin-top: 18px; align-items: start; }
+  .lanes:empty { display: none; }
   .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .lane > .head { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   .lane .name { font-weight: 600; letter-spacing: .1em; font-size: 11px; text-transform: uppercase; }
+  .lane .name.barrier { color: var(--warn); }
   .lane .branch { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .dots { display: flex; flex-wrap: wrap; gap: 5px; padding: 10px 12px 2px; }
+  .dots.inline { padding: 0; gap: 4px; }
+  .dots.inline button { width: 24px; height: 24px; }
   .dots button {
-    all: unset; cursor: pointer; width: 22px; height: 22px; border-radius: 4px;
+    all: unset; cursor: pointer; width: 26px; height: 26px; border-radius: 4px;
     display: grid; place-items: center; font-size: 10px; color: var(--dim);
     background: var(--panel-2); border: 1px solid var(--line); font-variant-numeric: tabular-nums;
   }
-  .dots button:focus-visible { outline: 2px solid var(--run); outline-offset: 1px; }
-  .dots button.done { color: #07230f; background: var(--done); border-color: var(--done); }
-  .dots button.running { color: #041726; background: var(--run); border-color: var(--run); }
-  .dots button.failed, .dots button.blocked { color: #2a0808; background: var(--fail); border-color: var(--fail); }
-  .dots button.interrupted { color: #251a00; background: var(--warn); border-color: var(--warn); }
+  :focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-radius: 3px; }
+  .dots button.done { color: var(--on-done); background: var(--done); border-color: var(--done); }
+  .dots button.running { color: var(--on-run); background: var(--run); border-color: var(--run); }
+  .dots button.failed, .dots button.blocked { color: var(--on-fail); background: var(--fail); border-color: var(--fail); }
+  .dots button.interrupted { color: var(--on-warn); background: var(--warn); border-color: var(--warn); }
 
   .current { padding: 8px 12px 10px; }
   .current .tno { color: var(--run); }
@@ -88,8 +101,8 @@
   .current .meta { color: var(--faint); font-size: 11px; margin-top: 3px; display: flex; gap: 12px; flex-wrap: wrap; }
   .current .timer { font-variant-numeric: tabular-nums; }
 
-  .feed { margin: 0 12px 12px; background: #0d1119; border: 1px solid var(--line); border-radius: 4px; max-height: 182px; overflow: auto; }
-  .feed div { display: flex; gap: 8px; align-items: center; height: 26px; padding: 0 8px; border-bottom: 1px solid #161b26; white-space: nowrap; }
+  .feed { margin: 0 12px 12px; background: var(--feed-bg); border: 1px solid var(--line); border-radius: 4px; max-height: 182px; overflow: auto; }
+  .feed div { display: flex; gap: 8px; align-items: center; height: 26px; padding: 0 8px; border-bottom: 1px solid var(--feed-line); white-space: nowrap; }
   .feed div:last-child { border-bottom: 0; }
   .feed .tool { color: var(--ink); flex: 0 0 auto; }
   .feed .arg { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
@@ -98,7 +111,7 @@
   .feed .mark.err { color: var(--fail); }
   .feed .sub { color: var(--faint); }
   .feed .txt { color: var(--faint); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
-  .feed .empty { color: var(--faint); }
+  .feed .empty { color: var(--dim); }
 
   .lane > .foot { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; background: var(--panel-2); }
 
@@ -114,29 +127,33 @@
   .row .aux { color: var(--faint); font-size: 11px; }
   .mark.done { color: var(--done); } .mark.running { color: var(--run); }
   .mark.failed, .mark.blocked { color: var(--fail); } .mark.interrupted { color: var(--warn); }
-  .mark.pending { color: var(--pend); }
+  .mark.pending { color: var(--faint); }
   .dagline { color: var(--dim); }
   .dagline b { color: var(--faint); font-weight: 400; }
 
   /* ---------------------------------------------------------- drawer */
-  .scrim { position: fixed; inset: 0; background: #05070ab8; opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .15s; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   aside {
     position: fixed; top: 0; right: 0; height: 100%; width: min(620px, 94vw);
     background: var(--panel); border-left: 1px solid var(--line);
-    transform: translateX(100%); transition: transform .18s ease-out;
+    transform: translateX(100%); transition: transform .18s ease-out, visibility 0s .18s;
     display: flex; flex-direction: column; z-index: 2;
+    /* Hidden, not merely off-screen: a translated panel still counts toward
+       the document's scroll width on a narrow viewport. */
+    visibility: hidden;
   }
-  aside.open { transform: none; }
+  aside.open { transform: none; visibility: visible; transition: transform .18s ease-out; }
   @media (prefers-reduced-motion: reduce) { aside, .scrim { transition: none } }
   aside .head { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  aside .head h2 { margin: 0; font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--ink); font-weight: 600; }
   aside .body { overflow: auto; padding: 14px 16px 40px; }
   aside h3 { margin: 18px 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
   aside h3:first-child { margin-top: 0; }
   aside pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: var(--dim); }
   aside code { color: var(--dim); }
   aside .close { all: unset; cursor: pointer; color: var(--dim); padding: 2px 8px; border-radius: 4px; }
-  aside .close:hover, aside .close:focus-visible { background: var(--panel-2); color: var(--ink); outline: none; }
+  aside .close:hover, aside .close:focus-visible { background: var(--panel-2); color: var(--ink); }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
   .kv dt { color: var(--faint); }
   .kv dd { margin: 0; overflow-wrap: anywhere; }
@@ -160,11 +177,18 @@
   </div>
 </header>
 
-<div class="bar" id="bar"></div>
-<div class="sub" id="counts"></div>
-<div class="alerts" id="alerts"></div>
+<main>
+<!-- The bar is decoration; #counts states the same thing in words. -->
+<div class="bar" id="bar" aria-hidden="true"></div>
+<div class="sub" id="counts" role="status" aria-live="polite"></div>
+<div class="alerts" id="alerts" role="status" aria-live="polite"></div>
 
-<div class="lanes" id="lanes"></div>
+<div class="lanes" id="board"></div>
+
+<section id="settled-section" hidden>
+  <h2>Settled lanes</h2>
+  <div class="rows" id="settled"></div>
+</section>
 
 <section id="barriers-section" hidden>
   <h2>Barriers — after every lane, in order</h2>
@@ -181,10 +205,12 @@
   <div class="rows" id="dag"></div>
 </section>
 
+</main>
+
 <div class="scrim" id="scrim"></div>
-<aside id="drawer" aria-hidden="true" aria-label="Task detail">
+<aside id="drawer" role="dialog" aria-modal="true" aria-hidden="true" inert aria-labelledby="d-title">
   <div class="head">
-    <strong id="d-title">Task</strong>
+    <h2 id="d-title">Task</h2>
     <div class="spacer"></div>
     <button class="close" id="d-close" aria-label="Close">esc ✕</button>
   </div>
@@ -214,9 +240,23 @@ function dur(ms) {
 const since = (iso) => (iso ? dur(Date.now() + skew - Date.parse(iso)) : '–');
 /** A settled task gets the time it took, not a clock that keeps running. */
 const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date.parse(t.startedAt)) : t.startedAt ? since(t.startedAt) : '–');
-const money = (v) => (typeof v === 'number' && v > 0 ? `$${v.toFixed(2)}` : '$0.00');
+// Cost lands only when a process exits, so zero means "not reported yet",
+// not "this was free". Saying $0.00 there is a lie the reader acts on.
+const money = (v) => (typeof v === 'number' && v > 0 ? `$${v.toFixed(2)}` : '—');
+/**
+ * Rewriting innerHTML that did not change is not just wasted work: it destroys
+ * whatever the reader had focused inside it. With a snapshot arriving every
+ * second, tabbing to a task row was a race the reader could not win.
+ */
+function paint(el, html) {
+  if (el.dataset.sig === html) return false;
+  el.dataset.sig = html;
+  el.innerHTML = html;
+  return true;
+}
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const short = (sha) => String(sha || '').slice(0, 7);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ------------------------------------------------------------ rendering
 
@@ -226,11 +266,11 @@ function render(s) {
 
   if (!s.ready) {
     $('plan-sub').textContent = s.plan || '';
-    $('lanes').innerHTML = `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`;
+    $('board').innerHTML = `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`;
     $('bar').innerHTML = '';
     $('counts').textContent = '';
     $('alerts').innerHTML = '';
-    for (const id of ['barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
+    for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
     return;
   }
 
@@ -242,14 +282,17 @@ function render(s) {
   ].filter(Boolean).join(' &nbsp;·&nbsp; ');
 
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
+  // This page is made to sit in a background tab; the tab strip should report.
+  const stuckCount = s.totals.failed + s.totals.blocked;
+  document.title = `${stuckCount ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
   $('m-cost').textContent = money(s.totals.costUsd);
 
-  $('bar').innerHTML = all.map((t) => `<i class="${t.status}" title="T${t.n} ${esc(t.status)}"></i>`).join('');
+  paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
   $('counts').textContent = ['running', 'failed', 'blocked', 'interrupted', 'pending']
     .filter((k) => s.totals[k]).map((k) => `${s.totals[k]} ${k}`).join('  ·  ') || 'all tasks settled';
 
   renderAlerts(s);
-  renderLanes(s);
+  renderBoard(s);
   renderBarriers(s);
   renderIntegration(s);
   renderDag(s);
@@ -269,31 +312,46 @@ function renderAlerts(s) {
   for (const t of stuck) {
     out.push(`<div class="alert bad">T${t.n} <b>${esc(t.status)}</b> — ${esc(t.error || 'no error recorded')}</div>`);
   }
-  $('alerts').innerHTML = out.join('');
+  paint($('alerts'), out.join(''));
 }
 
-function laneHtml(lane) {
-  const current = lane.tasks.find((t) => t.status === 'running')
-    || lane.tasks.find((t) => t.status === 'failed' || t.status === 'blocked' || t.status === 'interrupted')
-    || lane.tasks.find((t) => t.status === 'pending');
+/** The first thing in a task list that still wants attention. */
+function currentOf(tasks) {
+  return tasks.find((t) => t.status === 'running')
+    || tasks.find((t) => t.status === 'failed' || t.status === 'blocked' || t.status === 'interrupted')
+    || tasks.find((t) => t.status === 'pending');
+}
+
+const sumTurns = (tasks) => tasks.reduce((n, t) => n + (t.turns || 0), 0);
+const sumCommits = (tasks) => tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0);
+const sumCost = (tasks) => tasks.reduce((n, t) => n + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+
+function dotsHtml(tasks, extraClass = '') {
+  return `<div class="dots ${extraClass}">${tasks.map((t) => {
+    const name = `Task ${t.n}, ${esc(t.title)}, ${esc(t.status)}`;
+    return `<button class="${t.status}" data-task="${t.n}" aria-haspopup="dialog" aria-label="${name}" title="${name}">${t.n}</button>`;
+  }).join('')}</div>`;
+}
+
+/**
+ * One card, whether it holds a lane or the barrier that runs after them all.
+ * A barrier gets the same treatment because during integration it is the only
+ * thing running, and a thin row under three "lane complete" cards is not a
+ * report on it.
+ */
+function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
   const live = current && current.status === 'running';
-
-  const dots = lane.tasks.map((t) => `<button class="${t.status}" data-task="${t.n}" title="T${t.n} — ${esc(t.title)} (${esc(t.status)})">${t.n}</button>`).join('');
-
   const feed = live && current.activity.length
     ? current.activity.slice().reverse().map(activityHtml).join('')
-    : `<div class="empty">${current ? esc(feedPlaceholder(current)) : 'lane complete'}</div>`;
-
-  const commits = lane.tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0);
-  const turns = lane.tasks.reduce((n, t) => n + (t.turns || 0), 0);
-  const cost = lane.tasks.reduce((n, t) => n + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+    : `<div class="empty">${current ? esc(feedPlaceholder(current)) : 'every task settled'}</div>`;
+  const commits = sumCommits(tasks);
 
   return `
     <div class="head">
-      <span class="name">Lane ${esc(lane.label)}</span>
-      <span class="branch" title="${esc(lane.worktree || '')}">${esc(lane.branch || 'no branch yet')}</span>
+      <span class="name ${kind}">${esc(label)}</span>
+      <span class="branch" title="${esc(subTitle || '')}">${esc(sub || '')}</span>
     </div>
-    <div class="dots">${dots}</div>
+    ${dotsHtml(tasks)}
     <div class="current ${live ? '' : 'idle'}">
       ${current
         ? `<div><span class="tno ${esc(current.status)}">${MARK[current.status] || '·'} T${current.n}</span> <span class="title">${esc(current.title)}</span></div>
@@ -308,7 +366,7 @@ function laneHtml(lane) {
         : '<div class="title">every task settled</div>'}
     </div>
     <div class="feed">${feed}</div>
-    <div class="foot"><span>${turns} turns</span><span>${commits} commit${commits === 1 ? '' : 's'}</span><span>${money(cost)}</span></div>`;
+    <div class="foot"><span>${sumTurns(tasks)} turns</span><span>${plural(commits, 'commit')}</span><span>${money(sumCost(tasks))}</span></div>`;
 }
 
 function feedPlaceholder(t) {
@@ -326,38 +384,72 @@ function activityHtml(a) {
   return `<div><span class="mark ${mark}">${glyph}</span><span class="tool${a.sub ? ' sub' : ''}">${a.sub ? '└ ' : ''}${esc(a.name)}</span><span class="arg">${esc(a.target || '')}</span></div>`;
 }
 
-function renderLanes(s) {
-  const host = $('lanes');
-  const wanted = s.lanes.map((l) => l.id);
+/**
+ * Cards go to whatever is still working; everything finished collapses into a
+ * one-line strip. Before this, integration showed three "lane complete" cards
+ * and hid the running barrier in a thin row underneath.
+ */
+function renderBoard(s) {
+  const cards = s.lanes.filter((l) => !l.settled).map((lane) => ({
+    key: `lane:${lane.id}`,
+    sig: JSON.stringify(lane),
+    html: cardHtml({
+      kind: 'lane', label: `Lane ${lane.label}`, sub: lane.branch || 'no branch yet',
+      subTitle: lane.worktree, tasks: lane.tasks, current: currentOf(lane.tasks),
+    }),
+  }));
 
-  // Rebuild a lane only when its own payload changed: an untouched lane keeps
-  // its feed scroll position, which is the whole point of watching one.
-  for (const lane of s.lanes) {
-    const sig = JSON.stringify(lane);
-    let el = host.querySelector(`[data-lane="${CSS.escape(lane.id)}"]`);
+  if (s.activeBarrier != null) {
+    const current = s.barriers.find((t) => t.n === s.activeBarrier);
+    cards.push({
+      key: 'barrier',
+      sig: JSON.stringify(s.barriers),
+      html: cardHtml({
+        kind: 'barrier', label: 'Barrier', sub: 'runs in the merged tree',
+        tasks: s.barriers, current,
+      }),
+    });
+  }
+
+  const host = $('board');
+  for (const card of cards) {
+    let el = host.querySelector(`[data-card="${CSS.escape(card.key)}"]`);
     if (!el) {
       el = document.createElement('div');
       el.className = 'lane';
-      el.dataset.lane = lane.id;
+      el.dataset.card = card.key;
       host.appendChild(el);
     }
-    if (el.dataset.sig !== sig) {
-      el.dataset.sig = sig;
-      el.innerHTML = laneHtml(lane);
+    // Rebuild only what changed: an untouched card keeps its feed scrolled
+    // where the reader left it.
+    if (el.dataset.sig !== card.sig) {
+      el.dataset.sig = card.sig;
+      el.innerHTML = card.html;
     }
+    // (the signature is the lane payload, not the html: identical rendering
+    //  from different data would otherwise skip a legitimate update)
   }
-  for (const el of [...host.children]) {
-    if (!wanted.includes(el.dataset.lane)) el.remove();
-  }
+  const wanted = cards.map((c) => c.key);
+  for (const el of [...host.children]) if (!wanted.includes(el.dataset.card)) el.remove();
+
+  const settled = s.lanes.filter((l) => l.settled);
+  $('settled-section').hidden = !settled.length;
+  paint($('settled'), settled.map((lane) => `<div class="row">
+      <span class="mark done">✓</span>
+      <span class="aux">Lane ${esc(lane.label)}</span>
+      ${dotsHtml(lane.tasks, 'inline')}
+      <span class="grow aux">${esc(lane.branch || '')}</span>
+      <span class="aux">${sumTurns(lane.tasks)} turns · ${plural(sumCommits(lane.tasks), 'commit')} · ${money(sumCost(lane.tasks))}</span>
+    </div>`).join(''));
 }
 
 function rowHtml(t) {
   const bits = [];
-  if (t.commits && t.commits.length) bits.push(`${t.commits.length} commit${t.commits.length === 1 ? '' : 's'} ${t.commits.map(short).join(' ')}`);
+  if (t.commits && t.commits.length) bits.push(`${plural(t.commits.length, 'commit')} ${t.commits.map(short).join(' ')}`);
   if (t.turns) bits.push(`${t.turns} turns`);
   if (t.attempts > 1) bits.push(`${t.attempts} attempts`);
   if (t.reconciled) bits.push('reconciled from git');
-  return `<div class="row" data-task="${t.n}" tabindex="0" role="button">
+  return `<div class="row" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
     <span class="mark ${t.status}">${MARK[t.status] || '·'}</span>
     <span>T${t.n}</span>
     <span class="grow">${esc(t.title)}</span>
@@ -367,8 +459,8 @@ function rowHtml(t) {
 }
 
 function renderBarriers(s) {
-  $('barriers-section').hidden = !s.barriers.length;
-  $('barriers').innerHTML = s.barriers.map(rowHtml).join('');
+  $('barriers-section').hidden = !s.barriers.length || s.activeBarrier != null;
+  paint($('barriers'), s.barriers.map(rowHtml).join(''));
 }
 
 function renderIntegration(s) {
@@ -380,26 +472,27 @@ function renderIntegration(s) {
     ['cross-lane review', i.review ? (i.review.verdict || (i.review.clean ? 'CLEAN' : 'findings')) : 'not run'],
   ];
   $('integration-section').hidden = false;
-  $('integration').innerHTML = rows.map(([k, v]) => `<div class="row"><span class="grow">${esc(k)}</span><span class="aux">${esc(v)}</span></div>`).join('');
+  paint($('integration'), rows.map(([k, v]) => `<div class="row"><span class="grow">${esc(k)}</span><span class="aux">${esc(v)}</span></div>`).join(''));
 }
 
 function renderDag(s) {
   $('dag-section').hidden = false;
   const lanes = s.lanes.map((l) => `<div class="row"><span class="aux">Lane ${esc(l.label)}</span><span class="dagline grow">${l.tasks.map((t) => `T${t.n}`).join(' <b>→</b> ')}</span></div>`);
   if (s.barriers.length) lanes.push(`<div class="row"><span class="aux">Barriers</span><span class="dagline grow">${s.barriers.map((t) => `T${t.n}`).join(' <b>→</b> ')}</span></div>`);
-  $('dag').innerHTML = lanes.join('');
+  paint($('dag'), lanes.join(''));
 }
 
 // ------------------------------------------------------------ timers
 
 function tick() {
-  if (!snap || !snap.ready) return;
+  if (!snap || !snap.ready || document.hidden) return;
   $('m-elapsed').textContent = snap.totals.firstStartedAt ? since(snap.totals.firstStartedAt) : '–';
   for (const el of document.querySelectorAll('[data-since]')) {
     el.textContent = el.dataset.since ? since(el.dataset.since) : '–';
   }
 }
 setInterval(tick, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 
 // ------------------------------------------------------------ drawer
 
@@ -408,6 +501,7 @@ async function showTask(n, trigger) {
   openTask = n;
   $('drawer').classList.add('open');
   $('drawer').setAttribute('aria-hidden', 'false');
+  $('drawer').removeAttribute('inert');
   $('scrim').classList.add('open');
   $('d-close').focus();
   try {
@@ -430,7 +524,7 @@ function drawTask(t) {
     ['turns', t.turns || 0],
     ['attempts', t.attempts || 0],
     ['output tokens', t.outputTokens || 0],
-    ['cost', t.costUsd == null ? '— (recorded when the process exits)' : money(t.costUsd)],
+    ['cost', money(t.costUsd)],
     ['model', t.model || '—'],
     ['session', t.sessionId || '—'],
     ['commits', (t.commits || []).map(short).join(' ') || 'none'],
@@ -456,6 +550,9 @@ function closeDrawer() {
   openedFrom = null;
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
+  // Off-screen is not out of the tab order: without inert the drawer's
+  // controls stay focusable behind an aria-hidden container.
+  $('drawer').setAttribute('inert', '');
   $('scrim').classList.remove('open');
 }
 
@@ -464,7 +561,20 @@ document.addEventListener('click', (e) => {
   if (hit) { showTask(Number(hit.dataset.task), hit); return; }
   if (e.target.id === 'scrim' || e.target.id === 'd-close') closeDrawer();
 });
+/** Keep Tab inside the drawer while it is open — a modal that leaks focus
+ *  behind its own scrim is worse than one that never claimed to be modal. */
+function trapTab(e) {
+  if (openTask == null || e.key !== 'Tab') return;
+  const focusable = $('drawer').querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])');
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
 document.addEventListener('keydown', (e) => {
+  trapTab(e);
   if (e.key === 'Escape') closeDrawer();
   const hit = e.target.closest && e.target.closest('.row[data-task]');
   if (hit && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showTask(Number(hit.dataset.task), hit); }

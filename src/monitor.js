@@ -319,15 +319,26 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
     return { ...head, ready: false, message: 'No state file yet — run `plo analyze`, then `plo init`.' };
   }
 
-  const lanes = st.lanes.map((lane) => ({
-    id: lane.id,
-    label: laneLabel(lane.id),
-    branch: lane.branch,
-    worktree: lane.worktree,
-    weight: lane.weight,
-    tasks: lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, logs })),
-  }));
+  const lanes = st.lanes.map((lane) => {
+    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, logs }));
+    return {
+      id: lane.id,
+      label: laneLabel(lane.id),
+      branch: lane.branch,
+      worktree: lane.worktree,
+      weight: lane.weight,
+      // A lane with nothing left to do has nothing left to watch. Saying so
+      // here rather than in the page keeps the rule testable.
+      settled: tasks.every((t) => isTerminal(t.status)),
+      tasks,
+    };
+  });
   const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, logs }));
+
+  // During integration every lane is finished and the only live work is a
+  // barrier. Naming it lets the page give it a lane's worth of attention
+  // instead of one thin row under three cards saying "lane complete".
+  const activeBarrier = barriers.find((t) => t.status !== state.STATUS.PENDING && !isTerminal(t.status));
 
   const all = [...lanes.flatMap((l) => l.tasks), ...barriers];
   const counts = {};
@@ -362,6 +373,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
       active: (counts[state.STATUS.RUNNING] || 0) > 0,
     },
     rateLimit: limited[0] || null,
+    activeBarrier: activeBarrier ? activeBarrier.n : null,
     lanes,
     barriers,
     integration: st.integration,

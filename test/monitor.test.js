@@ -266,6 +266,37 @@ test('the payload carries no wall-clock value, so equal reads compare equal', ()
   assert.equal(a, b, 'an elapsed-time field here would make every tick look like a change');
 });
 
+test('a lane whose every task is done is marked settled', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  assert.equal(monitor.snapshot(planPath).lanes[0].settled, false, 'T2 is still running');
+
+  st.tasks['2'].status = state.STATUS.DONE;
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).lanes[0].settled, true);
+});
+
+test('the barrier in flight is named, because during integration it is the only live work', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+
+  // Nothing to promote while a barrier is merely waiting its turn.
+  assert.equal(monitor.snapshot(planPath).activeBarrier, null);
+
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.tasks['3'].status = state.STATUS.RUNNING;
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).activeBarrier, 3);
+
+  st.tasks['3'].status = state.STATUS.FAILED;
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).activeBarrier, 3, 'a barrier that died still deserves the attention');
+
+  st.tasks['3'].status = state.STATUS.DONE;
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).activeBarrier, null);
+});
+
 // ---------------------------------------------------------------- detail
 
 test('taskDetail returns full history for a finished task', () => {
