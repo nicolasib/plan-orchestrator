@@ -246,8 +246,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
    nota ao final. Meio dia.
 2. ~~**Fase 2 — o trilho**~~ **— feita em 20/08/2026** (itens 1, 7, 9). Ver a
    nota ao final.
-3. **Fase 3 — a pipeline** (itens 5, 10, 11, 12, 13): estágios, busca no log,
-   totais, ações.
+3. ~~**Fase 3 — a pipeline**~~ **— feita em 20/08/2026** (itens 5, 10, 11, 12,
+   13). Ver a nota ao final.
 4. **Fase 4 — a timeline** (item 6): a swimlane. Cara, e a única que responde à
    pergunta que motiva o `plo`.
 
@@ -351,3 +351,87 @@ não prende Tab e não rouba o foco da linha clicada; abaixo, tem todos, o scrim
 volta, o foco vai para o botão de fechar e volta para quem abriu no Esc.
 Atravessar os 900px com uma task aberta mantém o painel aberto e troca só as
 semânticas — nas duas direções.
+
+---
+
+## 9. Registro — fase 3
+
+Feito: barra de estágios (5), toolbar do feed (10), rodapé de totais (11),
+ações de cópia (12), deep link (13).
+
+A tela passa a responder *onde* a run parou. Na 1.11.0 a barra lê
+`Run ✓ 3/3 · Merge ✓ lanes A, B, C · Barriers ✗ 0/1 · Full suite ○ · Review ○`:
+a falha ocupa a terceira posição de cinco e as duas seguintes estão visivelmente
+intocadas. A tabela `Integration` dizia a mesma coisa com a palavra
+`barrier-failed`, que só significa alguma coisa para quem já sabe a ordem.
+
+Quatro escolhas que se afastam do que o documento propunha:
+
+- **Os estágios são derivados no servidor, não na página.** `buildStages` mora
+  no `monitor.js` e tem teste, como `buildFeed` e `settled`. O mapeamento tem
+  casos que não se leem de um campo (`merge-failed` deixa tudo depois em
+  `pending`; `barrier-failed` implica merge feito; suíte sem test command é
+  falha, não silêncio) — regra com casos é regra que se testa, e uma página
+  HTML não tem onde.
+- **O plano sem barrier task tem quatro estágios, não cinco.** Um quinto
+  permanentemente `done` se lê como trabalho que aconteceu.
+- **"Expandir" virou um interruptor da coluna, não um estado por linha.** Sessenta
+  linhas repintadas a cada segundo não têm onde guardar "esta está aberta" —
+  não existe id de evento, e a chave sintética quebraria no primeiro evento
+  repetido. Uma classe no container atravessa o repaint de graça.
+- **Filtro em `<select>`, não em segmented control.** Quatro botões e uma busca
+  não cabem em 320px de trilho sem virar duas linhas de cromo sobre o conteúdo
+  que eles filtram.
+
+E um desvio que o item 12 forçou: **o banner de bloqueio deixou de ser um
+`div[role=button]`**. Um botão de copiar dentro de um `role="button"` é
+interação aninhada — ARIA que o leitor de tela tem o direito de ignorar. O
+banner virou texto com dois botões de verdade (`Copy resume`, `Details`), e
+perdeu o "clicar em qualquer lugar" em troca de semântica que não mente.
+
+Seis defeitos, todos encontrados rodando:
+
+1. **Wrap não envolvia.** A linha é um `subgrid`; contra uma track implícita
+   `auto` o Chrome mede o bloco como se as colunas fossem irrestritas — toda
+   linha reportava 26px e o texto quebrado vazava por cima da linha de baixo.
+   `grid-auto-rows: min-content` faz medir de verdade. Custo de descobrir: o
+   texto *parecia* certo em uma linha só.
+2. **58px de rolagem horizontal a 320px.** Os spans de leitor de tela na barra
+   de estágios são `position: absolute` sem ancestral posicionado, então não
+   são recortados pelo `overflow` da faixa: iam parar em x=377 e arrastavam o
+   documento junto. `position: relative` na célula resolve.
+3. **A faixa de estágios não cabia entre 700 e 900px** — o breakpoint que eu
+   tinha chutado ficava 160px abaixo do necessário. Passou a 900 (a mesma
+   largura em que o trilho desiste), e as células viraram
+   `minmax(max-content, 1fr)`: preenchem quando há espaço e rolam dentro da
+   borda quando não há, em vez de truncar rótulo.
+4. **Contraste, de novo, e no mesmo lugar da fase 2.** `--text-3` passa contra
+   `--surface` e falha (4.42:1) contra `--surface-2`, que é o fundo do rodapé
+   de totais e do placeholder da busca. E a etiqueta de lane numa linha
+   vermelha ficou de fora da correção da fase 2: 4.28:1 no claro. Todo dim
+   numa linha de erro agora usa `--text-on-fail`.
+5. **O toggle era 6px mais alto que os vizinhos.** `all: unset` devolve
+   `box-sizing` para `content-box`.
+6. **A branch na tabela começava 12px à direita do próprio cabeçalho.**
+   `.row .mono` impõe `display: block` e ganha de `.cp-row` — o botão nunca foi
+   flex, então o ícone simplesmente vinha antes do texto.
+
+Um detalhe que não estava no plano e a captura de tela cobrou: a branch era
+copiável no card da lane viva e virava texto morto na tabela quando a lane
+terminava — que é exatamente quando se faz checkout dela. As duas copiam.
+
+E uma correção de fundo que o item 12 tornou obrigatória: `drawTask` escrevia
+`innerHTML` direto, uma vez por segundo, com o painel aberto. Sem foco lá
+dentro isso passava; com dois botões de copiar, não. Agora passa pelo `paint`,
+e a duração de uma task rodando saiu do payload para um `[data-since]` — sem
+isso a assinatura mudava a cada segundo e o `paint` nunca acertaria.
+
+Verificado no browser (headless, CDP) contra a run real da 1.11.0 e contra a
+fixture de 11 tasks: 108 testes passando; 24 combinações de viewport × tema
+(1728/1280/900/640/390/320 × claro/escuro × duas runs) sem um único erro de
+console e sem rolagem horizontal do documento; a área de transferência conferida
+de verdade — com `Browser.grantPermissions` e `readText` — recebendo
+`plo resume --plan docs/superpowers/plans/…md`, a branch e o session id; o
+histórico do navegador andando `feed → T9 → T2 → T9 → feed`; os totais do
+rodapé alinhados às colunas que fecham em todos os viewports; e AA nos dois
+temas, pior caso 4.61:1 no escuro e 4.87:1 no claro.

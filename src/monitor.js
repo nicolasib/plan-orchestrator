@@ -342,6 +342,73 @@ function buildFeed(tasks, limit) {
 const isTerminal = (s) => s === state.STATUS.DONE;
 
 /**
+ * The run as a pipeline, in the one order it can happen.
+ *
+ * Integration is not a status field, it is five stages: lanes run, branches
+ * merge, barrier tasks run in the merged tree, the full suite runs, the
+ * cross-lane review reads the combined diff. Folded into the single word
+ * `barrier-failed` inside a key-value row, the reader has to already know
+ * that order to place the failure in it.
+ */
+function buildStages(lanes, barriers, integration) {
+  const i = integration || {};
+  const S = state.STATUS;
+
+  // A group reports the worst thing in it before the liveliest. "Some
+  // finished, none running" is a stage under way, not a pending one:
+  // `pending` here means nothing in this stage has started.
+  const fold = (tasks) => {
+    if (tasks.some((t) => t.status === S.FAILED || t.status === S.BLOCKED)) return S.FAILED;
+    if (tasks.some((t) => t.status === S.RUNNING)) return S.RUNNING;
+    if (tasks.some((t) => t.status === S.INTERRUPTED)) return S.INTERRUPTED;
+    if (tasks.every((t) => t.status === S.DONE)) return S.DONE;
+    return tasks.some((t) => t.status === S.DONE) ? S.RUNNING : S.PENDING;
+  };
+  const count = (tasks) => `${tasks.filter((t) => t.status === S.DONE).length}/${tasks.length}`;
+
+  const laneTasks = lanes.flatMap((l) => l.tasks);
+  const merged = i.mergedLanes || [];
+  // Every integration status other than these two means the merge is behind us.
+  const mergeDone = Boolean(i.status) && i.status !== S.PENDING && i.status !== 'merge-failed';
+
+  const stages = [
+    { key: 'run', label: 'Run', status: fold(laneTasks), detail: `${count(laneTasks)} tasks` },
+    {
+      key: 'merge',
+      label: 'Merge',
+      status: i.status === 'merge-failed' ? S.FAILED : mergeDone ? S.DONE : S.PENDING,
+      detail: merged.length ? `lanes ${merged.join(', ')}` : `${lanes.length} lanes`,
+    },
+  ];
+
+  // A plan with no barrier tasks has four stages — not a fifth that is
+  // permanently done, which reads as work that happened.
+  if (barriers.length) {
+    stages.push({
+      key: 'barriers',
+      label: 'Barriers',
+      status: i.status === 'barrier-failed' ? S.FAILED : fold(barriers),
+      detail: `${count(barriers)} tasks`,
+    });
+  }
+
+  stages.push({
+    key: 'suite',
+    label: 'Full suite',
+    status: i.suite ? (i.suite.ok ? S.DONE : S.FAILED) : S.PENDING,
+    detail: i.suite ? (i.suite.skipped ? 'no test command' : i.suite.ok ? 'pass' : 'fail') : '',
+  });
+  stages.push({
+    key: 'review',
+    label: 'Cross-lane review',
+    status: i.review ? (i.review.clean ? S.DONE : S.FAILED) : S.PENDING,
+    detail: i.review ? (i.review.verdict || (i.review.clean ? 'clean' : 'findings')) : '',
+  });
+
+  return stages;
+}
+
+/**
  * The whole dashboard payload.
  *
  * Deliberately free of anything derived from "now": every duration is sent as
@@ -422,6 +489,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
     },
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
+    stages: buildStages(lanes, barriers, st.integration),
     feed,
     lanes,
     barriers,
@@ -458,4 +526,4 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, buildFeed, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, buildStages, digestLog, readTaskLog, tailFile, toolTarget, shortPath };

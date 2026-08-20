@@ -130,17 +130,32 @@ limit that killed it — is already on disk in `.plo-logs/task-<n>.jsonl`, becau
 A second window, not a second run: read-only, loopback-bound, no dependency and
 no build step. Cards follow the work — a lane with nothing left collapses to one
 line, and the barrier running during integration gets a card of its own, because
-by then it is the only thing working.
+by then it is the only thing working. Settled lanes drop to a table that closes
+with its own totals, so the turns, commits and dollars in the topbar add up
+under the column that composed them.
+
+Across the top, the run is a pipeline: `run → merge → barriers → full suite →
+cross-lane review`, in the only order they can happen. A failure lands on the
+stage that owns it — `Barriers ✗` with the two stages after it visibly
+untouched says more than the word `barrier-failed` in a status field, which
+only means something to a reader who already knows the order.
 
 The right-hand rail carries the run in one chronological feed: time, lane, tool,
 target, and how long the call took. Each lane writes its own log, so this is the
 only place that answers "what happened, in what order" — the `git checkout -b`
-that failed inside the barrier is a red row here and nowhere else. Click any
-task and the rail switches to its record: commits, session id, declared writes,
-plan steps, and the full activity tail. Below 900px there is no room for two
-columns, so the rail becomes a drawer over the page — and only then does it
-behave as a dialog, with the scrim, the focus trap and `aria-modal` that would
-be a lie beside a board you can still read and click.
+that failed inside the barrier is a red row here and nowhere else. Search it,
+narrow it to errors, Bash or edits, or turn on `Wrap` when the line you want is
+the one the ellipsis ate. Click any task and the rail switches to its record:
+commits, session id, declared writes, plan steps, and the full activity tail —
+and the URL becomes `#task=4`, which survives a reload and pastes into Slack.
+Below 900px there is no room for two columns, so the rail becomes a drawer over
+the page — and only then does it behave as a dialog, with the scrim, the focus
+trap and `aria-modal` that would be a lie beside a board you can still read and
+click.
+
+Nothing on the page asks to be retyped. The blocked banner carries the
+`plo resume --plan …` it implies, and the branch, the session id and the log
+path each copy with one click.
 
 Status reads as a shape before a colour, the way an issue tracker does: an empty
 ring is waiting, a half-filled one is running, a filled check is done, a crossed

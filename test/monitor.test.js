@@ -360,6 +360,82 @@ test('the merge scaffolding never reaches the payload', () => {
   assert.equal(JSON.stringify(monitor.snapshot(planPath)), JSON.stringify(snap), 'the feed must not make two equal reads differ');
 });
 
+// ---------------------------------------------------------------- stages
+
+const byKey = (planPath) => Object.fromEntries(monitor.snapshot(planPath).stages.map((x) => [x.key, x]));
+
+test('the pipeline is the five stages of a run, in the order they can happen', () => {
+  const { planPath } = fixture();
+  const s = monitor.snapshot(planPath);
+
+  assert.deepEqual(s.stages.map((x) => x.key), ['run', 'merge', 'barriers', 'suite', 'review']);
+  assert.equal(s.stages[0].status, 'running', 'one task done and one running is a run under way');
+  assert.equal(s.stages[0].detail, '1/2 tasks');
+  assert.equal(s.stages[1].status, 'pending', 'nothing merges while a lane is still working');
+});
+
+test('a failure lands on the stage that owns it', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.integration = { status: 'barrier-failed', mergedLanes: ['A'], suite: null, review: null };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.run.status, 'done');
+  assert.equal(by.merge.status, 'done', 'a barrier only ever runs in a merged tree');
+  assert.equal(by.merge.detail, 'lanes A');
+  assert.equal(by.barriers.status, 'failed');
+  assert.equal(by.suite.status, 'pending', 'the suite never got to run, and must not read as passed');
+});
+
+test('a merge that failed leaves every later stage pending', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.integration = { status: 'merge-failed', mergedLanes: [], suite: null, review: null };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.merge.status, 'failed');
+  assert.equal(by.barriers.status, 'pending');
+  assert.equal(by.review.status, 'pending');
+});
+
+test('the suite and the review carry their own verdicts', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.tasks['3'].status = state.STATUS.DONE;
+  st.integration = {
+    status: 'review-findings', mergedLanes: ['A'],
+    suite: { ok: true }, review: { clean: false, verdict: 'FINDINGS' },
+  };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.suite.status, 'done');
+  assert.equal(by.suite.detail, 'pass');
+  assert.equal(by.review.status, 'failed');
+  assert.equal(by.review.detail, 'FINDINGS');
+});
+
+test('a suite with no test command failed — it did not pass quietly', () => {
+  const stages = monitor.buildStages(
+    [{ tasks: [{ status: 'done' }] }], [],
+    { status: 'merged', mergedLanes: ['A'], suite: { ok: false, skipped: true }, review: null },
+  );
+  const suite = stages.find((x) => x.key === 'suite');
+  assert.equal(suite.status, 'failed');
+  assert.equal(suite.detail, 'no test command');
+});
+
+test('a plan with no barrier tasks has four stages, not a fifth that is always done', () => {
+  const stages = monitor.buildStages([{ tasks: [{ status: 'pending' }] }], [], { status: 'pending' });
+  assert.deepEqual(stages.map((x) => x.key), ['run', 'merge', 'suite', 'review']);
+  assert.equal(stages[0].status, 'pending', 'a run where nothing started has not started');
+});
+
 // ---------------------------------------------------------------- detail
 
 test('taskDetail returns full history for a finished task', () => {

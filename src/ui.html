@@ -183,6 +183,48 @@
   .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
   .subline .sep { color: var(--text-faint); }
 
+  /* --------------------------------------------------------- stage bar */
+  /* A run has five stages and exactly one order: lanes run, branches merge,
+     barrier tasks run in the merged tree, the full suite runs, the review
+     reads the combined diff. `barrier-failed` used to be a word inside a
+     key-value table; here it is an X in the third position of a line, and
+     the position is the answer. */
+  .stages {
+    /* Fill the width when there is room, never truncate a label when there is
+       not — then the strip scrolls inside its own border instead. */
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr);
+    margin: 2px 0 0; padding: 0; list-style: none; overflow-x: auto;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  }
+  /* Positioned so the screen-reader span below stays inside the strip: an
+     absolutely positioned child with no positioned ancestor is not clipped by
+     the scroller, and at 320px it sat 58px past the right edge of the page —
+     dragging the whole document into a horizontal scroll with it. */
+  .stage { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 14px; }
+  .stage + .stage { border-left: 1px solid var(--line-soft); }
+  .stage svg { flex: 0 0 auto; }
+  .stage .st-label { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+  .stage.pending .st-label { font-weight: 400; color: var(--text-2); }
+  .stage .st-detail {
+    min-width: 0; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+    max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stage.failed { background: var(--fail-soft); }
+  .stage.failed .st-detail { color: var(--text-on-fail); }
+  /* Five labelled cells with their details need ~860px. Below the width where
+     the rail itself gives up, the detail goes first: it is the only part the
+     ring and the label do not already imply. */
+  @media (max-width: 899px) {
+    .stage { padding: 9px 12px; }
+    .stage .st-detail { display: none; }
+  }
+
+  /* The status of a stage is drawn as a shape; a screen reader needs the word. */
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
   /* -------------------------------------------------------------- alerts */
   .alerts { display: grid; gap: 8px; margin-top: 16px; }
   .alerts:empty { display: none; }
@@ -194,9 +236,10 @@
   .alert svg { flex: 0 0 auto; margin-top: 2px; }
   .alert.bad { border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
   .alert b { font-weight: 600; }
-  .alert[data-task] { cursor: pointer; transition: background .12s ease; }
-  .alert[data-task]:hover { background: color-mix(in srgb, var(--fail-soft) 60%, var(--hover)); }
-  .alert .more { margin-left: auto; align-self: center; flex: 0 0 auto; color: var(--text-2); font-size: 11.5px; }
+  /* Real buttons, not a clickable div: a banner that carries a copy button
+     cannot also be a button itself — nesting one inside the other is the kind
+     of ARIA a screen reader is entitled to ignore. */
+  .alert .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; align-self: center; flex: 0 0 auto; }
   .alert code { color: var(--text-2); }
 
   /* --------------------------------------------------------------- board */
@@ -217,6 +260,12 @@
     background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px;
     padding: 1px 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* A branch name is a string you retype into a terminal, so it copies. It
+     already looked like a chip; what changes is the cursor and the hover. */
+  button.branch { margin: 0; text-align: left; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  button.branch:hover { background: var(--hover); color: var(--text); border-color: var(--line); }
+  button.branch svg { flex: 0 0 auto; opacity: .7; }
+  button.branch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px 2px; }
   .chip {
@@ -277,7 +326,8 @@
      the row, which dropped the dim columns on it to 3.98:1 — so on a red row
      they step up one token and clear AA again. */
   .feed .ln.bad { background: var(--fail-soft); }
-  .feed .ln.bad .at, .feed .ln.bad .arg, .feed .ln.bad .took { color: var(--text-on-fail); }
+  .feed .ln.bad .at, .feed .ln.bad .arg, .feed .ln.bad .took,
+  .feed .ln.bad .who, .feed .ln.bad .name.sub, .feed .ln.bad .say { color: var(--text-on-fail); }
   /* --text-faint is for separators and empty glyphs; a timestamp is a fact
      the reader reads, so it takes the lowest token that still clears AA. */
   .feed .at { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -306,6 +356,18 @@
     .feed.run .took { display: none; }
     .feed.run .say { grid-column: span 2; }
   }
+
+  /* "Expand": the target column stops being one clipped line. On an error row
+     the preview is the whole reason the line is red, and the preview is
+     exactly what the ellipsis eats. */
+  /* `grid-auto-rows` is not decoration here. A row is a subgrid, and against
+     an implicit `auto` track Chrome measures its block size as if the columns
+     were unconstrained — every line reports 26px and the wrapped text spills
+     over the row below it. Naming the track sizing makes it measure for real. */
+  .feed.wrap { grid-auto-rows: min-content; }
+  .feed.wrap .ln { height: auto; min-height: 26px; align-items: start; padding-top: 5px; padding-bottom: 5px; white-space: normal; }
+  .feed.wrap .name, .feed.wrap .arg, .feed.wrap .say { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+  .feed.wrap .at, .feed.wrap .who, .feed.wrap .ico, .feed.wrap .took { padding-top: 1px; }
 
   .card > .foot {
     display: flex; gap: 14px; flex-wrap: wrap; padding: 9px 14px;
@@ -353,6 +415,26 @@
   .row .num b { font-weight: 500; color: var(--text-2); }
   .row .right { justify-self: end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .row .chips { padding: 0; }
+  /* The number that only existed in the topbar now closes the column that
+     composes it. It sums the rows above it — never the whole run, which would
+     be a total that does not add up to the table it sits under. */
+  .row.lane.foot { border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface-2); }
+  .row.foot .tag { color: var(--text-2); font-weight: 600; }
+  .row.foot .num b { color: var(--text); font-weight: 600; }
+  .row.foot .mono { color: var(--text-2); }
+  /* The same control as the card's branch chip, without the chip: inside a
+     table row a bordered box would read as a second table. */
+  .cp-row {
+    all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    flex-direction: row-reverse; justify-content: flex-end;
+    min-width: 0; max-width: 100%; padding: 2px 6px; margin-left: -6px; border-radius: 5px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-3);
+  }
+  .cp-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-row:hover { background: var(--hover); color: var(--text); }
+  .cp-row.ok { color: var(--done); }
+  .cp-row.bad { color: var(--fail); }
+  .cp-row svg { flex: 0 0 auto; opacity: .6; }
   /* An `auto` track only agrees with itself: every row being its own grid is
      why the header sat 30px off its own column. One grid for the table, rows
      borrowing its tracks via subgrid — and the row still draws its own box,
@@ -383,11 +465,6 @@
   .flow .node { font-variant-numeric: tabular-nums; }
   .flow .node.done { color: var(--text-3); }
   .flow .node.running { color: var(--text); font-weight: 600; }
-
-  /* Two key-value tables of four rows each: side by side they cost half the
-     scroll and use the width that widening the shell just handed them. */
-  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 0 20px; }
-  .pair section { min-width: 0; }
 
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
 
@@ -446,6 +523,45 @@
     padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px;
   }
   .close:hover { background: var(--hover); color: var(--text); }
+
+  /* A tail of eight lines is not observability, and neither is sixty you have
+     to read in order. Search, one kind at a time, and a way to stop clipping. */
+  aside .tools {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto;
+    padding: 8px 12px; border-bottom: 1px solid var(--line);
+  }
+  .q, .sel {
+    box-sizing: border-box; min-height: 26px; padding: 3px 7px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+    font: 400 12px var(--ui); color: var(--text); letter-spacing: -.011em;
+  }
+  .q { flex: 1 1 108px; min-width: 0; }
+  .q::placeholder { color: var(--text-2); }
+  .q::-webkit-search-cancel-button { filter: grayscale(1); opacity: .5; }
+  .sel { flex: 0 0 auto; color: var(--text-2); cursor: pointer; padding-right: 2px; }
+  .tgl {
+    all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; flex: 0 0 auto;
+    min-height: 26px; padding: 3px 9px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--surface-2); font-size: 11.5px; color: var(--text-2);
+  }
+  .tgl:hover { background: var(--hover); color: var(--text); }
+  .tgl[aria-pressed="true"] {
+    color: var(--text); background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  }
+
+  /* One copy control, four places: the resume command, a session id, a log
+     path, a lane branch — every string on this page a reader retypes. */
+  .cp {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
+    min-height: 22px; padding: 2px 6px; border-radius: 5px; color: var(--text-3);
+  }
+  .cp.wide { min-height: 24px; padding: 2px 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font-size: 11.5px; }
+  .cp:hover { background: var(--hover); color: var(--text); }
+  .cp.ok { color: var(--done); }
+  .cp.bad { color: var(--fail); }
+  .kv-row .v-cp { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .kv-row .v-cp .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Below 900px there is no rail, so the run feed needs a door of its own. */
   .railbtn {
     all: unset; cursor: pointer; display: inline-flex; align-items: center;
@@ -489,6 +605,8 @@
   </div>
   <div class="subline" id="plan-sub"></div>
 
+  <ol class="stages" id="stages" aria-label="Run pipeline" hidden></ol>
+
   <div class="shell">
   <main>
     <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
@@ -505,17 +623,10 @@
       <div class="list" id="barriers"></div>
     </section>
 
-    <div class="pair">
-      <section id="integration-section" hidden>
-        <h2>Integration</h2>
-        <div class="list" id="integration"></div>
-      </section>
-
-      <section id="dag-section" hidden>
-        <h2>Lane plan</h2>
-        <div class="list" id="dag"></div>
-      </section>
-    </div>
+    <section id="dag-section" hidden>
+      <h2>Lane plan</h2>
+      <div class="list" id="dag"></div>
+    </section>
   </main>
 
   <aside id="panel" aria-labelledby="d-title">
@@ -525,6 +636,16 @@
       <div class="grow"></div>
       <span class="count" id="p-count"></span>
       <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
+    </div>
+    <div class="tools" id="p-tools">
+      <input type="search" class="q" id="p-q" placeholder="Filter events" aria-label="Filter run activity" autocomplete="off" spellcheck="false" />
+      <select class="sel" id="p-kind" aria-label="Kind of event">
+        <option value="">All</option>
+        <option value="err">Errors</option>
+        <option value="bash">Bash</option>
+        <option value="edit">Edits</option>
+      </select>
+      <button class="tgl" id="p-wrap" aria-pressed="false" aria-controls="p-feed" title="Show each line in full instead of clipping it">Wrap</button>
     </div>
     <div class="feed run" id="p-feed"></div>
     <div class="body" id="d-body" hidden></div>
@@ -544,6 +665,8 @@ let skew = 0;          // serverNow - clientNow, so timers agree with the run
 let openTask = null;   // task number shown in the panel, or null for the feed
 let openedFrom = null; // element that opened it, to hand focus back on close
 let modalOpen = false; // only meaningful below 900px, where the panel is modal
+let feedQuery = '';    // what the reader typed into the feed's filter
+let feedKind = '';     // '' | 'err' | 'bash' | 'edit'
 
 /** The one query the panel's two personalities hang off. */
 const wide = window.matchMedia('(min-width: 900px)');
@@ -652,6 +775,13 @@ const alertIcon = (bad) => {
     <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
 };
 
+const copyIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <rect x="3.7" y="3.7" width="6.8" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path d="M8.3 1.6 H3.2 A1.6 1.6 0 0 0 1.6 3.2 V8.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>`;
+
+const okIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M2.4 6.3 L4.7 8.6 L9.6 3.5" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
 /** Two branches folding into one: the barrier card's mark. */
 const mergeIcon = () => `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
   <path d="M2.8 1.6 v2.6 c0 2.2 1.5 2.9 3.2 2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
@@ -671,7 +801,8 @@ function render(s) {
     paint($('verdict'), '');
     paint($('alerts'), '');
     renderFeed(s);
-    for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
+    $('stages').hidden = true;
+    for (const id of ['settled-section', 'barriers-section', 'dag-section']) $(id).hidden = true;
     return;
   }
 
@@ -692,11 +823,11 @@ function render(s) {
   paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
   paint($('verdict'), verdictHtml(s));
 
+  renderStages(s);
   renderAlerts(s);
   renderFeed(s);
   renderBoard(s);
   renderBarriers(s);
-  renderIntegration(s);
   renderDag(s);
   tick();
 }
@@ -734,32 +865,132 @@ function verdictHtml(s) {
  * doing but never what happened across the run — which is the question the
  * empty right half of this page was refusing to answer.
  */
+/**
+ * The pipeline, full width, above everything it explains.
+ *
+ * The four key-value rows this replaces reported `barrier-failed` as a word,
+ * which asks the reader to already know that barriers run after the merge and
+ * before the suite in order to place it. Here the position carries that.
+ */
+function renderStages(s) {
+  const stages = (s && s.ready && s.stages) || [];
+  $('stages').hidden = !stages.length;
+  paint($('stages'), stages.map((st) => `<li class="stage ${esc(st.status)}">`
+    + statusIcon(st.status, 14)
+    + `<span class="st-label">${esc(st.label)}</span>`
+    + `<span class="sr">${esc(STATUS_WORD[st.status] || st.status)}${st.detail ? ',' : ''}</span>`
+    + (st.detail ? `<span class="st-detail" title="${esc(st.detail)}">${esc(st.detail)}</span>` : '')
+    + '</li>').join(''));
+}
+
+const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Update']);
+/** Everything on a line a reader could plausibly be looking for. */
+const feedText = (a) => [a.name, a.target, a.text, a.preview, a.label, whoLabel(a)].filter(Boolean).join(' ').toLowerCase();
+
+function feedMatch(a) {
+  if (feedKind === 'err' && a.ok !== false) return false;
+  if (feedKind === 'bash' && a.name !== 'Bash') return false;
+  if (feedKind === 'edit' && !EDIT_TOOLS.has(a.name)) return false;
+  return !feedQuery || feedText(a).includes(feedQuery);
+}
+
 function renderFeed(s) {
-  const feed = (s && s.ready && s.feed) || [];
-  $('p-count').textContent = feed.length ? plural(feed.length, 'event') : '';
+  const all = (s && s.ready && s.feed) || [];
+  const feed = all.filter(feedMatch);
+  // A filtered count that hides the total reads as a shrinking run.
+  $('p-count').textContent = !all.length ? ''
+    : feed.length === all.length ? plural(all.length, 'event') : `${feed.length} of ${all.length}`;
+
   const host = $('p-feed');
   // Repainted every second: a reader who scrolled back must not be yanked to
   // the top by an event they were not reading.
   const top = host.scrollTop;
   const changed = paint(host, feed.length
     ? feed.slice().reverse().map((a) => activityHtml(a, true)).join('')
-    : '<div class="empty">no agent events yet</div>');
+    : `<div class="empty">${all.length ? 'no event matches' : 'no agent events yet'}</div>`);
   if (changed) host.scrollTop = top;
 }
 
+/**
+ * The command the reader is about to retype, in the form they would type it:
+ * from the repo root, with the plan relative to it.
+ */
+function cmd(s, verb) {
+  const root = s.repoRoot ? `${s.repoRoot}/` : '';
+  const plan = root && s.plan && s.plan.startsWith(root) ? s.plan.slice(root.length) : s.plan;
+  return `plo ${verb} --plan ${plan}`;
+}
+
+/**
+ * A banner that says what went wrong and leaves the reader to retype the fix
+ * has done half the job. Every alert here ends in the command it implies.
+ */
 function renderAlerts(s) {
   const out = [];
+  const acts = (html) => `<div class="acts">${html}</div>`;
+  const resume = () => copyBtnHtml(cmd(s, 'resume'), 'the resume command', { label: 'Copy resume' });
+
   if (s.rateLimit) {
     const at = s.rateLimit.resetsAt ? new Date(s.rateLimit.resetsAt * 1000).toLocaleTimeString() : null;
-    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div></div>`);
+    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div>${acts(resume())}</div>`);
   }
   if (s.planChanged) {
-    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div></div>`);
+    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div>${acts(copyBtnHtml(cmd(s, 'analyze'), 'the analyze command', { label: 'Copy analyze' }))}</div>`);
   }
   for (const t of [...s.lanes.flatMap((l) => l.tasks), ...s.barriers].filter((t) => t.status === 'failed' || t.status === 'blocked')) {
-    out.push(`<div class="alert bad" data-task="${t.n}" role="button" tabindex="0" aria-controls="panel">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div><span class="more">Details</span></div>`);
+    out.push(`<div class="alert bad">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div>`
+      + acts(resume() + `<button class="chip" data-task="${t.n}" aria-controls="panel">Details</button>`) + '</div>');
   }
   paint($('alerts'), out.join(''));
+}
+
+/**
+ * One copy control, four places: the resume command, a session id, a log path,
+ * a lane branch — every string on this page that otherwise gets retyped.
+ */
+function copyBtnHtml(text, what, { label = '', cls = 'cp', title = '' } = {}) {
+  const wide = cls === 'cp' && label ? ' wide' : '';
+  return `<button class="${cls}${wide}" data-copy="${esc(text)}" data-what="${esc(what)}" data-label="${esc(label)}"`
+    + ` aria-label="Copy ${esc(what)}" title="${esc(title || `Copy ${what}`)}">`
+    + copyIcon() + (label ? `<span>${esc(label)}</span>` : '') + '</button>';
+}
+
+/**
+ * `navigator.clipboard` needs a secure context. Loopback is one; the address
+ * `--host` hands another machine is not — and that is exactly the reader who
+ * cannot retype a session id by hand. The textarea is the fallback for them.
+ */
+async function copyText(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+/** `done` is null at rest, true after a copy, false after a refusal. */
+function paintCopyBtn(btn, done) {
+  btn.classList.toggle('ok', done === true);
+  btn.classList.toggle('bad', done === false);
+  const label = btn.dataset.label;
+  const word = done === true ? 'Copied' : done === false ? 'Copy failed' : label;
+  btn.innerHTML = (done === true ? okIcon() : copyIcon()) + (label ? `<span>${esc(word)}</span>` : '');
+  btn.setAttribute('aria-label', done === true ? `${btn.dataset.what} copied` : `Copy ${btn.dataset.what}`);
+}
+
+async function handleCopy(btn) {
+  const ok = await copyText(btn.dataset.copy || '');
+  paintCopyBtn(btn, ok);
+  clearTimeout(btn.restore);
+  btn.restore = setTimeout(() => paintCopyBtn(btn, null), 1400);
 }
 
 /** The first thing in a task list that still wants attention. */
@@ -838,7 +1069,7 @@ function feedPlaceholder(t) {
  * thing running, and a thin row under three "lane complete" cards is not a
  * report on it.
  */
-function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
+function cardHtml({ kind, label, sub, subTitle, copy, tasks, current }) {
   const live = current && current.status === 'running';
   const feed = live && current.activity.length
     ? current.activity.slice().reverse().map((a) => activityHtml(a)).join('')
@@ -848,7 +1079,9 @@ function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
     <div class="head">
       <span class="kind ${kind}">${kind === 'barrier' ? mergeIcon() : ''}${esc(label)}</span>
       <div class="grow"></div>
-      ${sub ? `<span class="branch" title="${esc(subTitle || sub)}">${esc(sub)}</span>` : ''}
+      ${!sub ? '' : copy
+        ? copyBtnHtml(copy, 'the lane branch', { label: sub, cls: 'branch', title: `${subTitle || sub} — click to copy the branch` })
+        : `<span class="branch" title="${esc(subTitle || sub)}">${esc(sub)}</span>`}
     </div>
     ${chipsHtml(tasks)}
     <div class="now">
@@ -881,7 +1114,7 @@ function renderBoard(s) {
     sig: JSON.stringify(lane),
     html: cardHtml({
       kind: 'lane', label: `Lane ${lane.label}`, sub: lane.branch || 'no branch yet',
-      subTitle: lane.worktree, tasks: lane.tasks, current: currentOf(lane.tasks),
+      subTitle: lane.worktree, copy: lane.branch || '', tasks: lane.tasks, current: currentOf(lane.tasks),
     }),
   }));
 
@@ -931,11 +1164,32 @@ function renderBoard(s) {
       <span class="ic" role="cell">${statusIcon('done')}</span>
       <span class="tag" role="cell">Lane ${esc(lane.label)}</span>
       <span class="cell" role="cell">${chipsHtml(lane.tasks)}</span>
-      <span class="mono" role="cell" title="${esc(lane.branch || '')}">${esc(lane.branch || '')}</span>
+      <span class="cell" role="cell">${lane.branch
+        ? copyBtnHtml(lane.branch, 'the lane branch', { label: lane.branch, cls: 'cp-row', title: `${lane.worktree || lane.branch} — click to copy the branch` })
+        : ''}</span>
       <span class="num" role="cell"><b>${sumTurns(lane.tasks)}</b></span>
       <span class="num" role="cell"><b>${sumCommits(lane.tasks)}</b></span>
       <span class="num" role="cell"><b>${money(sumCost(lane.tasks))}</b></span>
-    </div>`).join('') + '</div>');
+    </div>`).join('') + totalsRow(settled, s.lanes.length) + '</div>');
+}
+
+/**
+ * The row that closes the columns above it. It sums the lanes in the table,
+ * never the whole run: a total that does not add up to the rows under it is
+ * worse than no total.
+ */
+function totalsRow(lanes, allLanes) {
+  const tasks = lanes.flatMap((l) => l.tasks);
+  const note = lanes.length < allLanes ? `${lanes.length} of ${allLanes} lanes settled` : '';
+  return `<div class="row lane foot" role="row">
+      <span role="cell"></span>
+      <span class="tag" role="cell">Total</span>
+      <span class="cell" role="cell">${plural(tasks.length, 'task')}</span>
+      <span class="mono" role="cell">${esc(note)}</span>
+      <span class="num" role="cell"><b>${sumTurns(tasks)}</b></span>
+      <span class="num" role="cell"><b>${sumCommits(tasks)}</b></span>
+      <span class="num" role="cell"><b>${money(sumCost(tasks))}</b></span>
+    </div>`;
 }
 
 function rowHtml(t) {
@@ -958,23 +1212,6 @@ function rowHtml(t) {
 function renderBarriers(s) {
   $('barriers-section').hidden = !s.barriers.length || s.activeBarrier != null;
   paint($('barriers'), s.barriers.map(rowHtml).join(''));
-}
-
-function renderIntegration(s) {
-  const i = s.integration || {};
-  const pill = (text, kind) => `<span class="pill ${kind}">${esc(text)}</span>`;
-  const statusKind = i.status === 'done' ? 'ok'
-    : String(i.status).includes('failed') ? 'bad'
-      : i.status === 'pending' ? '' : 'live';
-
-  const rows = [
-    ['Status', pill(i.status || 'pending', statusKind)],
-    ['Merged lanes', (i.mergedLanes || []).length ? esc(i.mergedLanes.join(', ')) : '<span class="mono">none</span>'],
-    ['Full suite', i.suite ? pill(i.suite.ok ? 'pass' : 'fail', i.suite.ok ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
-    ['Cross-lane review', i.review ? pill(i.review.verdict || (i.review.clean ? 'clean' : 'findings'), i.review.clean ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
-  ];
-  $('integration-section').hidden = false;
-  paint($('integration'), rows.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join(''));
 }
 
 function renderDag(s) {
@@ -1028,6 +1265,7 @@ function applyPanel() {
   }
 
   $('p-feed').hidden = onTask;
+  $('p-tools').hidden = onTask;
   $('d-body').hidden = !onTask;
   $('p-back').hidden = !onTask;
   $('p-count').hidden = onTask;
@@ -1049,11 +1287,35 @@ async function loadTask(n) {
   }
 }
 
+/**
+ * `#task=4` survives a reload and pastes into Slack, which is most of what a
+ * URL is for. `pushState` never fires `hashchange`, so the page can write the
+ * hash without hearing itself and reopening what it just opened.
+ */
+const hashTask = () => {
+  const m = /^#task=(\d+)$/.exec(location.hash || '');
+  return m ? Number(m[1]) : null;
+};
+
+function writeHash(n) {
+  const want = n == null ? '' : `#task=${n}`;
+  if (location.hash === want) return;
+  if (n == null) history.replaceState(null, '', location.pathname + location.search);
+  else history.pushState(null, '', want);
+}
+
+window.addEventListener('hashchange', () => {
+  const n = hashTask();
+  if (n == null) { if (openTask != null) backToFeed(); return; }
+  if (n !== openTask) showTask(n);
+});
+
 function showTask(n, trigger) {
   if (trigger) openedFrom = trigger;
   const wasModal = modalOpen;
   openTask = n;
   modalOpen = true;
+  writeHash(n);
   applyPanel();
   // Only a modal takes the reader's focus. In the rail the panel simply
   // changes what it shows, and yanking focus off the row they clicked would
@@ -1067,6 +1329,7 @@ function showFeed(trigger) {
   if (trigger) openedFrom = trigger;
   openTask = null;
   modalOpen = true;
+  writeHash(null);
   applyPanel();
   renderFeed(snap);
   if (!wide.matches) $('d-close').focus();
@@ -1079,15 +1342,21 @@ function drawTask(t) {
   const kv = [
     ['Status', `<span class="pill ${statusPill}">${esc(STATUS_WORD[t.status] || t.status)}${t.barrier ? ' · barrier' : ''}</span>`],
     ['Lane', t.lane ? esc(String(t.lane).toUpperCase()) : '—'],
-    ['Duration', esc(span(t))],
+    // A running task's duration is a clock, and a clock in the payload would
+    // repaint this panel every second — with the reader's focus inside it.
+    ['Duration', t.status === 'running' && t.startedAt ? `<span data-since="${esc(t.startedAt)}">–</span>` : esc(span(t))],
     ['Turns', String(t.turns || 0)],
     ['Attempts', String(t.attempts || 0)],
     ['Output tokens', (t.outputTokens || 0).toLocaleString()],
     ['Cost', money(t.costUsd)],
     ['Model', `<span class="mono">${esc(t.model || '—')}</span>`],
-    ['Session', `<span class="mono">${esc(t.sessionId || '—')}</span>`],
+    ['Session', t.sessionId
+      ? `<span class="v-cp"><span class="mono">${esc(t.sessionId)}</span>${copyBtnHtml(t.sessionId, 'the session id')}</span>`
+      : '<span class="mono">—</span>'],
     ['Commits', (t.commits || []).length ? `<span class="mono">${t.commits.map((c) => esc(short(c))).join(' ')}</span>` : '—'],
-    ['Log', `<span class="mono">${esc(t.logFile || '—')}</span>`],
+    ['Log', t.logFile
+      ? `<span class="v-cp"><span class="mono">${esc(t.logFile)}</span>${copyBtnHtml(t.logFile, 'the log path')}</span>`
+      : '<span class="mono">—</span>'],
   ];
 
   const parts = [`<div class="pad"><div class="list">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div></div>`];
@@ -1111,12 +1380,16 @@ function drawTask(t) {
     t.activity.length ? t.activity.slice().reverse().map((a) => activityHtml(a)).join('') : '<div class="empty">no agent events recorded</div>'
   }</div></div>`);
 
-  $('d-body').innerHTML = parts.join('');
+  // Painted, not assigned: the stream redraws this every second while a task
+  // is open, and an unguarded write destroys whatever the reader had focused
+  // — which now includes two copy buttons.
+  if (paint($('d-body'), parts.join(''))) tick();
 }
 
 /** Back to the run feed, keeping the panel where it is. */
 function backToFeed() {
   openTask = null;
+  writeHash(null);
   applyPanel();
   renderFeed(snap);
   $('p-feed').scrollTop = 0;
@@ -1128,6 +1401,7 @@ function closePanel() {
   if (openTask == null && !modalOpen) return;
   openTask = null;
   modalOpen = false;
+  writeHash(null);
   // Focus must not stay inside a container that is about to be aria-hidden.
   if (openedFrom && document.contains(openedFrom)) openedFrom.focus();
   openedFrom = null;
@@ -1150,7 +1424,19 @@ function trapTab(e) {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
+/** The feed's toolbar. It lives outside the painted region on purpose: a
+ *  filter that loses what you typed once a second is not a filter. */
+$('p-q').addEventListener('input', (e) => { feedQuery = e.target.value.trim().toLowerCase(); renderFeed(snap); });
+$('p-kind').addEventListener('change', (e) => { feedKind = e.target.value; renderFeed(snap); });
+$('p-wrap').addEventListener('click', () => {
+  const on = $('p-wrap').getAttribute('aria-pressed') !== 'true';
+  $('p-wrap').setAttribute('aria-pressed', String(on));
+  $('p-feed').classList.toggle('wrap', on);
+});
+
 document.addEventListener('click', (e) => {
+  const cp = e.target.closest('[data-copy]');
+  if (cp) { handleCopy(cp); return; }
   if (e.target.closest('#p-back')) { backToFeed(); return; }
   if (e.target.closest('#open-feed')) { showFeed(e.target.closest('#open-feed')); return; }
   const hit = e.target.closest('[data-task]');
@@ -1165,6 +1451,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 applyPanel();
+// A link into a task opens on it, at whichever width the reader arrived with.
+if (hashTask() != null) showTask(hashTask());
 
 // --------------------------------------------------------------- transport
 
