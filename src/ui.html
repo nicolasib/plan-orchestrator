@@ -4,215 +4,352 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>plo — run monitor</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%234ade80'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235e6ad2'/%3E%3C/svg%3E" />
 <style>
+  /*
+   * Visual language: Linear. Dense rows, quiet chrome, one indigo accent, and
+   * status carried by a shape before a colour. Type is the system UI face;
+   * monospace is kept for the things that are literally code — paths,
+   * commands, shas, branches.
+   *
+   * Every colour is a token, so the light theme is a value swap, not a fork.
+   */
   :root {
-    color-scheme: dark;
-    --bg: #0b0d11;
-    --panel: #121620;
-    --panel-2: #171c28;
-    --line: #232a38;
-    --ink: #dfe4ec;
-    --dim: #8b93a5;
-    --faint: #7d869c;      /* 4.67:1 on the darkest panel — AA for body text */
-    --done: #4ade80;
-    --run: #58b6ff;
-    --fail: #ff6b6b;
-    --warn: #f6c453;
-    --pend: #454d61;       /* fill only: 2.14:1 is too low for a glyph */
-    --feed-bg: var(--feed-bg);
-    --feed-line: var(--feed-line);
-    --scrim: var(--scrim);
-    --on-done: #07230f;
-    --on-run: #041726;
-    --on-fail: #2a0808;
-    --on-warn: #251a00;
+    color-scheme: dark light;
+
+    --bg: #08090a;
+    --surface: #0f1011;
+    --surface-2: #141518;
+    --line: #23242a;
+    --line-soft: #191a1e;
+    --hover: rgba(255, 255, 255, .045);
+
+    --text: #f7f8f8;
+    --text-2: #8a8f98;      /* 5.86:1 on surface */
+    --text-3: #787d87;      /* 4.61:1 — the floor for anything readable */
+    --text-faint: #5b606a;  /* decorative only: separators, empty glyphs */
+
+    --accent: #5e6ad2;
+    --accent-ink: #8b95e8;  /* the accent when it has to be small text */
+    --accent-soft: rgba(94, 106, 210, .16);
+    --on-accent: #ffffff;
+
+    --done: #4cb782;
+    --done-soft: rgba(76, 183, 130, .14);
+    --run: #f2c94c;
+    --run-soft: rgba(242, 201, 76, .14);
+    --fail: #eb5757;
+    --fail-soft: rgba(235, 87, 87, .14);
+    --warn: #fc7840;
+    --idle: #62666d;
+
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .28);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, .48), 0 2px 8px rgba(0, 0, 0, .32);
+    --scrim: rgba(4, 5, 6, .5);
+
+    --ui: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #fafbfc;
+      --line: #e5e6e8;
+      --line-soft: #eeeff1;
+      --hover: rgba(0, 0, 0, .035);
+
+      --text: #1c1d21;
+      --text-2: #6b6f76;
+      --text-3: #6b6f76;
+      --text-faint: #9aa0a8;
+
+      --accent-ink: #4a54b8;
+      --accent-soft: rgba(94, 106, 210, .12);
+
+      --done: #17794b;
+      --done-soft: rgba(23, 121, 75, .12);
+      --run: #8a6400;
+      --run-soft: rgba(217, 164, 6, .16);
+      --fail: #b4232b;
+      --fail-soft: rgba(180, 35, 43, .1);
+      --warn: #a4490f;
+      --idle: #9aa0a8;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .06);
+      --shadow-lg: 0 12px 32px rgba(0, 0, 0, .12), 0 2px 8px rgba(0, 0, 0, .06);
+      --scrim: rgba(20, 22, 26, .28);
+    }
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    background: var(--bg); color: var(--ink);
-    font: 13px/1.5 var(--mono);
-    padding: 18px 20px 60px;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 13px/1.5 var(--ui);
+    letter-spacing: -.011em;
+    -webkit-font-smoothing: antialiased;
   }
-  a { color: var(--run); }
+  code, .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
-  /* ---------------------------------------------------------- header */
-  header { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
-  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
-  .sub { color: var(--dim); font-size: 12px; }
-  .spacer { flex: 1 1 auto; }
-  .metrics { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; }
-  .metric b { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .metric span { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-left: 6px; }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 72px; }
+  .grow { flex: 1 1 auto; min-width: 0; }
 
-  .live { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pend); }
-  .live.on .dot { background: var(--done); animation: pulse 2s ease-in-out infinite; }
-  .live.off .dot { background: var(--fail); }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
-  @media (prefers-reduced-motion: reduce) { .live.on .dot { animation: none } }
-
-  /* progress */
-  .bar { display: flex; gap: 2px; margin: 12px 0 4px; height: 6px; }
-  .bar i { flex: 1 1 0; border-radius: 2px; background: var(--pend); }
-  .bar i.done { background: var(--done); }
-  .bar i.running { background: var(--run); }
-  .bar i.failed, .bar i.blocked { background: var(--fail); }
-  .bar i.interrupted { background: var(--warn); }
-
-  .alerts { margin: 12px 0 0; display: grid; gap: 8px; }
-  .alert { border: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--panel); padding: 9px 12px; border-radius: 4px; color: var(--ink); }
-  .alert.bad { border-left-color: var(--fail); }
-
-  /* ---------------------------------------------------------- lanes */
-  /* Cards cap their width: when integration leaves a single barrier running,
-     one card should read like a card, not stretch across the whole window. */
-  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 480px)); justify-content: start; gap: 14px; margin-top: 18px; align-items: start; }
-  .lanes:empty { display: none; }
-  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  .lane > .head { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-  .lane .name { font-weight: 600; letter-spacing: .1em; font-size: 11px; text-transform: uppercase; }
-  .lane .name.barrier { color: var(--warn); }
-  .lane .branch { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .dots { display: flex; flex-wrap: wrap; gap: 5px; padding: 10px 12px 2px; }
-  .dots.inline { padding: 0; gap: 4px; }
-  .dots.inline button { width: 24px; height: 24px; }
-  .dots button {
-    all: unset; cursor: pointer; width: 26px; height: 26px; border-radius: 4px;
-    display: grid; place-items: center; font-size: 10px; color: var(--dim);
-    background: var(--panel-2); border: 1px solid var(--line); font-variant-numeric: tabular-nums;
+  /* ------------------------------------------------------------- topbar */
+  .topbar {
+    position: sticky; top: 0; z-index: 3;
+    display: flex; align-items: center; gap: 12px;
+    min-height: 48px; padding: 6px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
   }
-  :focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-radius: 3px; }
-  .dots button.done { color: var(--on-done); background: var(--done); border-color: var(--done); }
-  .dots button.running { color: var(--on-run); background: var(--run); border-color: var(--run); }
-  .dots button.failed, .dots button.blocked { color: var(--on-fail); background: var(--fail); border-color: var(--fail); }
-  .dots button.interrupted { color: var(--on-warn); background: var(--warn); border-color: var(--warn); }
+  .crumbs { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .badge-app {
+    display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 auto;
+    background: var(--accent); color: var(--on-accent); border-radius: 5px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: -.02em;
+  }
+  h1 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .current { padding: 8px 12px 10px; }
-  .current .tno { color: var(--run); }
-  .current.idle .tno { color: var(--faint); }
-  .current .tno.failed, .current .tno.blocked { color: var(--fail); }
-  .current .tno.interrupted { color: var(--warn); }
-  .current .tno.done { color: var(--done); }
-  .current .title { color: var(--ink); }
-  .current .meta { color: var(--faint); font-size: 11px; margin-top: 3px; display: flex; gap: 12px; flex-wrap: wrap; }
-  .current .timer { font-variant-numeric: tabular-nums; }
+  .stats { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+  .stat {
+    display: inline-flex; align-items: baseline; gap: 5px;
+    padding: 3px 8px; border-radius: var(--radius-sm);
+    font-size: 12px; color: var(--text-2); white-space: nowrap;
+  }
+  .stat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .live {
+    display: inline-flex; align-items: center; gap: 6px; margin-left: 6px;
+    padding: 3px 10px 3px 8px; border: 1px solid var(--line); border-radius: 999px;
+    font-size: 11.5px; color: var(--text-2); background: var(--surface-2); white-space: nowrap;
+  }
+  .live .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--idle); }
+  .live.on .pip { background: var(--done); box-shadow: 0 0 0 3px var(--done-soft); animation: breathe 2.4s ease-in-out infinite; }
+  .live.off .pip { background: var(--fail); box-shadow: 0 0 0 3px var(--fail-soft); }
+  @keyframes breathe { 0%, 100% { opacity: 1 } 50% { opacity: .4 } }
+  @media (prefers-reduced-motion: reduce) { .live.on .pip { animation: none } }
 
-  .feed { margin: 0 12px 12px; background: var(--feed-bg); border: 1px solid var(--line); border-radius: 4px; max-height: 182px; overflow: auto; }
-  .feed div { display: flex; gap: 8px; align-items: center; height: 26px; padding: 0 8px; border-bottom: 1px solid var(--feed-line); white-space: nowrap; }
-  .feed div:last-child { border-bottom: 0; }
-  .feed .tool { color: var(--ink); flex: 0 0 auto; }
-  .feed .arg { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
-  .feed .mark { flex: 0 0 auto; width: 10px; color: var(--faint); }
-  .feed .mark.ok { color: var(--done); }
-  .feed .mark.err { color: var(--fail); }
-  .feed .sub { color: var(--faint); }
-  .feed .txt { color: var(--faint); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
-  .feed .empty { color: var(--dim); }
+  /* ------------------------------------------------------------ progress */
+  .summary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px 0 10px; }
+  .track { display: flex; gap: 3px; flex: 1 1 240px; min-width: 180px; height: 4px; }
+  .track i { flex: 1 1 0; border-radius: 2px; background: var(--line); }
+  .track i.done { background: var(--accent); }
+  .track i.running { background: var(--run); }
+  .track i.failed, .track i.blocked { background: var(--fail); }
+  .track i.interrupted { background: var(--warn); }
+  .legend { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+  .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
+  .subline .sep { color: var(--text-faint); }
 
-  .lane > .foot { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; background: var(--panel-2); }
+  /* -------------------------------------------------------------- alerts */
+  .alerts { display: grid; gap: 8px; margin-top: 16px; }
+  .alerts:empty { display: none; }
+  .alert {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface); font-size: 12.5px; color: var(--text);
+  }
+  .alert svg { flex: 0 0 auto; margin-top: 2px; }
+  .alert.bad { border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
+  .alert b { font-weight: 600; }
+  .alert[data-task] { cursor: pointer; transition: background .12s ease; }
+  .alert[data-task]:hover { background: color-mix(in srgb, var(--fail-soft) 60%, var(--hover)); }
+  .alert .more { margin-left: auto; align-self: center; flex: 0 0 auto; color: var(--text-2); font-size: 11.5px; }
+  .alert code { color: var(--text-2); }
 
-  /* ---------------------------------------------------------- sections */
-  section { margin-top: 22px; }
-  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--faint); font-weight: 600; margin: 0 0 8px; }
-  .rows { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
-  .row { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+  /* --------------------------------------------------------------- board */
+  .board {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 460px));
+    justify-content: start; gap: 12px; margin-top: 16px; align-items: start;
+  }
+  .board:empty { display: none; }
+  .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); }
+  .card .kind { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+  .card .kind.barrier { color: var(--accent-ink); }
+  .card .branch {
+    font-family: var(--mono); font-size: 11px; color: var(--text-3);
+    background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px;
+    padding: 1px 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px 2px; }
+  .chip {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+    min-height: 24px; padding: 2px 8px 2px 6px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--surface-2);
+    font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+  }
+  .chip:hover { background: var(--hover); color: var(--text); border-color: var(--text-faint); }
+  .chip.running { color: var(--text); border-color: color-mix(in srgb, var(--run) 42%, var(--line)); background: var(--run-soft); }
+  .chip.failed, .chip.blocked { color: var(--text); border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); background: var(--fail-soft); }
+
+  .now { padding: 10px 14px 12px; display: grid; gap: 6px; min-width: 0; }
+  .now .title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; }
+  .now .title .tno { color: var(--text-2); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .now .title .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .now .meta { display: flex; gap: 10px; flex-wrap: wrap; min-width: 0; font-size: 11.5px; color: var(--text-3); }
+  .now .meta .clock { font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .now .meta .tool { font-family: var(--mono); font-size: 11px; }
+
+  .feed { margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-2); max-height: 208px; overflow: auto; }
+  .feed .ln { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  .feed .ln:last-child { border-bottom: 0; }
+  .feed .ico { flex: 0 0 auto; display: grid; place-items: center; width: 12px; }
+  .feed .name { font-size: 12px; font-weight: 500; flex: 0 0 auto; }
+  .feed .name.sub { color: var(--text-2); font-weight: 400; }
+  .feed .arg { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+  .feed .say { font-size: 12px; color: var(--text-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
+  .feed .empty { display: flex; align-items: center; height: 40px; padding: 0 10px; color: var(--text-3); font-size: 12px; }
+
+  .card > .foot {
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px 14px;
+    border-top: 1px solid var(--line-soft); background: var(--surface-2);
+    font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------ sections */
+  section { margin-top: 26px; }
+  h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
+  .list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  .row {
+    display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 14px;
+    border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
+    transition: background .12s ease;
+  }
   .row:last-child { border-bottom: 0; }
-  .row .mark { width: 12px; }
+  .row[data-task] { cursor: pointer; }
+  .row[data-task]:hover { background: var(--hover); }
+  .row .tag { color: var(--text-2); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .mono { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .right { margin-left: auto; display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .row .err { color: var(--fail); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .grow { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .aux { color: var(--faint); font-size: 11px; }
-  .mark.done { color: var(--done); } .mark.running { color: var(--run); }
-  .mark.failed, .mark.blocked { color: var(--fail); } .mark.interrupted { color: var(--warn); }
-  .mark.pending { color: var(--faint); }
-  .dagline { color: var(--dim); }
-  .dagline b { color: var(--faint); font-weight: 400; }
+  .row .chips { padding: 0; }
 
-  /* ---------------------------------------------------------- drawer */
-  .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  .kv-row:last-child { border-bottom: 0; }
+  .kv-row .k { color: var(--text-2); width: 150px; flex: 0 0 auto; }
+  .kv-row .v { overflow-wrap: anywhere; min-width: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 500; border: 1px solid var(--line); color: var(--text-2); background: var(--surface-2);
+  }
+  .pill.ok { color: var(--done); border-color: color-mix(in srgb, var(--done) 38%, var(--line)); background: var(--done-soft); }
+  .pill.bad { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
+  .pill.live { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: var(--accent-soft); }
+
+  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
+  .flow .arrow { color: var(--text-faint); }
+  .flow .node { font-variant-numeric: tabular-nums; }
+  .flow .node.done { color: var(--text-3); }
+  .flow .node.running { color: var(--text); font-weight: 600; }
+
+  .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
+
+  /* -------------------------------------------------------------- drawer */
+  .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .14s ease; z-index: 4; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   aside {
-    position: fixed; top: 0; right: 0; height: 100%; width: min(620px, 94vw);
-    background: var(--panel); border-left: 1px solid var(--line);
-    transform: translateX(100%); transition: transform .18s ease-out, visibility 0s .18s;
-    display: flex; flex-direction: column; z-index: 2;
+    position: fixed; top: 0; right: 0; height: 100%; width: min(540px, 100vw);
+    background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
+    transform: translateX(100%);
     /* Hidden, not merely off-screen: a translated panel still counts toward
-       the document's scroll width on a narrow viewport. */
+       the document's scroll width on a narrow viewport, and its controls stay
+       focusable behind the scrim. */
     visibility: hidden;
+    transition: transform .16s cubic-bezier(.32, .72, 0, 1), visibility 0s .16s;
+    display: flex; flex-direction: column; z-index: 5;
   }
-  aside.open { transform: none; visibility: visible; transition: transform .18s ease-out; }
-  @media (prefers-reduced-motion: reduce) { aside, .scrim { transition: none } }
-  aside .head { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-  aside .head h2 { margin: 0; font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--ink); font-weight: 600; }
-  aside .body { overflow: auto; padding: 14px 16px 40px; }
-  aside h3 { margin: 18px 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  aside h3:first-child { margin-top: 0; }
-  aside pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: var(--dim); }
-  aside code { color: var(--dim); }
-  aside .close { all: unset; cursor: pointer; color: var(--dim); padding: 2px 8px; border-radius: 4px; }
-  aside .close:hover, aside .close:focus-visible { background: var(--panel-2); color: var(--ink); }
-  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
-  .kv dt { color: var(--faint); }
-  .kv dd { margin: 0; overflow-wrap: anywhere; }
-  ul.steps { margin: 0; padding-left: 18px; color: var(--dim); }
-  .empty-state { color: var(--faint); padding: 40px 0; text-align: center; }
+  aside.open { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
+  @media (prefers-reduced-motion: reduce) { aside, .scrim, .row, .chip { transition: none } }
+  aside .head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  aside h2#d-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text); min-width: 0; }
+  aside h2#d-title .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  aside .body { overflow: auto; padding: 12px 0 48px; }
+  aside h3 { margin: 22px 16px 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+  aside .pad { padding: 0 16px; }
+  aside pre { margin: 0 16px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-2); font: 400 11.5px/1.6 var(--mono); }
+  .close {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px;
+  }
+  .close:hover { background: var(--hover); color: var(--text); }
+  kbd {
+    font-family: var(--ui); font-size: 10.5px; line-height: 1; padding: 3px 5px;
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+    background: var(--surface-2); color: var(--text-2);
+  }
+  ul.steps { margin: 0; padding: 0 16px 0 34px; color: var(--text-2); font-size: 12.5px; }
+  ul.steps li { margin: 3px 0; }
+  ul.steps li.on { color: var(--text); }
 </style>
 </head>
 <body>
 
-<header>
-  <div>
+<header class="topbar">
+  <div class="crumbs">
+    <span class="badge-app" aria-hidden="true">plo</span>
     <h1 id="plan-title">…</h1>
-    <div class="sub" id="plan-sub"></div>
   </div>
-  <div class="spacer"></div>
-  <div class="metrics">
-    <div class="metric"><b id="m-progress">–</b><span>done</span></div>
-    <div class="metric"><b id="m-cost">–</b><span>spent</span></div>
-    <div class="metric"><b id="m-elapsed">–</b><span>elapsed</span></div>
-    <div class="live off" id="live"><i class="dot"></i><span id="live-text">connecting…</span></div>
+  <div class="grow"></div>
+  <div class="stats">
+    <span class="stat"><b id="m-progress">–</b> done</span>
+    <span class="stat"><b id="m-cost">–</b> spent</span>
+    <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
+    <span class="live off" id="live"><i class="pip"></i><span id="live-text">connecting…</span></span>
   </div>
 </header>
 
-<main>
-<!-- The bar is decoration; #counts states the same thing in words. -->
-<div class="bar" id="bar" aria-hidden="true"></div>
-<div class="sub" id="counts" role="status" aria-live="polite"></div>
-<div class="alerts" id="alerts" role="status" aria-live="polite"></div>
+<div class="wrap">
+  <div class="summary">
+    <div class="track" id="bar" aria-hidden="true"></div>
+    <div class="legend" id="counts" role="status" aria-live="polite"></div>
+  </div>
+  <div class="subline" id="plan-sub"></div>
 
-<div class="lanes" id="board"></div>
+  <main>
+    <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
 
-<section id="settled-section" hidden>
-  <h2>Settled lanes</h2>
-  <div class="rows" id="settled"></div>
-</section>
+    <div class="board" id="board"></div>
 
-<section id="barriers-section" hidden>
-  <h2>Barriers — after every lane, in order</h2>
-  <div class="rows" id="barriers"></div>
-</section>
+    <section id="settled-section" hidden>
+      <h2>Settled lanes</h2>
+      <div class="list" id="settled"></div>
+    </section>
 
-<section id="integration-section" hidden>
-  <h2>Integration</h2>
-  <div class="rows" id="integration"></div>
-</section>
+    <section id="barriers-section" hidden>
+      <h2>Barriers</h2>
+      <div class="list" id="barriers"></div>
+    </section>
 
-<section id="dag-section" hidden>
-  <h2>Lane plan</h2>
-  <div class="rows" id="dag"></div>
-</section>
+    <section id="integration-section" hidden>
+      <h2>Integration</h2>
+      <div class="list" id="integration"></div>
+    </section>
 
-</main>
+    <section id="dag-section" hidden>
+      <h2>Lane plan</h2>
+      <div class="list" id="dag"></div>
+    </section>
+  </main>
+</div>
 
 <div class="scrim" id="scrim"></div>
 <aside id="drawer" role="dialog" aria-modal="true" aria-hidden="true" inert aria-labelledby="d-title">
   <div class="head">
     <h2 id="d-title">Task</h2>
-    <div class="spacer"></div>
-    <button class="close" id="d-close" aria-label="Close">esc ✕</button>
+    <div class="grow"></div>
+    <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
   </div>
   <div class="body" id="d-body"></div>
 </aside>
@@ -220,15 +357,41 @@
 <script>
 'use strict';
 
-const MARK = { done: '✓', running: '▶', pending: '·', failed: '✗', blocked: '■', interrupted: '⚡' };
 const $ = (id) => document.getElementById(id);
 
-let snap = null;      // last snapshot payload
-let skew = 0;         // serverNow - clientNow, so timers agree with the run
-let openTask = null;  // task number shown in the drawer
+let snap = null;       // last snapshot payload
+let skew = 0;          // serverNow - clientNow, so timers agree with the run
+let openTask = null;   // task number shown in the drawer
 let openedFrom = null; // element that opened it, to hand focus back on close
 
-// ------------------------------------------------------------ formatting
+/**
+ * Rewriting innerHTML that did not change is not just wasted work: it destroys
+ * whatever the reader had focused inside it. With a snapshot arriving every
+ * second, tabbing to a task row was a race the reader could not win.
+ */
+function paint(el, html) {
+  if (el.dataset.sig === html) return false;
+  el.dataset.sig = html;
+  el.innerHTML = html;
+  return true;
+}
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const short = (sha) => String(sha || '').slice(0, 7);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * An agent that blocks writes a report, not a sentence — headings, bold, the
+ * whole account. A banner takes its first real line; the rest is one click
+ * away in the drawer, where there is room for it.
+ */
+function gist(text, max = 150) {
+  const line = String(text || '')
+    .split('\n')
+    .map((l) => l.replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').replace(/`/g, '').trim())
+    .find((l) => l.length > 2) || '';
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+}
 
 function dur(ms) {
   if (ms == null || !isFinite(ms) || ms < 0) return '–';
@@ -243,22 +406,74 @@ const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date
 // Cost lands only when a process exits, so zero means "not reported yet",
 // not "this was free". Saying $0.00 there is a lie the reader acts on.
 const money = (v) => (typeof v === 'number' && v > 0 ? `$${v.toFixed(2)}` : '—');
-/**
- * Rewriting innerHTML that did not change is not just wasted work: it destroys
- * whatever the reader had focused inside it. With a snapshot arriving every
- * second, tabbing to a task row was a race the reader could not win.
- */
-function paint(el, html) {
-  if (el.dataset.sig === html) return false;
-  el.dataset.sig = html;
-  el.innerHTML = html;
-  return true;
-}
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const short = (sha) => String(sha || '').slice(0, 7);
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-// ------------------------------------------------------------ rendering
+// ------------------------------------------------------------ status marks
+
+const STATUS_WORD = {
+  done: 'Done', running: 'In progress', pending: 'Todo',
+  failed: 'Failed', blocked: 'Blocked', interrupted: 'Interrupted',
+};
+
+/**
+ * Status reads as a shape first and a colour second — the same reason Linear
+ * draws a ring that fills rather than a coloured dot. Colour alone excludes
+ * anyone who cannot separate the hues, and these six states matter.
+ */
+function statusIcon(status, size = 15) {
+  const s = size, c = s / 2;
+  const open = `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true" focusable="false">`;
+  const ring = (stroke, dash = '') => `<circle cx="${c}" cy="${c}" r="${c - 1.25}" fill="none" stroke="${stroke}" stroke-width="1.5"${dash} />`;
+
+  switch (status) {
+    case 'done':
+      return `${open}<circle cx="${c}" cy="${c}" r="${c - 0.5}" fill="var(--accent)" />
+        <path d="M${c * 0.6} ${c + c * 0.03} l${c * 0.28} ${c * 0.3} l${c * 0.55} -${c * 0.6}" fill="none" stroke="var(--on-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+    case 'running': {
+      // Half-filled ring: a pie drawn as one fat dashed stroke, Linear-style.
+      const r = (c - 1.25) / 2;
+      const circ = 2 * Math.PI * r;
+      return `${open}${ring('var(--run)')}
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--run)" stroke-width="${(r * 2).toFixed(2)}"
+          stroke-dasharray="${(circ * 0.5).toFixed(2)} ${circ.toFixed(2)}" transform="rotate(-90 ${c} ${c})" /></svg>`;
+    }
+    case 'failed':
+      return `${open}${ring('var(--fail)')}
+        <path d="M${c - 2.3} ${c - 2.3} l4.6 4.6 M${c + 2.3} ${c - 2.3} l-4.6 4.6" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
+    case 'blocked':
+      return `${open}${ring('var(--fail)')}
+        <path d="M${c - 2.6} ${c} h5.2" stroke="var(--fail)" stroke-width="1.6" stroke-linecap="round" /></svg>`;
+    case 'interrupted':
+      return `${open}${ring('var(--warn)', ' stroke-dasharray="2.6 2.2"')}
+        <circle cx="${c}" cy="${c}" r="1.6" fill="var(--warn)" /></svg>`;
+    default:
+      return `${open}${ring('var(--idle)')}</svg>`;
+  }
+}
+
+function resultIcon(ok) {
+  if (ok === null || ok === undefined) {
+    return `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="2" fill="var(--text-faint)" /></svg>`;
+  }
+  return ok
+    ? `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.2 5.6 L4.3 7.7 L8.8 3.2" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+    : `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.8 2.8 l5.4 5.4 M8.2 2.8 l-5.4 5.4" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
+}
+
+const alertIcon = (bad) => {
+  const c = bad ? 'var(--fail)' : 'var(--warn)';
+  return `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+    <circle cx="7" cy="7" r="6.25" fill="none" stroke="${c}" stroke-width="1.5" />
+    <path d="M7 3.6 v3.9" stroke="${c}" stroke-width="1.5" stroke-linecap="round" />
+    <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
+};
+
+/** Two branches folding into one: the barrier card's mark. */
+const mergeIcon = () => `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+  <path d="M2.8 1.6 v2.6 c0 2.2 1.5 2.9 3.2 2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+  <path d="M2.8 11.4 v-2.6 c0-2.2 1.5-2.9 3.2-2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+  <circle cx="10.2" cy="6.5" r="1.7" fill="currentColor" /></svg>`;
+
+// --------------------------------------------------------------- rendering
 
 function render(s) {
   snap = s;
@@ -266,26 +481,27 @@ function render(s) {
 
   if (!s.ready) {
     $('plan-sub').textContent = s.plan || '';
-    $('board').innerHTML = `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`;
-    $('bar').innerHTML = '';
+    paint($('board'), `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`);
+    paint($('bar'), '');
     $('counts').textContent = '';
-    $('alerts').innerHTML = '';
+    paint($('alerts'), '');
     for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
     return;
   }
 
   const all = [...s.lanes.flatMap((l) => l.tasks), ...s.barriers];
+
   $('plan-sub').innerHTML = [
-    s.base ? `base <b>${esc(s.base.branch)}</b> @ ${esc(short(s.base.commit))}` : '',
+    s.base ? `base <code>${esc(s.base.branch)}</code> at <code>${esc(short(s.base.commit))}</code>` : '',
     s.testCommand ? `tests <code>${esc(s.testCommand)}</code>` : '',
-    `${s.lanes.length} lane${s.lanes.length === 1 ? '' : 's'} · max ${s.maxLanes}`,
-  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    `${plural(s.lanes.length, 'lane')} · max ${s.maxLanes}`,
+  ].filter(Boolean).join('<span class="sep">·</span>');
 
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
-  // This page is made to sit in a background tab; the tab strip should report.
-  const stuckCount = s.totals.failed + s.totals.blocked;
-  document.title = `${stuckCount ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
   $('m-cost').textContent = money(s.totals.costUsd);
+  // This page is made to sit in a background tab; the tab strip should report.
+  const stuck = s.totals.failed + s.totals.blocked;
+  document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
 
   paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
   $('counts').textContent = ['running', 'failed', 'blocked', 'interrupted', 'pending']
@@ -303,14 +519,13 @@ function renderAlerts(s) {
   const out = [];
   if (s.rateLimit) {
     const at = s.rateLimit.resetsAt ? new Date(s.rateLimit.resetsAt * 1000).toLocaleTimeString() : null;
-    out.push(`<div class="alert bad">Usage limit <b>${esc(s.rateLimit.status)}</b> (${esc(s.rateLimit.rateLimitType || 'unknown window')})${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div>`);
+    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div></div>`);
   }
   if (s.planChanged) {
-    out.push('<div class="alert">The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div>');
+    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div></div>`);
   }
-  const stuck = [...s.lanes.flatMap((l) => l.tasks), ...s.barriers].filter((t) => t.status === 'failed' || t.status === 'blocked');
-  for (const t of stuck) {
-    out.push(`<div class="alert bad">T${t.n} <b>${esc(t.status)}</b> — ${esc(t.error || 'no error recorded')}</div>`);
+  for (const t of [...s.lanes.flatMap((l) => l.tasks), ...s.barriers].filter((t) => t.status === 'failed' || t.status === 'blocked')) {
+    out.push(`<div class="alert bad" data-task="${t.n}" role="button" tabindex="0" aria-haspopup="dialog">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div><span class="more">Details</span></div>`);
   }
   paint($('alerts'), out.join(''));
 }
@@ -326,11 +541,24 @@ const sumTurns = (tasks) => tasks.reduce((n, t) => n + (t.turns || 0), 0);
 const sumCommits = (tasks) => tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0);
 const sumCost = (tasks) => tasks.reduce((n, t) => n + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
 
-function dotsHtml(tasks, extraClass = '') {
-  return `<div class="dots ${extraClass}">${tasks.map((t) => {
-    const name = `Task ${t.n}, ${esc(t.title)}, ${esc(t.status)}`;
-    return `<button class="${t.status}" data-task="${t.n}" aria-haspopup="dialog" aria-label="${name}" title="${name}">${t.n}</button>`;
+function chipsHtml(tasks) {
+  return `<div class="chips">${tasks.map((t) => {
+    const name = `Task ${t.n}, ${esc(t.title)}, ${esc(STATUS_WORD[t.status] || t.status)}`;
+    return `<button class="chip ${t.status}" data-task="${t.n}" aria-haspopup="dialog" aria-label="${name}" title="${name}">${statusIcon(t.status, 13)}${t.n}</button>`;
   }).join('')}</div>`;
+}
+
+function activityHtml(a) {
+  if (a.kind === 'text') return `<div class="ln"><span class="ico"></span><span class="say">${esc(a.text)}</span></div>`;
+  if (a.kind === 'run') return `<div class="ln"><span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
+  if (a.kind === 'result') return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg">${esc(a.text || '')}</span></div>`;
+  return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span><span class="arg">${esc(a.target || '')}</span></div>`;
+}
+
+function feedPlaceholder(t) {
+  if (t.status === 'pending') return 'waiting for its turn';
+  if (t.status === 'running') return 'started — no agent events yet';
+  return t.error ? gist(t.error, 90) : STATUS_WORD[t.status] || t.status;
 }
 
 /**
@@ -344,44 +572,31 @@ function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
   const feed = live && current.activity.length
     ? current.activity.slice().reverse().map(activityHtml).join('')
     : `<div class="empty">${current ? esc(feedPlaceholder(current)) : 'every task settled'}</div>`;
-  const commits = sumCommits(tasks);
 
   return `
     <div class="head">
-      <span class="name ${kind}">${esc(label)}</span>
-      <span class="branch" title="${esc(subTitle || '')}">${esc(sub || '')}</span>
+      <span class="kind ${kind}">${kind === 'barrier' ? mergeIcon() : ''}${esc(label)}</span>
+      <div class="grow"></div>
+      ${sub ? `<span class="branch" title="${esc(subTitle || sub)}">${esc(sub)}</span>` : ''}
     </div>
-    ${dotsHtml(tasks)}
-    <div class="current ${live ? '' : 'idle'}">
+    ${chipsHtml(tasks)}
+    <div class="now">
       ${current
-        ? `<div><span class="tno ${esc(current.status)}">${MARK[current.status] || '·'} T${current.n}</span> <span class="title">${esc(current.title)}</span></div>
+        ? `<div class="title">${statusIcon(current.status)}<span class="tno">T${current.n}</span><span class="label">${esc(current.title)}</span></div>
            <div class="meta">
-             ${live
-               ? `<span class="timer" data-since="${esc(current.startedAt || '')}">–</span>`
-               : `<span class="timer">${esc(span(current))}</span>`}
-             <span>${current.turns || 0} turns</span>
+             <span class="clock"${live ? ` data-since="${esc(current.startedAt || '')}"` : ''}>${live ? '–' : esc(span(current))}</span>
+             <span>${plural(current.turns || 0, 'turn')}</span>
              ${current.attempts > 1 ? `<span>attempt ${current.attempts}</span>` : ''}
-             ${current.lastTool ? `<span>${esc(current.lastTool.name)}</span>` : ''}
+             ${current.lastTool ? `<span class="tool">${esc(current.lastTool.name)}</span>` : ''}
            </div>`
-        : '<div class="title">every task settled</div>'}
+        : '<div class="title"><span class="label">Every task settled</span></div>'}
     </div>
     <div class="feed">${feed}</div>
-    <div class="foot"><span>${sumTurns(tasks)} turns</span><span>${plural(commits, 'commit')}</span><span>${money(sumCost(tasks))}</span></div>`;
-}
-
-function feedPlaceholder(t) {
-  if (t.status === 'pending') return 'waiting for its turn';
-  if (t.status === 'running') return 'started — no agent events yet';
-  return t.error ? t.error : t.status;
-}
-
-function activityHtml(a) {
-  if (a.kind === 'text') return `<div><span class="mark"></span><span class="txt">${esc(a.text)}</span></div>`;
-  if (a.kind === 'run') return `<div><span class="mark">↻</span><span class="tool">${esc(a.label || 'run')}</span></div>`;
-  if (a.kind === 'result') return `<div><span class="mark ${a.ok ? 'ok' : 'err'}">${a.ok ? '✓' : '✗'}</span><span class="tool">${esc(a.label || 'result')}</span><span class="arg">${esc(a.text || '')}</span></div>`;
-  const mark = a.ok === null || a.ok === undefined ? '' : a.ok ? 'ok' : 'err';
-  const glyph = a.ok === null || a.ok === undefined ? '·' : a.ok ? '✓' : '✗';
-  return `<div><span class="mark ${mark}">${glyph}</span><span class="tool${a.sub ? ' sub' : ''}">${a.sub ? '└ ' : ''}${esc(a.name)}</span><span class="arg">${esc(a.target || '')}</span></div>`;
+    <div class="foot">
+      <span>${plural(sumTurns(tasks), 'turn')}</span>
+      <span>${plural(sumCommits(tasks), 'commit')}</span>
+      <span>${money(sumCost(tasks))}</span>
+    </div>`;
 }
 
 /**
@@ -400,13 +615,13 @@ function renderBoard(s) {
   }));
 
   if (s.activeBarrier != null) {
-    const current = s.barriers.find((t) => t.n === s.activeBarrier);
     cards.push({
       key: 'barrier',
       sig: JSON.stringify(s.barriers),
       html: cardHtml({
-        kind: 'barrier', label: 'Barrier', sub: 'runs in the merged tree',
-        tasks: s.barriers, current,
+        kind: 'barrier', label: 'Barrier', sub: 'merged tree',
+        subTitle: 'Barrier tasks run after every lane has merged',
+        tasks: s.barriers, current: s.barriers.find((t) => t.n === s.activeBarrier),
       }),
     });
   }
@@ -416,7 +631,7 @@ function renderBoard(s) {
     let el = host.querySelector(`[data-card="${CSS.escape(card.key)}"]`);
     if (!el) {
       el = document.createElement('div');
-      el.className = 'lane';
+      el.className = 'card';
       el.dataset.card = card.key;
       host.appendChild(el);
     }
@@ -426,8 +641,6 @@ function renderBoard(s) {
       el.dataset.sig = card.sig;
       el.innerHTML = card.html;
     }
-    // (the signature is the lane payload, not the html: identical rendering
-    //  from different data would otherwise skip a legitimate update)
   }
   const wanted = cards.map((c) => c.key);
   for (const el of [...host.children]) if (!wanted.includes(el.dataset.card)) el.remove();
@@ -435,26 +648,30 @@ function renderBoard(s) {
   const settled = s.lanes.filter((l) => l.settled);
   $('settled-section').hidden = !settled.length;
   paint($('settled'), settled.map((lane) => `<div class="row">
-      <span class="mark done">✓</span>
-      <span class="aux">Lane ${esc(lane.label)}</span>
-      ${dotsHtml(lane.tasks, 'inline')}
-      <span class="grow aux">${esc(lane.branch || '')}</span>
-      <span class="aux">${sumTurns(lane.tasks)} turns · ${plural(sumCommits(lane.tasks), 'commit')} · ${money(sumCost(lane.tasks))}</span>
+      ${statusIcon('done')}
+      <span class="tag">Lane ${esc(lane.label)}</span>
+      ${chipsHtml(lane.tasks)}
+      <span class="mono">${esc(lane.branch || '')}</span>
+      <span class="right">
+        <span>${plural(sumTurns(lane.tasks), 'turn')}</span>
+        <span>${plural(sumCommits(lane.tasks), 'commit')}</span>
+        <span>${money(sumCost(lane.tasks))}</span>
+      </span>
     </div>`).join(''));
 }
 
 function rowHtml(t) {
   const bits = [];
   if (t.commits && t.commits.length) bits.push(`${plural(t.commits.length, 'commit')} ${t.commits.map(short).join(' ')}`);
-  if (t.turns) bits.push(`${t.turns} turns`);
+  if (t.turns) bits.push(plural(t.turns, 'turn'));
   if (t.attempts > 1) bits.push(`${t.attempts} attempts`);
   if (t.reconciled) bits.push('reconciled from git');
   return `<div class="row" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
-    <span class="mark ${t.status}">${MARK[t.status] || '·'}</span>
-    <span>T${t.n}</span>
-    <span class="grow">${esc(t.title)}</span>
-    <span class="aux">${esc(bits.join(' · '))}</span>
-    ${t.error ? `<span class="err">${esc(t.error.split('\n')[0].slice(0, 80))}</span>` : ''}
+    ${statusIcon(t.status)}
+    <span class="tag">T${t.n}</span>
+    <span class="name">${esc(t.title)}</span>
+    ${t.error ? `<span class="err">${esc(gist(t.error, 70))}</span>` : ''}
+    <span class="right">${esc(bits.join('  ·  '))}</span>
   </div>`;
 }
 
@@ -465,24 +682,30 @@ function renderBarriers(s) {
 
 function renderIntegration(s) {
   const i = s.integration || {};
+  const pill = (text, kind) => `<span class="pill ${kind}">${esc(text)}</span>`;
+  const statusKind = i.status === 'done' ? 'ok'
+    : String(i.status).includes('failed') ? 'bad'
+      : i.status === 'pending' ? '' : 'live';
+
   const rows = [
-    ['status', i.status || 'pending'],
-    ['merged lanes', (i.mergedLanes || []).join(', ') || 'none'],
-    ['full suite', i.suite ? (i.suite.ok ? 'PASS' : 'FAIL') : 'not run'],
-    ['cross-lane review', i.review ? (i.review.verdict || (i.review.clean ? 'CLEAN' : 'findings')) : 'not run'],
+    ['Status', pill(i.status || 'pending', statusKind)],
+    ['Merged lanes', (i.mergedLanes || []).length ? esc(i.mergedLanes.join(', ')) : '<span class="mono">none</span>'],
+    ['Full suite', i.suite ? pill(i.suite.ok ? 'pass' : 'fail', i.suite.ok ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
+    ['Cross-lane review', i.review ? pill(i.review.verdict || (i.review.clean ? 'clean' : 'findings'), i.review.clean ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
   ];
   $('integration-section').hidden = false;
-  paint($('integration'), rows.map(([k, v]) => `<div class="row"><span class="grow">${esc(k)}</span><span class="aux">${esc(v)}</span></div>`).join(''));
+  paint($('integration'), rows.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join(''));
 }
 
 function renderDag(s) {
   $('dag-section').hidden = false;
-  const lanes = s.lanes.map((l) => `<div class="row"><span class="aux">Lane ${esc(l.label)}</span><span class="dagline grow">${l.tasks.map((t) => `T${t.n}`).join(' <b>→</b> ')}</span></div>`);
-  if (s.barriers.length) lanes.push(`<div class="row"><span class="aux">Barriers</span><span class="dagline grow">${s.barriers.map((t) => `T${t.n}`).join(' <b>→</b> ')}</span></div>`);
-  paint($('dag'), lanes.join(''));
+  const flow = (tasks) => tasks.map((t) => `<span class="node ${t.status}">T${t.n}</span>`).join('<span class="arrow">→</span>');
+  const rows = s.lanes.map((l) => `<div class="kv-row"><span class="k">Lane ${esc(l.label)}</span><span class="v"><span class="flow">${flow(l.tasks)}</span></span></div>`);
+  if (s.barriers.length) rows.push(`<div class="kv-row"><span class="k">Barriers</span><span class="v"><span class="flow">${flow(s.barriers)}</span></span></div>`);
+  paint($('dag'), rows.join(''));
 }
 
-// ------------------------------------------------------------ timers
+// ------------------------------------------------------------------ timers
 
 function tick() {
   if (!snap || !snap.ready || document.hidden) return;
@@ -494,16 +717,17 @@ function tick() {
 setInterval(tick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 
-// ------------------------------------------------------------ drawer
+// ------------------------------------------------------------------ drawer
 
 async function showTask(n, trigger) {
   if (trigger) openedFrom = trigger;
+  const firstOpen = openTask == null;
   openTask = n;
   $('drawer').classList.add('open');
   $('drawer').setAttribute('aria-hidden', 'false');
   $('drawer').removeAttribute('inert');
   $('scrim').classList.add('open');
-  $('d-close').focus();
+  if (firstOpen) $('d-close').focus();
   try {
     const r = await fetch(`/api/task?n=${encodeURIComponent(n)}`);
     const body = await r.json();
@@ -515,35 +739,49 @@ async function showTask(n, trigger) {
 }
 
 function drawTask(t) {
-  $('d-title').innerHTML = `<span class="mark ${t.status}">${MARK[t.status] || '·'}</span> T${t.n} — ${esc(t.title)}`;
-  const kv = [
-    ['status', t.status + (t.barrier ? ' (barrier)' : '')],
-    ['lane', t.lane || '—'],
-    ['started', t.startedAt || '—'],
-    ['ended', t.endedAt || '—'],
-    ['turns', t.turns || 0],
-    ['attempts', t.attempts || 0],
-    ['output tokens', t.outputTokens || 0],
-    ['cost', money(t.costUsd)],
-    ['model', t.model || '—'],
-    ['session', t.sessionId || '—'],
-    ['commits', (t.commits || []).map(short).join(' ') || 'none'],
-    ['log', t.logFile || '—'],
-  ];
-  const parts = [`<h3>Record</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`];
+  $('d-title').innerHTML = `${statusIcon(t.status)}<span class="label">T${t.n} · ${esc(t.title)}</span>`;
 
-  if (t.error) parts.push(`<h3>Error</h3><pre>${esc(t.error)}</pre>`);
-  if (t.result && t.result.text) parts.push(`<h3>Agent result</h3><pre>${esc(t.result.text)}</pre>`);
+  const statusPill = t.status === 'done' ? 'ok' : t.status === 'running' ? 'live' : t.status === 'pending' ? '' : 'bad';
+  const kv = [
+    ['Status', `<span class="pill ${statusPill}">${esc(STATUS_WORD[t.status] || t.status)}${t.barrier ? ' · barrier' : ''}</span>`],
+    ['Lane', t.lane ? esc(String(t.lane).toUpperCase()) : '—'],
+    ['Duration', esc(span(t))],
+    ['Turns', String(t.turns || 0)],
+    ['Attempts', String(t.attempts || 0)],
+    ['Output tokens', (t.outputTokens || 0).toLocaleString()],
+    ['Cost', money(t.costUsd)],
+    ['Model', `<span class="mono">${esc(t.model || '—')}</span>`],
+    ['Session', `<span class="mono">${esc(t.sessionId || '—')}</span>`],
+    ['Commits', (t.commits || []).length ? `<span class="mono">${t.commits.map((c) => esc(short(c))).join(' ')}</span>` : '—'],
+    ['Log', `<span class="mono">${esc(t.logFile || '—')}</span>`],
+  ];
+
+  const parts = [`<div class="pad"><div class="list">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div></div>`];
+
+  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><pre>${esc(t.error)}</pre>`);
+  // A blocked task's error IS its final message; printing both twice reads as
+  // two findings when there is one.
+  // The stored error keeps the report's line breaks; the digest collapses
+  // them. Compare on flattened text or the duplicate slips through.
+  const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const resultText = t.result && t.result.text;
+  const duplicated = resultText && t.error
+    && (flat(t.error).includes(flat(resultText).slice(0, 60)) || flat(resultText).includes(flat(t.error).slice(0, 60)));
+  if (resultText && !duplicated) parts.push(`<h3>Agent result</h3><pre>${esc(resultText)}</pre>`);
   if (t.files && t.files.writes.length) parts.push(`<h3>Declared writes</h3><pre>${t.files.writes.map(esc).join('\n')}</pre>`);
   if (t.files && t.files.excluded.length) parts.push(`<h3>Excluded by negation</h3><pre>${t.files.excluded.map(esc).join('\n')}</pre>`);
-  if (t.steps && t.steps.length) parts.push(`<h3>Plan steps</h3><ul class="steps">${t.steps.map((s) => `<li>${s.checked ? '☑' : '☐'} ${esc(s.text)}</li>`).join('')}</ul>`);
-  parts.push(`<h3>Activity${t.truncated ? ' (tail)' : ''}</h3><div class="feed" style="max-height:none">${t.activity.length ? t.activity.slice().reverse().map(activityHtml).join('') : '<div class="empty">no agent events recorded</div>'}</div>`);
+  if (t.steps && t.steps.length) {
+    parts.push(`<h3>Plan steps</h3><ul class="steps">${t.steps.map((s) => `<li class="${s.checked ? 'on' : ''}">${s.checked ? '☑' : '☐'} ${esc(s.text)}</li>`).join('')}</ul>`);
+  }
+  parts.push(`<h3>Activity${t.truncated ? ' · tail' : ''}</h3><div class="pad"><div class="feed" style="margin:0;max-height:none">${
+    t.activity.length ? t.activity.slice().reverse().map(activityHtml).join('') : '<div class="empty">no agent events recorded</div>'
+  }</div></div>`);
 
   $('d-body').innerHTML = parts.join('');
 }
 
 function closeDrawer() {
-  if (!openTask) return;
+  if (openTask == null) return;
   openTask = null;
   // Focus must not stay inside a container that is about to be aria-hidden.
   if (openedFrom && document.contains(openedFrom)) openedFrom.focus();
@@ -556,11 +794,6 @@ function closeDrawer() {
   $('scrim').classList.remove('open');
 }
 
-document.addEventListener('click', (e) => {
-  const hit = e.target.closest('[data-task]');
-  if (hit) { showTask(Number(hit.dataset.task), hit); return; }
-  if (e.target.id === 'scrim' || e.target.id === 'd-close') closeDrawer();
-});
 /** Keep Tab inside the drawer while it is open — a modal that leaks focus
  *  behind its own scrim is worse than one that never claimed to be modal. */
 function trapTab(e) {
@@ -573,18 +806,22 @@ function trapTab(e) {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
+document.addEventListener('click', (e) => {
+  const hit = e.target.closest('[data-task]');
+  if (hit) { showTask(Number(hit.dataset.task), hit); return; }
+  if (e.target.id === 'scrim' || e.target.closest('#d-close')) closeDrawer();
+});
 document.addEventListener('keydown', (e) => {
   trapTab(e);
   if (e.key === 'Escape') closeDrawer();
-  const hit = e.target.closest && e.target.closest('.row[data-task]');
+  const hit = e.target.closest && e.target.closest('[data-task][tabindex]');
   if (hit && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showTask(Number(hit.dataset.task), hit); }
 });
 
-// ------------------------------------------------------------ transport
+// --------------------------------------------------------------- transport
 
 function setLive(on, text) {
-  const el = $('live');
-  el.className = `live ${on ? 'on' : 'off'}`;
+  $('live').className = `live ${on ? 'on' : 'off'}`;
   $('live-text').textContent = text;
 }
 

@@ -128,10 +128,15 @@ limit that killed it — is already on disk in `.plo-logs/task-<n>.jsonl`, becau
     plo serve --plan <plan.md> --port 8080 --open
 
 A second window, not a second run: read-only, loopback-bound, no dependency and
-no build step. It reads the same two files `plo status` reads and shows lanes
-side by side, each with its task dots, a live activity feed, and the elapsed
-clock. Click any task for its record — commits, session id, declared writes,
-plan steps, and the full activity tail.
+no build step. Cards follow the work — a lane with nothing left collapses to one
+line, and the barrier running during integration gets a card of its own, because
+by then it is the only thing working. Click any task for its record: commits,
+session id, declared writes, plan steps, and the full activity tail.
+
+Status reads as a shape before a colour, the way an issue tracker does: an empty
+ring is waiting, a half-filled one is running, a filled check is done, a crossed
+ring failed. It follows the system light/dark setting and holds WCAG AA contrast
+in both.
 
 Two things it is careful about:
 
