@@ -140,6 +140,15 @@ stage that owns it — `Barriers ✗` with the two stages after it visibly
 untouched says more than the word `barrier-failed` in a status field, which
 only means something to a reader who already knows the order.
 
+Under it, the run is a timeline: one band per lane, one bar per task, all on
+the same clock. This is where you find out whether running these lanes at once
+paid, and what held the rest up — on the `1.11.0` release the three lanes
+finished inside twenty-two minutes side by side and the single serial barrier
+after them took twenty-six, which is the whole argument about that run in one
+picture. A task that has not started has no honest place on a time axis, so it
+waits beside it. While anything is running the axis has no end: it grows
+against your clock, not against anything on disk.
+
 The right-hand rail carries the run in one chronological feed: time, lane, tool,
 target, and how long the call took. Each lane writes its own log, so this is the
 only place that answers "what happened, in what order" — the `git checkout -b`

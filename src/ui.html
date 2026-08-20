@@ -99,7 +99,6 @@
     -webkit-font-smoothing: antialiased;
   }
   code, .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
@@ -174,12 +173,6 @@
   .verdict .soft { color: var(--text-2); font-weight: 500; }
   .verdict .bad { color: var(--fail); }
   .verdict .sep { color: var(--text-faint); font-weight: 400; }
-  .track { display: flex; gap: 3px; height: 4px; }
-  .track i { flex: 1 1 0; border-radius: 2px; background: var(--line); }
-  .track i.done { background: var(--accent); }
-  .track i.running { background: var(--run); }
-  .track i.failed, .track i.blocked { background: var(--fail); }
-  .track i.interrupted { background: var(--warn); }
   .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
   .subline .sep { color: var(--text-faint); }
 
@@ -229,10 +222,16 @@
   .alerts { display: grid; gap: 8px; margin-top: 16px; }
   .alerts:empty { display: none; }
   .alert {
-    display: flex; gap: 10px; align-items: flex-start;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
     padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
     background: var(--surface); font-size: 12.5px; color: var(--text);
   }
+  /* A flex item's default `min-width: auto` is its longest word, and an agent
+     error carries words like `error_during_execution`. That set the banner's
+     minimum width and pushed the whole document 58px past a 320px screen —
+     the page scrolled sideways because of one identifier in a message. The
+     buttons drop to their own line before the text is squeezed to nothing. */
+  .alert > div:not(.acts) { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
   .alert svg { flex: 0 0 auto; margin-top: 2px; }
   .alert.bad { border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
   .alert b { font-weight: 600; }
@@ -460,13 +459,100 @@
   .pill.bad { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
   .pill.live { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: var(--accent-soft); }
 
-  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
-  .flow .arrow { color: var(--text-faint); }
-  .flow .node { font-variant-numeric: tabular-nums; }
-  .flow .node.done { color: var(--text-3); }
-  .flow .node.running { color: var(--text); font-weight: 600; }
 
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
+
+  /* ---------------------------------------------------------- timeline */
+  /* One band per lane on a shared clock.
+     `Lane plan` drew `T1 → T2 → T3`: the order the scheduler chose. It could
+     not say that A and B overlapped for eleven minutes, that four minutes
+     passed between the last lane and the barrier with nothing running, or
+     that the serial barrier cost more than the parallel part saved. Those
+     answers are positions on a time axis, and an arrow has no axis. */
+  .tl {
+    --tl-cols: max-content minmax(0, 1fr) max-content;
+    display: grid; grid-template-columns: var(--tl-cols); align-content: start;
+    column-gap: 10px; padding: 8px 12px 10px;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  }
+  /* Same reason the lane table and the feed use it: an `auto` track only ever
+     agrees with itself, so per-row grids would put every lane letter in a
+     different place. */
+  .tl-row {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: var(--tl-cols); column-gap: 10px; align-items: center;
+    min-height: 26px;
+  }
+  @supports (grid-template-columns: subgrid) { .tl-row { grid-template-columns: subgrid; } }
+  .tl-lane {
+    font-size: 11.5px; font-weight: 600; color: var(--text-2); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .tl-lane.barrier { font-weight: 500; color: var(--accent-ink); }
+  .tl-scale { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .tl-scale b { font-weight: 500; }
+  .tl-total { color: var(--text-3); }
+  .tl-total b { color: var(--text-2); font-weight: 500; }
+  .tl-top { min-height: 20px; }
+  .tl-top .tl-q { font-size: 10.5px; color: var(--text-3); }
+
+  /* Quarter marks, drawn by the background so they rescale with the axis
+     instead of needing a write per second while the run is still growing. */
+  .tl-track {
+    position: relative; height: 20px; border-radius: 4px;
+    background: repeating-linear-gradient(to right, var(--line-soft) 0 1px, transparent 1px 25%);
+  }
+  /* "not started" is a fact the reader reads, not a separator: --text-faint
+     is for glyphs nobody has to make out. */
+  .tl-none { position: absolute; inset: 0; display: flex; align-items: center; font-size: 10.5px; color: var(--text-3); }
+  /* The block's geometry is two numbers and a division: `--s` and `--e` are
+     seconds from the run's origin, `--span` is the axis. While a task runs it
+     has no right edge — it is pinned to the end of the axis, so the second
+     that grows the run grows the bar with one property write. */
+  .tl-b {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    position: absolute; top: 2px; bottom: 2px;
+    left: calc(var(--s) / var(--span) * 100%);
+    width: max(3px, calc((var(--e) - var(--s)) / var(--span) * 100%));
+    display: flex; align-items: center; overflow: hidden;
+    padding: 0 5px; border: 1px solid transparent; border-radius: 3px;
+    font-size: 10.5px; font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tl-b.open { right: 0; width: auto; }
+  /* Half a glyph is worse than no glyph: under ~24px the bar carries no label
+     and says what it is through its accessible name and its tooltip. */
+  .tl-b.bare { padding: 0; }
+  .tl-b.bare .tl-t { display: none; }
+  .tl-b:hover { border-color: currentColor; }
+  .tl-b.done { background: var(--accent-soft); color: var(--accent-ink); }
+  .tl-b.running { background: var(--run-soft); color: var(--run); }
+  /* 10% and not 16%: in the light theme a warn tint darkens the ground under
+     its own label, and at 16% the pair measured 4.09:1. */
+  .tl-b.interrupted { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+  /* The one state that must not depend on hue: a failed bar is hatched. */
+  .tl-b.failed, .tl-b.blocked {
+    color: var(--fail);
+    background:
+      repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--fail) 20%, transparent) 4px 7px),
+      var(--fail-soft);
+  }
+  .tl-q { display: flex; align-items: center; gap: 4px; }
+  /* A task with no start time has no place on a time axis, and drawing it a
+     bar would be a lie in the one language this chart speaks. It waits beside
+     the axis — which is also where it is in the run. */
+  .tl-qb {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    display: inline-flex; align-items: center; min-height: 18px; padding: 0 7px;
+    border: 1px dashed var(--line); border-radius: 999px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+  .tl-qb:hover { border-style: solid; color: var(--text); background: var(--hover); }
+  /* On a phone the axis is under 120px wide; the run's total is already in
+     the topbar, and here it only pushed the two clock labels apart. */
+  @media (max-width: 639px) { .tl-total { display: none; } }
+  .tl-more { font-size: 10.5px; color: var(--text-3); }
 
   /* --------------------------------------------------------------- panel */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .14s ease; z-index: 4; }
@@ -603,6 +689,18 @@
   ul.steps { margin: 0; padding: 0 var(--rail-pad) 0 30px; color: var(--text-2); font-size: 12.5px; }
   ul.steps li { margin: 3px 0; }
   ul.steps li.on { color: var(--text); }
+
+  /* ------------------------------------------------------------- focus */
+  /* Last on purpose, and it has to stay last.
+     Every control on this page that resets itself with `all: unset` — the
+     copy buttons, the chips, the wrap toggle, the timeline blocks — sets
+     `outline: initial` at class specificity. Declared at the top of the file
+     this rule tied with them on specificity and lost on source order, so a
+     keyboard reader tabbed through the whole page with no visible focus at
+     all. Measured with `CSS.forcePseudoState`: `outline-style: none` on
+     seven controls, ring intact only on the plain `<input>` and the one row
+     that is a div. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -625,7 +723,6 @@
 <div class="wrap">
   <div class="summary">
     <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
-    <div class="track" id="bar" aria-hidden="true"></div>
   </div>
   <div class="subline" id="plan-sub"></div>
 
@@ -634,6 +731,11 @@
   <div class="shell">
   <main>
     <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
+
+    <section id="timeline-section" hidden>
+      <h2>Timeline</h2>
+      <div class="tl" id="timeline" aria-label="Run timeline"></div>
+    </section>
 
     <div class="board" id="board"></div>
 
@@ -647,10 +749,6 @@
       <div class="list" id="barriers"></div>
     </section>
 
-    <section id="dag-section" hidden>
-      <h2>Lane plan</h2>
-      <div class="list" id="dag"></div>
-    </section>
   </main>
 
   <aside id="panel" aria-labelledby="d-title">
@@ -821,12 +919,11 @@ function render(s) {
   if (!s.ready) {
     $('plan-sub').textContent = s.plan || '';
     paint($('board'), `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`);
-    paint($('bar'), '');
     paint($('verdict'), '');
     paint($('alerts'), '');
     renderFeed(s);
     $('stages').hidden = true;
-    for (const id of ['settled-section', 'barriers-section', 'dag-section']) $(id).hidden = true;
+    for (const id of ['settled-section', 'barriers-section', 'timeline-section']) $(id).hidden = true;
     return;
   }
 
@@ -844,15 +941,14 @@ function render(s) {
   const stuck = s.totals.failed + s.totals.blocked;
   document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
 
-  paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
   paint($('verdict'), verdictHtml(s));
 
   renderStages(s);
   renderAlerts(s);
+  renderTimeline(s);
   renderFeed(s);
   renderBoard(s);
   renderBarriers(s);
-  renderDag(s);
   tick();
 }
 
@@ -1039,6 +1135,8 @@ const clock = (iso) => {
   const d = iso ? new Date(iso) : null;
   return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', { hour12: false }) : '';
 };
+/** An axis label is a time of day, not a stopwatch: seconds are noise there. */
+const hhmm = (iso) => clock(iso).slice(0, 5);
 
 /**
  * How long a call took, once its result came back. Anything under a second
@@ -1238,12 +1336,92 @@ function renderBarriers(s) {
   paint($('barriers'), s.barriers.map(rowHtml).join(''));
 }
 
-function renderDag(s) {
-  $('dag-section').hidden = false;
-  const flow = (tasks) => tasks.map((t) => `<span class="node ${t.status}">T${t.n}</span>`).join('<span class="arrow">→</span>');
-  const rows = s.lanes.map((l) => `<div class="kv-row"><span class="k">Lane ${esc(l.label)}</span><span class="v"><span class="flow">${flow(l.tasks)}</span></span></div>`);
-  if (s.barriers.length) rows.push(`<div class="kv-row"><span class="k">Barriers</span><span class="v"><span class="flow">${flow(s.barriers)}</span></span></div>`);
-  paint($('dag'), rows.join(''));
+/**
+ * The run on one clock.
+ *
+ * Two questions justify this tool existing — did running these lanes at the
+ * same time pay, and who held the run up — and both are read off positions on
+ * a shared axis. `Lane plan` listed each lane's tasks in scheduled order,
+ * which answers neither.
+ *
+ * The blocks carry offsets in seconds and the axis carries the span; the
+ * division happens in CSS, so a run that is still growing costs one property
+ * write per second and never rewrites a node the reader might have focused.
+ */
+const QUEUE_SHOWN = 3;
+
+function renderTimeline(s) {
+  const tl = s && s.ready ? s.timeline : null;
+  $('timeline-section').hidden = !tl;
+  if (!tl) return;
+
+  const ends = tl.live ? '<b>now</b>' : `<b>${esc(hhmm(new Date(Date.parse(tl.origin) + tl.span * 1000).toISOString()))}</b>`;
+  // Between two times of day, a bare duration reads as a third one.
+  const total = tl.live
+    ? `<span class="tl-total"><b data-since="${esc(tl.origin)}">–</b> total</span>`
+    : `<span class="tl-total"><b>${esc(dur(tl.span * 1000))}</b> total</span>`;
+
+  const head = `<div class="tl-row tl-top">
+      <span class="tl-lane"></span>
+      <span class="tl-scale"><b>${esc(hhmm(tl.origin))}</b>${total}${ends}</span>
+      <span class="tl-q">${tl.rows.some((r) => r.queued.length) ? 'queued' : ''}</span>
+    </div>`;
+
+  const rows = tl.rows.map((r) => {
+    const blocks = r.blocks.map(blockHtml).join('')
+      || '<span class="tl-none">not started</span>';
+    const shown = r.queued.slice(0, QUEUE_SHOWN).map((t) =>
+      `<button class="tl-qb" data-task="${t.n}" aria-controls="panel"
+        aria-label="Task ${t.n}, ${esc(STATUS_WORD[t.status] || t.status)} — ${esc(t.title)}"
+        title="T${t.n} · ${esc(t.title)}">T${t.n}</button>`).join('');
+    const rest = r.queued.length - QUEUE_SHOWN;
+    return `<div class="tl-row">
+        <span class="tl-lane ${esc(r.kind)}">${esc(r.label)}</span>
+        <span class="tl-track">${blocks}</span>
+        <span class="tl-q">${shown}${rest > 0 ? `<span class="tl-more">+${rest}</span>` : ''}</span>
+      </div>`;
+  }).join('');
+
+  if (paint($('timeline'), head + rows)) tick();
+  layoutTimeline();
+}
+
+function blockHtml(b) {
+  const open = b.to == null;
+  const took = open
+    ? `running since ${hhmm(b.startedAt)}`
+    : `${hhmm(b.startedAt)} for ${dur((b.to - b.from) * 1000)}`;
+  const name = `Task ${b.n}, ${STATUS_WORD[b.status] || b.status}, ${took} — ${b.title}`;
+  return `<button class="tl-b ${esc(b.status)}${open ? ' open' : ''}" data-task="${b.n}" aria-controls="panel"
+    style="--s:${b.from}${open ? '' : `;--e:${b.to}`}" data-s="${b.from}"${open ? '' : ` data-e="${b.to}"`}
+    aria-label="${esc(name)}" title="T${b.n} · ${esc(b.title)}\n${esc(took)}"><span class="tl-t">T${b.n}</span></button>`;
+}
+
+/**
+ * The one number the server refuses to send. While a task is running the axis
+ * ends at the reader's clock, not at anything on disk — and writing it here
+ * rather than into the markup keeps the painted signature stable, so the
+ * blocks survive as nodes the reader can focus and click.
+ */
+const LABEL_MIN = 24;
+
+function layoutTimeline() {
+  const tl = snap && snap.ready ? snap.timeline : null;
+  if (!tl) return;
+  const host = $('timeline');
+  const span = Math.max(1, Math.round(tl.live ? (Date.now() + skew - Date.parse(tl.origin)) / 1000 : tl.span));
+  host.style.setProperty('--span', String(span));
+
+  // One rect read for the whole chart. Every block's width is arithmetic from
+  // there, so deciding which bars are too narrow for a label costs no layout
+  // per node — this runs once a second for as long as the tab is open.
+  const track = host.querySelector('.tl-track');
+  const px = track ? track.getBoundingClientRect().width : 0;
+  for (const b of host.querySelectorAll('.tl-b')) {
+    const from = Number(b.dataset.s);
+    const to = b.classList.contains('open') ? span : Number(b.dataset.e);
+    b.classList.toggle('bare', Math.max(3, ((to - from) / span) * px) < LABEL_MIN);
+  }
 }
 
 // ------------------------------------------------------------------ timers
@@ -1254,6 +1432,7 @@ function tick() {
   for (const el of document.querySelectorAll('[data-since]')) {
     el.textContent = el.dataset.since ? since(el.dataset.since) : '–';
   }
+  layoutTimeline();
 }
 setInterval(tick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });

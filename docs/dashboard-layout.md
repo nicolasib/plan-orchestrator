@@ -248,8 +248,8 @@ aberta o dia inteiro num monitor lateral. *Custo:* baixo.
    nota ao final.
 3. ~~**Fase 3 — a pipeline**~~ **— feita em 20/08/2026** (itens 5, 10, 11, 12,
    13). Ver a nota ao final.
-4. **Fase 4 — a timeline** (item 6): a swimlane. Cara, e a única que responde à
-   pergunta que motiva o `plo`.
+4. ~~**Fase 4 — a timeline**~~ **— feita em 20/08/2026** (item 6). Ver a nota
+   ao final.
 
 Nenhum item exige tocar em `run.js`, `spawn.js`, `state.js` ou `integrate.js`.
 O item 7 é o único que mexe no servidor, e só para elevar `activityLimit`.
@@ -435,3 +435,66 @@ de verdade — com `Browser.grantPermissions` e `readText` — recebendo
 histórico do navegador andando `feed → T9 → T2 → T9 → feed`; os totais do
 rodapé alinhados às colunas que fecham em todos os viewports; e AA nos dois
 temas, pior caso 4.61:1 no escuro e 4.87:1 no claro.
+
+---
+
+## 10. Registro — fase 4
+
+Feito: a swimlane (6). Substitui `Lane plan` e a `.track` de 4px, e é a
+primeira vez que a tela responde à pergunta que motiva o `plo`.
+
+Na run real da `1.11.0`: as três lanes ocupam de 0 a 1294s do eixo, lado a
+lado; o barrier vai de 1341 a 2881. **O trecho serial custou 1540 segundos —
+mais que a fase paralela inteira.** `Lane plan` desenhava exatamente as mesmas
+quatro tasks como `T1 → T2 → T3` e `T4`, e não tinha como dizer isso.
+
+Quatro escolhas que se afastam do documento:
+
+- **A geometria é derivada no `monitor.js`, com teste.** Mesma razão da fase 3:
+  as regras têm casos. Uma task que parou sem gravar fim fecha no último evento
+  do log; uma que nunca começou não tem lugar num eixo de tempo.
+- **O eixo não tem fim enquanto algo roda.** O servidor manda `span: null` e a
+  página estende contra o próprio relógio. Mandar `now` era uma linha a menos e
+  faria toda leitura diferir da anterior — um frame por segundo empurrado por
+  uma stream cujo projeto inteiro é ficar quieta. Tem teste: duas leituras
+  seguidas de uma run viva têm que sair idênticas.
+- **Task sem `startedAt` não vira barra.** O documento aceitava perder o plano
+  junto com o `Lane plan`; inventar uma barra numa carta de tempo é mentir na
+  única língua que o gráfico fala. Ela espera numa coluna `queued` ao lado do
+  eixo — que é também onde ela está na run.
+- **A conta acontece em CSS.** `--s` e `--e` são segundos desde a origem, `--span`
+  é o eixo; uma run viva cresce com **uma escrita de propriedade por segundo** e
+  nenhum nó reescrito. Verificado com o foco preso num bloco por quatro segundos
+  enquanto o eixo crescia: mesmo nó, mesmo foco, assinatura de pintura intacta.
+
+Seis defeitos que só apareceram rodando:
+
+- **Nenhum botão da página tinha anel de foco.** `all: unset` põe
+  `outline: initial` com especificidade de classe, e a regra `:focus-visible`
+  estava no topo do arquivo: empate de especificidade, derrota na ordem de
+  origem. Medido com `CSS.forcePseudoState`: `outline-style: none` em sete
+  controles, anel intacto só no `<input>` e na linha que é `div`. A regra foi
+  para o fim do arquivo, onde tem que ficar.
+- **58px de rolagem horizontal a 320px, e não é da fase 4.** Medi com e sem o
+  patch: `scrollWidth` 378 nos dois. É `min-width: auto` de item flex — o
+  banner de erro carrega palavras como `error_during_execution`, e a maior
+  delas definia a largura mínima do banner. A página rolava de lado por causa
+  de um identificador numa mensagem. Também quer dizer que a varredura da fase
+  3 **não cobriu essa célula**: as capturas de 320 da fixture saíram com o
+  argumento trocado, e eu contei como verificadas.
+- `interrupted` a **4.09:1** no tema claro — a tinta warn escurece o fundo sob
+  o próprio rótulo. 16% → 10%.
+- Rótulo cortado no meio do glifo em barras de 7px. Some abaixo de 24px,
+  decidido por aritmética a partir de **uma** leitura de rect para o gráfico
+  inteiro, não uma por nó.
+- `--text-faint` em "not started" — token de separador usado para informação.
+- O total entre dois horários lia como um terceiro horário. Ganhou a palavra
+  `total`.
+
+Verificado: 114 testes; 24 combinações de viewport × tema × run (1728/1280/900/
+640/390/320 × claro/escuro × a run real e a fixture de 11 tasks) com zero saída
+de console, zero rolagem horizontal do documento e zero interativo aninhado; AA
+nos dois temas nos seis estados de bloco (pior caso 4.72:1 escuro, 4.73:1
+claro); clique num bloco e num chip da fila abrindo a task e escrevendo
+`#task=N`; a run real continua cabendo em 1080 sem rolar, e a fixture ficou 9px
+mais baixa do que era com o `Lane plan`.

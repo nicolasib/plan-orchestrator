@@ -409,6 +409,89 @@ function buildStages(lanes, barriers, integration) {
 }
 
 /**
+ * The run on one clock.
+ *
+ * `plo` exists to run tasks concurrently and the page has never once shown
+ * whether that happened. `Lane plan` drew each lane as `T1 → T2 → T3`, which
+ * is the order they were scheduled in — it cannot say that A and B overlapped
+ * for eleven minutes, that four minutes passed between the last lane and the
+ * barrier with nothing running, or that the serial barrier at the end cost
+ * more than the parallel part saved. "Did the parallelism pay?" and "who held
+ * the run up?" are the two questions this tool is judged by, and both are
+ * questions about time.
+ *
+ * Offsets in seconds, not instants: the page has to divide by the run's span
+ * to place a block, and sending the offset lets that arithmetic happen in one
+ * CSS custom property instead of a layout pass per frame.
+ *
+ * The axis has no end while anything is running. Sending `now` would be one
+ * line shorter and would make every read differ from the last — a frame
+ * pushed every second down a stream whose whole design is to stay quiet. The
+ * page extends the axis against its own clock instead.
+ */
+function buildTimeline(lanes, barriers) {
+  const S = state.STATUS;
+  const at = (iso) => {
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? ms : null;
+  };
+
+  const all = [...lanes.flatMap((l) => l.tasks), ...barriers];
+  const starts = all.map((t) => at(t.startedAt)).filter((ms) => ms != null);
+  // Nothing has run: there is no clock to draw one against yet.
+  if (!starts.length) return null;
+
+  const origin = Math.min(...starts);
+  const secs = (ms) => Math.round((ms - origin) / 1000);
+  // A task that stopped without recording an end still stopped. Its last
+  // logged activity is the closest honest right edge; with neither, it is a
+  // moment rather than a span.
+  const endOf = (t) => {
+    if (t.status === S.RUNNING) return null;
+    return at(t.endedAt) ?? at(t.lastActivityAt) ?? at(t.startedAt);
+  };
+
+  const blocks = (tasks) => tasks
+    .filter((t) => at(t.startedAt) != null)
+    .map((t) => {
+      const end = endOf(t);
+      return {
+        n: t.n,
+        title: t.title,
+        status: t.status,
+        startedAt: t.startedAt,
+        from: secs(at(t.startedAt)),
+        to: end == null ? null : secs(end),
+      };
+    })
+    .sort((a, b) => a.from - b.from);
+
+  // A task that has not started has no place on a time axis, and inventing
+  // one for it would be a lie told in the one language this chart speaks.
+  // It waits beside the axis instead, which is also where it is in the run.
+  const queued = (tasks) => tasks
+    .filter((t) => at(t.startedAt) == null)
+    .map((t) => ({ n: t.n, title: t.title, status: t.status }));
+
+  const rows = lanes.map((l) => ({
+    key: `lane-${l.id}`, label: l.label, kind: 'lane', blocks: blocks(l.tasks), queued: queued(l.tasks),
+  }));
+  if (barriers.length) {
+    rows.push({ key: 'barriers', label: 'Barriers', kind: 'barrier', blocks: blocks(barriers), queued: queued(barriers) });
+  }
+
+  const live = all.some((t) => t.status === S.RUNNING);
+  const ends = all.map(endOf).filter((ms) => ms != null);
+  return {
+    origin: new Date(origin).toISOString(),
+    live,
+    // Never zero: the page divides by this.
+    span: live || !ends.length ? null : Math.max(1, secs(Math.max(...ends))),
+    rows,
+  };
+}
+
+/**
  * The whole dashboard payload.
  *
  * Deliberately free of anything derived from "now": every duration is sent as
@@ -490,6 +573,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
     stages: buildStages(lanes, barriers, st.integration),
+    timeline: buildTimeline(lanes, barriers),
     feed,
     lanes,
     barriers,
@@ -526,4 +610,4 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, buildFeed, buildStages, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, buildStages, buildTimeline, digestLog, readTaskLog, tailFile, toolTarget, shortPath };

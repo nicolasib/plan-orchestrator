@@ -436,6 +436,77 @@ test('a plan with no barrier tasks has four stages, not a fifth that is always d
   assert.equal(stages[0].status, 'pending', 'a run where nothing started has not started');
 });
 
+// -------------------------------------------------------------- timeline
+
+// The fixture's clock: T1 ran 11:00–11:20, T2 started at 12:00, T3 never did.
+const OFFSET_T2 = 3600;
+
+test('the timeline is one axis, and every block is an offset from the first start', () => {
+  const { planPath } = fixture();
+  const tl = monitor.snapshot(planPath).timeline;
+
+  assert.equal(tl.origin, '2026-08-19T11:00:00.000Z', 'the run starts when its first task does');
+  assert.deepEqual(tl.rows.map((r) => r.label), ['A', 'Barriers']);
+  assert.deepEqual(tl.rows[0].blocks.map((b) => [b.n, b.from, b.to]), [[1, 0, 1200], [2, OFFSET_T2, null]]);
+});
+
+test('while a task is running the axis has no end — and two reads stay identical', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath);
+
+  assert.equal(snap.timeline.live, true);
+  assert.equal(snap.timeline.span, null, 'sending `now` here would push a frame every second');
+  assert.equal(
+    JSON.stringify(monitor.snapshot(planPath).timeline),
+    JSON.stringify(snap.timeline),
+    'the timeline must not make two equal reads differ',
+  );
+});
+
+test('a settled run measures its own span, from first start to last end', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'] = { ...st.tasks['2'], status: state.STATUS.DONE, endedAt: '2026-08-19T12:30:00.000Z' };
+  st.tasks['3'] = {
+    ...st.tasks['3'], status: state.STATUS.DONE,
+    startedAt: '2026-08-19T12:40:00.000Z', endedAt: '2026-08-19T13:00:00.000Z',
+  };
+  state.save(planPath, st);
+
+  const tl = monitor.snapshot(planPath).timeline;
+  assert.equal(tl.live, false);
+  assert.equal(tl.span, 7200, 'two hours from 11:00 to 13:00');
+  assert.deepEqual(tl.rows[1].blocks.map((b) => [b.n, b.from, b.to]), [[3, 6000, 7200]]);
+  assert.deepEqual(tl.rows[1].queued, []);
+});
+
+test('a task that never started waits beside the axis, not on it', () => {
+  const { planPath } = fixture();
+  const tl = monitor.snapshot(planPath).timeline;
+
+  assert.deepEqual(tl.rows[1].blocks, [], 'no start time is not a zero-length bar at the origin');
+  assert.deepEqual(tl.rows[1].queued.map((q) => q.n), [3]);
+});
+
+test('a task that stopped without recording an end closes at its last activity', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'] = { ...st.tasks['2'], status: state.STATUS.INTERRUPTED };
+  state.save(planPath, st);
+
+  const tl = monitor.snapshot(planPath).timeline;
+  const t2 = tl.rows[0].blocks.find((b) => b.n === 2);
+  assert.equal(tl.live, false, 'an interrupted task is not running');
+  // The log's last event is 12:00:40 — forty seconds after the task started.
+  assert.equal(t2.to, OFFSET_T2 + 40);
+  assert.equal(tl.span, OFFSET_T2 + 40, 'and that is where the axis ends');
+});
+
+test('a run where nothing has started has no clock to draw', () => {
+  const tl = monitor.buildTimeline([{ id: 'A', label: 'A', tasks: [{ n: 1, status: 'pending' }] }], []);
+  assert.equal(tl, null);
+});
+
 // ---------------------------------------------------------------- detail
 
 test('taskDetail returns full history for a finished task', () => {
