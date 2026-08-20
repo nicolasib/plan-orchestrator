@@ -122,6 +122,27 @@ test('digestLog pairs each tool_result back onto its tool call', () => {
   assert.match(tools[1].preview, /FAIL/);
 });
 
+test("digestLog keeps the report's line breaks for the panel and collapses them only for the feed", () => {
+  const report = ['# Head', '', '| Fase | Resultado |', '|---|---|', '| Review | ok |'].join('\n');
+  const log = JSON.stringify({ type: 'result', subtype: 'success', num_turns: 2, result: report }) + '\n';
+  const d = monitor.digestLog(log);
+
+  // The feed row is one line and stays one line.
+  assert.ok(!d.result.text.includes('\n'), 'the feed line must not carry newlines');
+  assert.match(d.result.text, /# Head \| Fase \| Resultado \|/);
+
+  // The panel renders Markdown, and Markdown is made of line breaks.
+  assert.equal(d.result.body, report, 'the panel copy is the report as written');
+  assert.equal(d.result.clipped, false);
+});
+
+test('digestLog reports it when a report is longer than the panel budget', () => {
+  const long = 'x'.repeat(9000);
+  const d = monitor.digestLog(JSON.stringify({ type: 'result', subtype: 'success', result: long }) + '\n');
+  assert.equal(d.result.body.length, 8000);
+  assert.equal(d.result.clipped, true, 'a cap the reader cannot see is a cap that lies');
+});
+
 test('digestLog surfaces the rate limit event verbatim', () => {
   const d = monitor.digestLog(SAMPLE_LOG);
   assert.equal(d.rateLimit.rateLimitType, 'five_hour');
@@ -295,6 +316,252 @@ test('the barrier in flight is named, because during integration it is the only 
   st.tasks['3'].status = state.STATUS.DONE;
   state.save(planPath, st);
   assert.equal(monitor.snapshot(planPath).activeBarrier, null);
+});
+
+// ---------------------------------------------------------------- feed
+
+/** A second log, older than the fixture's, so a merge has something to merge. */
+function withEarlierLog(dir, planPath) {
+  const st = state.load(planPath);
+  const logFile = path.join(dir, '.plo-logs', 'task-1.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, [
+    '\n=== 2026-08-19T11:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    assistantTool('Read', { file_path: 'src/repo.js' }, 'tu_a', '2026-08-19T11:00:05.000Z'),
+    toolResult('tu_a', 'ok', false, '2026-08-19T11:00:06.000Z'),
+  ].join(''));
+  st.tasks['1'].logFile = logFile;
+  state.save(planPath, st);
+  return logFile;
+}
+
+test('the feed merges every task log into one chronological list', () => {
+  const { dir, planPath } = fixture();
+  withEarlierLog(dir, planPath);
+  const snap = monitor.snapshot(planPath);
+
+  const ats = snap.feed.map((a) => a.at);
+  assert.deepEqual([...ats].sort(), ats, 'a run feed out of order is not a run feed');
+
+  const tasks = [...new Set(snap.feed.map((a) => a.n))];
+  assert.deepEqual(tasks, [1, 2], 'the settled task is exactly the one a per-card tail cannot show');
+  assert.equal(snap.feed[0].lane, 'A', 'each entry names where it came from');
+
+  const read = snap.feed.find((a) => a.name === 'Read');
+  assert.equal(read.n, 1);
+  assert.equal(read.target, 'src/repo.js');
+});
+
+test('a tool entry records when its result came back, so the feed can time it', () => {
+  const d = monitor.digestLog(SAMPLE_LOG);
+  const bash = d.activity.find((a) => a.name === 'Bash');
+  assert.equal(bash.at, '2026-08-19T12:00:20.000Z');
+  assert.equal(bash.doneAt, '2026-08-19T12:00:31.000Z', '11 seconds is the fact the feed is for');
+});
+
+test('the feed keeps the tail of the run, not its opening', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath, { feedLimit: 2 });
+  assert.equal(snap.feed.length, 2);
+  assert.equal(snap.feed[snap.feed.length - 1].text, 'Fixing the failing assertion.', 'the newest event must survive the cut');
+});
+
+test('feedLimit 0 turns the feed off without disturbing the cards', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath, { feedLimit: 0 });
+  assert.deepEqual(snap.feed, []);
+  assert.equal(snap.lanes[0].tasks[1].activity.length > 0, true, 'the running card still has its own tail');
+});
+
+test('the merge scaffolding never reaches the payload', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath);
+  const all = [...snap.lanes.flatMap((l) => l.tasks), ...snap.barriers];
+  assert.equal(all.some((t) => 'recent' in t), false, 'a per-task copy of the feed would double the frame');
+  assert.equal(JSON.stringify(monitor.snapshot(planPath)), JSON.stringify(snap), 'the feed must not make two equal reads differ');
+});
+
+// ---------------------------------------------------------------- stages
+
+const byKey = (planPath) => Object.fromEntries(monitor.snapshot(planPath).stages.map((x) => [x.key, x]));
+
+test('the pipeline is the five stages of a run, in the order they can happen', () => {
+  const { planPath } = fixture();
+  const s = monitor.snapshot(planPath);
+
+  assert.deepEqual(s.stages.map((x) => x.key), ['run', 'merge', 'barriers', 'suite', 'review']);
+  assert.equal(s.stages[0].status, 'running', 'one task done and one running is a run under way');
+  assert.equal(s.stages[0].detail, '1/2 tasks');
+  assert.equal(s.stages[1].status, 'pending', 'nothing merges while a lane is still working');
+});
+
+test('a failure lands on the stage that owns it', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.integration = { status: 'barrier-failed', mergedLanes: ['A'], suite: null, review: null };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.run.status, 'done');
+  assert.equal(by.merge.status, 'done', 'a barrier only ever runs in a merged tree');
+  assert.equal(by.merge.detail, 'lanes A');
+  assert.equal(by.barriers.status, 'failed');
+  assert.equal(by.suite.status, 'pending', 'the suite never got to run, and must not read as passed');
+});
+
+test('a merge that failed leaves every later stage pending', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.integration = { status: 'merge-failed', mergedLanes: [], suite: null, review: null };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.merge.status, 'failed');
+  assert.equal(by.barriers.status, 'pending');
+  assert.equal(by.review.status, 'pending');
+});
+
+test('the suite and the review carry their own verdicts', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.tasks['3'].status = state.STATUS.DONE;
+  st.integration = {
+    status: 'review-findings', mergedLanes: ['A'],
+    suite: { ok: true }, review: { clean: false, verdict: 'FINDINGS' },
+  };
+  state.save(planPath, st);
+
+  const by = byKey(planPath);
+  assert.equal(by.suite.status, 'done');
+  assert.equal(by.suite.detail, 'pass');
+  assert.equal(by.review.status, 'failed');
+  assert.equal(by.review.detail, 'FINDINGS');
+});
+
+test('a suite with no test command failed — it did not pass quietly', () => {
+  const stages = monitor.buildStages(
+    [{ tasks: [{ status: 'done' }] }], [],
+    { status: 'merged', mergedLanes: ['A'], suite: { ok: false, skipped: true }, review: null },
+  );
+  const suite = stages.find((x) => x.key === 'suite');
+  assert.equal(suite.status, 'failed');
+  assert.equal(suite.detail, 'no test command');
+});
+
+test('a plan with no barrier tasks has four stages, not a fifth that is always done', () => {
+  const stages = monitor.buildStages([{ tasks: [{ status: 'pending' }] }], [], { status: 'pending' });
+  assert.deepEqual(stages.map((x) => x.key), ['run', 'merge', 'suite', 'review']);
+  assert.equal(stages[0].status, 'pending', 'a run where nothing started has not started');
+});
+
+// ---------------------------------------------------------------- tokens
+
+test('a token count comes from what the agent reported, never from a running sum', () => {
+  const { planPath, logFile } = fixture();
+
+  // The sample log accumulates 52 output tokens across its assistant
+  // messages and never closes with a result event — exactly the shape of a
+  // task that died mid-stream. A digest reads a tail, so that sum is a
+  // fraction of a log that can be tens of megabytes.
+  assert.equal(monitor.digestLog(SAMPLE_LOG).outputTokens, 52);
+  assert.equal(monitor.digestLog(SAMPLE_LOG).reportedTokens, null);
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, null, 'a fraction is worse than nothing');
+
+  fs.appendFileSync(logFile, ev({
+    type: 'result', subtype: 'success', total_cost_usd: 1.25,
+    usage: { output_tokens: 12864, input_tokens: 60, cache_read_input_tokens: 2219083 },
+  }));
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'the spawn reports its own total');
+});
+
+test('the checkpoint outranks the log, and the totals add up the run', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  // What `run.js` writes: summed across attempts, so a retried task counts
+  // every spawn it took.
+  st.tasks['1'].outputTokens = 40000;
+  st.tasks['2'].outputTokens = 17760;
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.lanes[0].tasks[0].outputTokens, 40000);
+  assert.equal(s.lanes[0].tasks[1].outputTokens, 17760, 'the checkpoint wins over anything read from the log');
+  assert.equal(s.totals.outputTokens, 57760);
+  assert.equal(s.barriers[0].outputTokens, null, 'a task that never ran reported nothing');
+});
+
+// -------------------------------------------------------------- timeline
+
+// The fixture's clock: T1 ran 11:00–11:20, T2 started at 12:00, T3 never did.
+const OFFSET_T2 = 3600;
+
+test('the timeline is one axis, and every block is an offset from the first start', () => {
+  const { planPath } = fixture();
+  const tl = monitor.snapshot(planPath).timeline;
+
+  assert.equal(tl.origin, '2026-08-19T11:00:00.000Z', 'the run starts when its first task does');
+  assert.deepEqual(tl.rows.map((r) => r.label), ['A', 'Barriers']);
+  assert.deepEqual(tl.rows[0].blocks.map((b) => [b.n, b.from, b.to]), [[1, 0, 1200], [2, OFFSET_T2, null]]);
+});
+
+test('while a task is running the axis has no end — and two reads stay identical', () => {
+  const { planPath } = fixture();
+  const snap = monitor.snapshot(planPath);
+
+  assert.equal(snap.timeline.live, true);
+  assert.equal(snap.timeline.span, null, 'sending `now` here would push a frame every second');
+  assert.equal(
+    JSON.stringify(monitor.snapshot(planPath).timeline),
+    JSON.stringify(snap.timeline),
+    'the timeline must not make two equal reads differ',
+  );
+});
+
+test('a settled run measures its own span, from first start to last end', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'] = { ...st.tasks['2'], status: state.STATUS.DONE, endedAt: '2026-08-19T12:30:00.000Z' };
+  st.tasks['3'] = {
+    ...st.tasks['3'], status: state.STATUS.DONE,
+    startedAt: '2026-08-19T12:40:00.000Z', endedAt: '2026-08-19T13:00:00.000Z',
+  };
+  state.save(planPath, st);
+
+  const tl = monitor.snapshot(planPath).timeline;
+  assert.equal(tl.live, false);
+  assert.equal(tl.span, 7200, 'two hours from 11:00 to 13:00');
+  assert.deepEqual(tl.rows[1].blocks.map((b) => [b.n, b.from, b.to]), [[3, 6000, 7200]]);
+  assert.deepEqual(tl.rows[1].queued, []);
+});
+
+test('a task that never started waits beside the axis, not on it', () => {
+  const { planPath } = fixture();
+  const tl = monitor.snapshot(planPath).timeline;
+
+  assert.deepEqual(tl.rows[1].blocks, [], 'no start time is not a zero-length bar at the origin');
+  assert.deepEqual(tl.rows[1].queued.map((q) => q.n), [3]);
+});
+
+test('a task that stopped without recording an end closes at its last activity', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'] = { ...st.tasks['2'], status: state.STATUS.INTERRUPTED };
+  state.save(planPath, st);
+
+  const tl = monitor.snapshot(planPath).timeline;
+  const t2 = tl.rows[0].blocks.find((b) => b.n === 2);
+  assert.equal(tl.live, false, 'an interrupted task is not running');
+  // The log's last event is 12:00:40 — forty seconds after the task started.
+  assert.equal(t2.to, OFFSET_T2 + 40);
+  assert.equal(tl.span, OFFSET_T2 + 40, 'and that is where the axis ends');
+});
+
+test('a run where nothing has started has no clock to draw', () => {
+  const tl = monitor.buildTimeline([{ id: 'A', label: 'A', tasks: [{ n: 1, status: 'pending' }] }], []);
+  assert.equal(tl, null);
 });
 
 // ---------------------------------------------------------------- detail

@@ -27,7 +27,13 @@ const { parsePlan } = require('./parse-plan');
 /** Read the log's tail, not the log. A long task writes tens of MB. */
 const TAIL_BYTES = 512 * 1024;
 const ACTIVITY_LIMIT = 40;
+/** How much of the run the merged feed keeps. Long enough to scroll back
+ *  through the last few minutes, short enough to ship every second. */
+const FEED_LIMIT = 60;
 const TEXT_MAX = 400;
+/** The panel's copy of an agent's report. `TEXT_MAX` is a feed line's budget;
+ *  a report is a document and gets a document's. */
+const REPORT_MAX = 8000;
 
 function tailFile(file, bytes = TAIL_BYTES) {
   let fd;
@@ -114,6 +120,9 @@ function emptyDigest() {
     attempts: 0,
     toolCount: 0,
     outputTokens: 0,
+    /** Only ever set from a result event: the spawn's own total, not a sum
+     *  over whatever messages happened to fall inside the tail. */
+    reportedTokens: null,
     costUsd: null,
     rateLimit: null,
     result: null,
@@ -216,6 +225,9 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
         if (entry) {
           entry.ok = !block.is_error;
           entry.preview = preview;
+          // The call already carries when it started; this is when it came
+          // back. A feed without it can say what ran, never that it took 11s.
+          entry.doneAt = at;
           pending.delete(block.tool_use_id);
         } else {
           push({ kind: 'tool', at, sub, name: 'result', target: '', ok: !block.is_error, preview });
@@ -226,16 +238,38 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
     }
 
     if (ev.type === 'result') {
+      // Two consumers, two shapes. A feed row is one line, so `text` collapses
+      // whitespace and stops at 120 or 400 characters — right there, wrong
+      // everywhere else. The panel renders the same field as Markdown, and
+      // Markdown is made of line breaks: a heading, a list and a table all
+      // stop existing the moment `\s+` becomes a space. The report the agent
+      // wrote was arriving in the drawer as one run-on paragraph of pipes.
+      const report = ev.result == null ? null : String(ev.result).trim();
       d.result = {
         isError: Boolean(ev.is_error || ev.subtype === 'error_max_turns' || ev.subtype === 'error_during_execution'),
         subtype: ev.subtype || null,
         numTurns: typeof ev.num_turns === 'number' ? ev.num_turns : null,
         durationMs: typeof ev.duration_ms === 'number' ? ev.duration_ms : null,
-        text: ev.result ? oneLine(ev.result, TEXT_MAX) : null,
+        text: report ? oneLine(report, TEXT_MAX) : null,
+        body: report ? report.slice(0, REPORT_MAX) : null,
+        // Never a silent cap: if it bit, the panel says so.
+        clipped: Boolean(report && report.length > REPORT_MAX),
       };
       if (typeof ev.total_cost_usd === 'number') d.costUsd = ev.total_cost_usd;
+      // The spawn's own total, which replaces the running sum rather than
+      // adding to it. A finished task's log is tens of megabytes and this
+      // digest sees its last half-megabyte, so adding up `usage` message by
+      // message reports a fraction of the truth. The result event carries the
+      // whole spawn, and it sits at the end of the file — inside the tail.
+      if (ev.usage && typeof ev.usage.output_tokens === 'number') d.reportedTokens = ev.usage.output_tokens;
       if (ev.session_id) d.sessionId = ev.session_id;
-      push({ kind: 'result', at, ok: !d.result.isError, label: ev.subtype || 'result', text: d.result.text });
+      // A result event carries no timestamp, so in a feed six of them stack at
+      // one instant reading the same polite sentence. What separates them is
+      // the turn they closed: keep its length.
+      push({
+        kind: 'result', at, ok: !d.result.isError, label: ev.subtype || 'result',
+        text: d.result.text, durationMs: d.result.durationMs,
+      });
     }
   }
 
@@ -257,17 +291,22 @@ function readTaskLog(logFile, opts = {}) {
 
 const laneLabel = (id) => String(id).toUpperCase();
 
-function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true } = {}) {
+function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true } = {}) {
   const rec = st.tasks[String(n)] || {};
   const task = plan.tasks.find((t) => t.n === Number(n));
-  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit }) : null;
+  // One read serves both granularities. The card wants the last few events of
+  // a task that is running; the run feed wants many more, from every task,
+  // finished ones included. Digesting twice would double the tail read for
+  // every task on every poll.
+  const limit = Math.max(activityLimit, feedLimit);
+  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit: limit }) : null;
 
   // The checkpoint is authoritative for status; the log is authoritative for
   // what is happening inside a task that is still running.
   const live = rec.status === state.STATUS.RUNNING ? digest : null;
   const lastTool = live && [...live.activity].reverse().find((a) => a.kind === 'tool');
 
-  return {
+  const view = {
     n: Number(n),
     title: task ? task.title.replace(/`/g, '') : `Task ${n}`,
     status: rec.status || state.STATUS.PENDING,
@@ -277,6 +316,17 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true
     turns: live ? live.turns : (rec.turns || 0),
     commits: rec.commits || [],
     costUsd: rec.costUsd ?? (live ? live.costUsd : null),
+    // The checkpoint first, because the CLI wrote it from the agent's own
+    // report. The log second, and only the figure a result event carried, so
+    // runs recorded before `plo` kept this still have a number.
+    //
+    // Never the digest's running sum: a task writes tens of megabytes and this
+    // reads half of one, so adding up `usage` message by message reports a
+    // fraction. Measured on a blocked barrier whose log has no result event in
+    // its tail — the sum said 377 output tokens for 842 turns. Null, never
+    // zero and never a fraction: a task that has not reported did not spend
+    // nothing.
+    outputTokens: rec.outputTokens ?? (digest ? digest.reportedTokens : null),
     error: rec.error || null,
     reconciled: Boolean(rec.reconciled),
     startedAt: rec.startedAt || null,
@@ -289,11 +339,190 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, logs = true
     // Not gated on `live`: the run this most needs to report is the one that
     // already died of a usage limit, and a dead task is by definition not live.
     rateLimit: digest ? digest.rateLimit : null,
-    activity: live ? live.activity : [],
+    activity: live ? live.activity.slice(-activityLimit) : [],
   };
+
+  // Scaffolding for the run feed, not payload: `snapshot` merges these and
+  // strips the field before the object is serialised.
+  if (feedLimit && digest) view.recent = digest.activity.slice(-feedLimit);
+  return view;
+}
+
+/**
+ * One chronological feed for the whole run.
+ *
+ * Parallel lanes are the point of this tool and each writes its own log file,
+ * so no single tail can answer "what happened, in what order". Entries are
+ * tagged with the task they came from and merged on their own timestamps —
+ * nothing here reads a clock, so two identical reads still compare equal.
+ */
+function buildFeed(tasks, limit) {
+  if (!limit) return [];
+  const out = [];
+  for (const t of tasks) {
+    // An event that carries no timestamp inherits the last one seen, so it
+    // stays beside the call it belongs to instead of sorting to the very top.
+    let at = t.startedAt || null;
+    for (const a of t.recent || []) {
+      at = a.at || at;
+      out.push({ ...a, at, n: t.n, lane: t.lane, barrier: t.barrier });
+    }
+  }
+  out.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+  return out.slice(-limit);
 }
 
 const isTerminal = (s) => s === state.STATUS.DONE;
+
+/**
+ * The run as a pipeline, in the one order it can happen.
+ *
+ * Integration is not a status field, it is five stages: lanes run, branches
+ * merge, barrier tasks run in the merged tree, the full suite runs, the
+ * cross-lane review reads the combined diff. Folded into the single word
+ * `barrier-failed` inside a key-value row, the reader has to already know
+ * that order to place the failure in it.
+ */
+function buildStages(lanes, barriers, integration) {
+  const i = integration || {};
+  const S = state.STATUS;
+
+  // A group reports the worst thing in it before the liveliest. "Some
+  // finished, none running" is a stage under way, not a pending one:
+  // `pending` here means nothing in this stage has started.
+  const fold = (tasks) => {
+    if (tasks.some((t) => t.status === S.FAILED || t.status === S.BLOCKED)) return S.FAILED;
+    if (tasks.some((t) => t.status === S.RUNNING)) return S.RUNNING;
+    if (tasks.some((t) => t.status === S.INTERRUPTED)) return S.INTERRUPTED;
+    if (tasks.every((t) => t.status === S.DONE)) return S.DONE;
+    return tasks.some((t) => t.status === S.DONE) ? S.RUNNING : S.PENDING;
+  };
+  const count = (tasks) => `${tasks.filter((t) => t.status === S.DONE).length}/${tasks.length}`;
+
+  const laneTasks = lanes.flatMap((l) => l.tasks);
+  const merged = i.mergedLanes || [];
+  // Every integration status other than these two means the merge is behind us.
+  const mergeDone = Boolean(i.status) && i.status !== S.PENDING && i.status !== 'merge-failed';
+
+  const stages = [
+    { key: 'run', label: 'Run', status: fold(laneTasks), detail: `${count(laneTasks)} tasks` },
+    {
+      key: 'merge',
+      label: 'Merge',
+      status: i.status === 'merge-failed' ? S.FAILED : mergeDone ? S.DONE : S.PENDING,
+      detail: merged.length ? `lanes ${merged.join(', ')}` : `${lanes.length} lanes`,
+    },
+  ];
+
+  // A plan with no barrier tasks has four stages — not a fifth that is
+  // permanently done, which reads as work that happened.
+  if (barriers.length) {
+    stages.push({
+      key: 'barriers',
+      label: 'Barriers',
+      status: i.status === 'barrier-failed' ? S.FAILED : fold(barriers),
+      detail: `${count(barriers)} tasks`,
+    });
+  }
+
+  stages.push({
+    key: 'suite',
+    label: 'Full suite',
+    status: i.suite ? (i.suite.ok ? S.DONE : S.FAILED) : S.PENDING,
+    detail: i.suite ? (i.suite.skipped ? 'no test command' : i.suite.ok ? 'pass' : 'fail') : '',
+  });
+  stages.push({
+    key: 'review',
+    label: 'Cross-lane review',
+    status: i.review ? (i.review.clean ? S.DONE : S.FAILED) : S.PENDING,
+    detail: i.review ? (i.review.verdict || (i.review.clean ? 'clean' : 'findings')) : '',
+  });
+
+  return stages;
+}
+
+/**
+ * The run on one clock.
+ *
+ * `plo` exists to run tasks concurrently and the page has never once shown
+ * whether that happened. `Lane plan` drew each lane as `T1 → T2 → T3`, which
+ * is the order they were scheduled in — it cannot say that A and B overlapped
+ * for eleven minutes, that four minutes passed between the last lane and the
+ * barrier with nothing running, or that the serial barrier at the end cost
+ * more than the parallel part saved. "Did the parallelism pay?" and "who held
+ * the run up?" are the two questions this tool is judged by, and both are
+ * questions about time.
+ *
+ * Offsets in seconds, not instants: the page has to divide by the run's span
+ * to place a block, and sending the offset lets that arithmetic happen in one
+ * CSS custom property instead of a layout pass per frame.
+ *
+ * The axis has no end while anything is running. Sending `now` would be one
+ * line shorter and would make every read differ from the last — a frame
+ * pushed every second down a stream whose whole design is to stay quiet. The
+ * page extends the axis against its own clock instead.
+ */
+function buildTimeline(lanes, barriers) {
+  const S = state.STATUS;
+  const at = (iso) => {
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? ms : null;
+  };
+
+  const all = [...lanes.flatMap((l) => l.tasks), ...barriers];
+  const starts = all.map((t) => at(t.startedAt)).filter((ms) => ms != null);
+  // Nothing has run: there is no clock to draw one against yet.
+  if (!starts.length) return null;
+
+  const origin = Math.min(...starts);
+  const secs = (ms) => Math.round((ms - origin) / 1000);
+  // A task that stopped without recording an end still stopped. Its last
+  // logged activity is the closest honest right edge; with neither, it is a
+  // moment rather than a span.
+  const endOf = (t) => {
+    if (t.status === S.RUNNING) return null;
+    return at(t.endedAt) ?? at(t.lastActivityAt) ?? at(t.startedAt);
+  };
+
+  const blocks = (tasks) => tasks
+    .filter((t) => at(t.startedAt) != null)
+    .map((t) => {
+      const end = endOf(t);
+      return {
+        n: t.n,
+        title: t.title,
+        status: t.status,
+        startedAt: t.startedAt,
+        from: secs(at(t.startedAt)),
+        to: end == null ? null : secs(end),
+      };
+    })
+    .sort((a, b) => a.from - b.from);
+
+  // A task that has not started has no place on a time axis, and inventing
+  // one for it would be a lie told in the one language this chart speaks.
+  // It waits beside the axis instead, which is also where it is in the run.
+  const queued = (tasks) => tasks
+    .filter((t) => at(t.startedAt) == null)
+    .map((t) => ({ n: t.n, title: t.title, status: t.status }));
+
+  const rows = lanes.map((l) => ({
+    key: `lane-${l.id}`, label: l.label, kind: 'lane', blocks: blocks(l.tasks), queued: queued(l.tasks),
+  }));
+  if (barriers.length) {
+    rows.push({ key: 'barriers', label: 'Barriers', kind: 'barrier', blocks: blocks(barriers), queued: queued(barriers) });
+  }
+
+  const live = all.some((t) => t.status === S.RUNNING);
+  const ends = all.map(endOf).filter((ms) => ms != null);
+  return {
+    origin: new Date(origin).toISOString(),
+    live,
+    // Never zero: the page divides by this.
+    span: live || !ends.length ? null : Math.max(1, secs(Math.max(...ends))),
+    rows,
+  };
+}
 
 /**
  * The whole dashboard payload.
@@ -303,7 +532,7 @@ const isTerminal = (s) => s === state.STATUS.DONE;
  * differs on every tick, which would defeat the change detection the stream
  * uses to stay quiet.
  */
-function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
+function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = true } = {}) {
   const abs = path.resolve(planPath);
   const contents = fs.readFileSync(abs, 'utf8');
   const plan = parsePlan(contents);
@@ -320,7 +549,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
   }
 
   const lanes = st.lanes.map((lane) => {
-    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, logs }));
+    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, feedLimit, logs }));
     return {
       id: lane.id,
       label: laneLabel(lane.id),
@@ -333,7 +562,7 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
       tasks,
     };
   });
-  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, logs }));
+  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, feedLimit, logs }));
 
   // During integration every lane is finished and the only live work is a
   // barrier. Naming it lets the page give it a lane's worth of attention
@@ -341,9 +570,12 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
   const activeBarrier = barriers.find((t) => t.status !== state.STATUS.PENDING && !isTerminal(t.status));
 
   const all = [...lanes.flatMap((l) => l.tasks), ...barriers];
+  const feed = buildFeed(all, feedLimit);
+  for (const t of all) delete t.recent;
   const counts = {};
   for (const t of all) counts[t.status] = (counts[t.status] || 0) + 1;
   const costUsd = all.reduce((sum, t) => sum + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+  const outputTokens = all.reduce((sum, t) => sum + (typeof t.outputTokens === 'number' ? t.outputTokens : 0), 0);
   const startedAts = all.map((t) => t.startedAt).filter(Boolean).sort();
 
   // Any lane reporting a non-"allowed" limit is the single fact most likely to
@@ -369,11 +601,15 @@ function snapshot(planPath, { activityLimit = 8, logs = true } = {}) {
       interrupted: counts[state.STATUS.INTERRUPTED] || 0,
       pending: counts[state.STATUS.PENDING] || 0,
       costUsd,
+      outputTokens,
       firstStartedAt: startedAts[0] || null,
       active: (counts[state.STATUS.RUNNING] || 0) > 0,
     },
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
+    stages: buildStages(lanes, barriers, st.integration),
+    timeline: buildTimeline(lanes, barriers),
+    feed,
     lanes,
     barriers,
     integration: st.integration,
@@ -401,7 +637,7 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
     lastText: digest ? digest.lastText : null,
     result: digest ? digest.result : null,
     model: digest ? digest.model : null,
-    outputTokens: digest ? digest.outputTokens : 0,
+    outputTokens: digest ? digest.reportedTokens : null,
     truncated: digest ? digest.truncated : false,
     files: task ? { writes: task.writes || [], excluded: task.excludedPaths || [] } : null,
     steps: task ? task.steps : [],
@@ -409,4 +645,4 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, buildStages, buildTimeline, digestLog, readTaskLog, tailFile, toolTarget, shortPath };

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>plo — run monitor</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%235e6ad2'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23dbfc03'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='%23141705'/%3E%3C/svg%3E" />
 <style>
   /*
    * Visual language: Linear. Dense rows, quiet chrome, one indigo accent, and
@@ -23,16 +23,25 @@
     --line: #23242a;
     --line-soft: #191a1e;
     --hover: rgba(255, 255, 255, .045);
+    --code-bg: rgba(255, 255, 255, .07);
 
     --text: #f7f8f8;
     --text-2: #8a8f98;      /* 5.86:1 on surface */
     --text-3: #787d87;      /* 4.61:1 — the floor for anything readable */
     --text-faint: #5b606a;  /* decorative only: separators, empty glyphs */
+    --text-on-fail: #8a8f98; /* the dim tone that still clears AA on a red row */
 
     --accent: #5e6ad2;
     --accent-ink: #8b95e8;  /* the accent when it has to be small text */
     --accent-soft: rgba(94, 106, 210, .16);
-    --on-accent: #ffffff;
+
+    /* The mark has its own colour and does not theme. It used to borrow
+       --accent, which is how the badge ended up as one more indigo thing in a
+       fold that already had eleven; a brand that shares the interface's accent
+       cannot be told apart from the interface's state. The ink is near-black
+       because the ground is at 0.85 luminance — white on it would be a hole. */
+    --brand: #dbfc03;
+    --on-brand: #141705;
 
     --done: #4cb782;
     --done-soft: rgba(76, 183, 130, .14);
@@ -45,6 +54,13 @@
 
     --radius: 10px;
     --radius-sm: 6px;
+    /* The frame: the pane the app lives in, and the ground it floats on.
+       --pad is the one vertical line the whole pane is aligned to — the
+       topbar's badge, a section heading, a table cell and a feed timestamp
+       all start here. */
+    --radius-frame: 12px;
+    --inset: 10px;
+    --pad: 14px;
     --shadow: 0 1px 2px rgba(0, 0, 0, .28);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, .48), 0 2px 8px rgba(0, 0, 0, .32);
     --scrim: rgba(4, 5, 6, .5);
@@ -55,17 +71,25 @@
 
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #ffffff;
+      /* --bg and --surface used to be the same white, which was harmless
+         while the page had no frame and fatal the moment it got one: the
+         pane would have floated on its own colour. --bg is now the desk the
+         pane sits on, and it is the only token this pass had to invent. */
+      --bg: #eceef1;
       --surface: #ffffff;
       --surface-2: #fafbfc;
       --line: #e5e6e8;
       --line-soft: #eeeff1;
       --hover: rgba(0, 0, 0, .035);
+      --code-bg: rgba(17, 24, 39, .055);
 
       --text: #1c1d21;
       --text-2: #6b6f76;
       --text-3: #6b6f76;
       --text-faint: #9aa0a8;
+      /* Light --text-2 and --text-3 are the same value, so stepping between
+         them buys nothing here; the fail tint needs its own darker tone. */
+      --text-on-fail: #5f636b;
 
       --accent-ink: #4a54b8;
       --accent-soft: rgba(94, 106, 210, .12);
@@ -94,28 +118,97 @@
     letter-spacing: -.011em;
     -webkit-font-smoothing: antialiased;
   }
-  code, .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0; }
+  /* `base main at 9142925` is a sentence with three literals in it, and bare
+     monospace inside a sans line is two typefaces arguing about a baseline:
+     different x-height, different width, no boundary saying where the literal
+     starts. The fill draws that boundary — the same job Slack's inline code
+     does, in grey instead of orange. `.92em` and not a fixed size so the chip
+     scales with whatever line it lands in; `--text` and not `--text-2` because
+     the literal is the payload and the word before it is the label. */
+  code {
+    font-family: var(--mono); font-size: .92em; letter-spacing: 0;
+    padding: 1px 5px; border-radius: 4px;
+    background: var(--code-bg); color: var(--text);
+  }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
-  .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 72px; }
+  .wrap { padding-bottom: 56px; }
   .grow { flex: 1 1 auto; min-width: 0; }
+  [hidden] { display: none !important; }
+
+  /* The panel is a column of the frame on a desk and a modal drawer on a
+     phone. Only its width changes between the two desk sizes. */
+  :root { --rail: 320px; }
+  @media (min-width: 1280px) { :root { --rail: 380px } }
+  @media (min-width: 1680px) { :root { --rail: 440px } }
+
+  /* ------------------------------------------------------------- frame */
+  /* On a phone there is no frame: the pane fills the window, the document
+     scrolls, and the topbar sticks to the top of it — the behaviour every
+     earlier pass verified at 640, 390 and 320. */
+  .frame {
+    display: flex; flex-direction: column; min-height: 100vh;
+    background: var(--surface);
+  }
+  .frame-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+  .scroller { min-width: 0; }
+
+  @media (min-width: 900px) {
+    /* The frame is pinned to the window and nothing moves it. The scroll
+       lives one level in, so the border, the radius and the ground around
+       them are still there at the bottom of a 60-event feed — which is the
+       whole point of a frame and the one thing a bordered `.wrap` cannot do.
+       `overflow: hidden` is what makes the corners actually cut. */
+    html, body { height: 100%; overflow: hidden; }
+    .frame {
+      position: fixed; inset: var(--inset); min-height: 0;
+      border: 1px solid var(--line); border-radius: var(--radius-frame);
+      box-shadow: var(--shadow-lg); overflow: hidden;
+    }
+    /* `minmax(0, 1fr)` and not `auto`: an auto row takes its base size from
+       its content, so a sixty-event feed would make the row taller than the
+       frame, the frame would clip it, and the rail's own scrollbar would
+       never engage. The row is the window's height, and what is inside it
+       scrolls. */
+    .frame-body { display: grid; grid-template-columns: minmax(0, 1fr) var(--rail); grid-template-rows: minmax(0, 1fr); }
+    .scroller { overflow: auto; overscroll-behavior: contain; }
+  }
+
+  /* No cap. The frame is the cap: it is already inset from the window, and a
+     max-width inside it would end every full-bleed hairline in mid-air with
+     pane on both sides — a rule that stops before the edge it divides. */
+  main { display: flex; flex-direction: column; min-width: 0; }
+
+  /* Bands, not cards. Four boxes with the same border and the same radius,
+     spaced 20px apart, is the shape of a generated report; one plane divided
+     by a rule is the shape of an application. The separator is a `border-top`
+     and never a `border-bottom` so that a hidden section — most of them are,
+     most of the time — takes its rule with it, and the stack never ends on a
+     line hanging in empty pane. */
+  .stages, main > * { border-top: 1px solid var(--line); }
 
   /* ------------------------------------------------------------- topbar */
+  /* Sticky is the phone's answer, where the document scrolls under it. In the
+     frame the topbar is simply the first row and cannot move at all — the
+     scroll is one level below it. */
   .topbar {
-    position: sticky; top: 0; z-index: 3;
+    position: sticky; top: 0; z-index: 3; flex: 0 0 auto;
     display: flex; align-items: center; gap: 12px;
-    min-height: 48px; padding: 6px 20px;
-    background: var(--bg);
+    min-height: 48px; padding: 6px var(--pad);
+    background: var(--surface);
     border-bottom: 1px solid var(--line);
   }
+  @media (min-width: 900px) { .topbar { position: static; } }
   .crumbs { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  /* A heading beside a badge that spells the same three letters is the word
+     twice. The mark is a heading arrow now — the run has a direction and a
+     current position, which is the only thing this page is about. */
   .badge-app {
     display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 auto;
-    background: var(--accent); color: var(--on-accent); border-radius: 5px;
-    font-size: 9.5px; font-weight: 700; letter-spacing: -.02em;
+    background: var(--brand); border-radius: 6px;
   }
   h1 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -138,41 +231,124 @@
   @media (prefers-reduced-motion: reduce) { .live.on .pip { animation: none } }
 
   /* ------------------------------------------------------------ progress */
-  .summary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px 0 10px; }
-  .track { display: flex; gap: 3px; flex: 1 1 240px; min-width: 180px; height: 4px; }
-  .track i { flex: 1 1 0; border-radius: 2px; background: var(--line); }
-  .track i.done { background: var(--accent); }
-  .track i.running { background: var(--run); }
-  .track i.failed, .track i.blocked { background: var(--fail); }
-  .track i.interrupted { background: var(--warn); }
-  .legend { font-size: 12px; color: var(--text-2); white-space: nowrap; }
-  .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); padding-bottom: 4px; }
+  .summary { display: grid; gap: 7px; padding: 16px var(--pad) 14px; }
+  /* This page lives on a second monitor. One line has to carry the state of
+     the run at a glance, from across the room, before any of the detail. */
+  .verdict {
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0; min-width: 0;
+    font-size: 15px; font-weight: 600; letter-spacing: -.021em; color: var(--text);
+  }
+  .verdict:empty { display: none; }
+  .verdict svg { flex: 0 0 auto; }
+  .verdict .soft { color: var(--text-2); font-weight: 500; }
+  .verdict .bad { color: var(--fail); }
+  .verdict .sep { color: var(--text-faint); font-weight: 400; }
+  /* The verdict and the line under it are one statement about the run, so
+     they are one band. Apart they were two, and the rule between them said
+     they were unrelated. */
+  .subline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-2); }
+  .subline:empty { display: none; }
   .subline .sep { color: var(--text-faint); }
 
+  /* --------------------------------------------------------- stage bar */
+  /* A run has five stages and exactly one order: lanes run, branches merge,
+     barrier tasks run in the merged tree, the full suite runs, the review
+     reads the combined diff. `barrier-failed` used to be a word inside a
+     key-value table; here it is an X in the third position of a line, and
+     the position is the answer. */
+  .stages {
+    /* Fill the width when there is room, never truncate a label when there is
+       not — then the strip scrolls inside its own border instead. */
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr);
+    margin: 0; padding: 0; list-style: none; overflow-x: auto;
+    background: var(--surface);
+  }
+  /* Positioned so the screen-reader span below stays inside the strip: an
+     absolutely positioned child with no positioned ancestor is not clipped by
+     the scroller, and at 320px it sat 58px past the right edge of the page —
+     dragging the whole document into a horizontal scroll with it. */
+  .stage { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 14px; }
+  /* The first cell starts on the pane's gutter like every heading below it;
+     the strip no longer has a border of its own to hold it off the edge. */
+  .stage:first-child { padding-left: var(--pad); }
+  .stage + .stage { border-left: 1px solid var(--line-soft); }
+  .stage svg { flex: 0 0 auto; }
+  .stage .st-label { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+  .stage.pending .st-label { font-weight: 400; color: var(--text-2); }
+  .stage .st-detail {
+    min-width: 0; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+    max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stage.failed { background: var(--fail-soft); }
+  .stage.failed .st-detail { color: var(--text-on-fail); }
+  /* Five labelled cells with their details need ~860px. Below the width where
+     the rail itself gives up, the detail goes first: it is the only part the
+     ring and the label do not already imply. */
+  @media (max-width: 899px) {
+    .stage { padding: 9px 12px; }
+    .stage .st-detail { display: none; }
+  }
+
+  /* The status of a stage is drawn as a shape; a screen reader needs the word. */
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
   /* -------------------------------------------------------------- alerts */
-  .alerts { display: grid; gap: 8px; margin-top: 16px; }
+  .alerts { display: grid; gap: 0; }
   .alerts:empty { display: none; }
   .alert {
-    display: flex; gap: 10px; align-items: flex-start;
-    padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
-    background: var(--surface); font-size: 12.5px; color: var(--text);
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+    padding: 11px var(--pad);
+    background: var(--surface-2); font-size: 12.5px; color: var(--text);
   }
+  .alert + .alert { border-top: 1px solid var(--line-soft); }
+  /* A flex item's default `min-width: auto` is its longest word, and an agent
+     error carries words like `error_during_execution`. That set the banner's
+     minimum width and pushed the whole document 58px past a 320px screen —
+     the page scrolled sideways because of one identifier in a message. The
+     buttons drop to their own line before the text is squeezed to nothing. */
+  .alert > div:not(.acts) { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
   .alert svg { flex: 0 0 auto; margin-top: 2px; }
-  .alert.bad { border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
+  /* Without a border the tint is the whole signal, so it carries a rule of
+     its own colour on the reading edge — the shape a callout keeps when the
+     box around it goes away. */
+  .alert.bad { background: var(--fail-soft); box-shadow: inset 2px 0 0 var(--fail); }
   .alert b { font-weight: 600; }
-  .alert[data-task] { cursor: pointer; transition: background .12s ease; }
-  .alert[data-task]:hover { background: color-mix(in srgb, var(--fail-soft) 60%, var(--hover)); }
-  .alert .more { margin-left: auto; align-self: center; flex: 0 0 auto; color: var(--text-2); font-size: 11.5px; }
-  .alert code { color: var(--text-2); }
+  /* Real buttons, not a clickable div: a banner that carries a copy button
+     cannot also be a button itself — nesting one inside the other is the kind
+     of ARIA a screen reader is entitled to ignore. */
+  .alert .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; align-self: center; flex: 0 0 auto; }
+
 
   /* --------------------------------------------------------------- board */
   .board {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 460px));
-    justify-content: start; gap: 12px; margin-top: 16px; align-items: start;
+    /* 1fr, not a 460px cap: during integration a single card is the only
+       thing alive on the page, and it should own the width instead of
+       floating in half a screen of nothing. A wide card is a wide feed. */
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+    gap: 0; align-items: stretch;
   }
   .board:empty { display: none; }
-  .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); }
+  /* Lanes running side by side are columns of one board, divided the way a
+     board divides columns. `align-items: stretch` is load-bearing: on `start`
+     the shorter lane's rule stopped where its feed did, and two cards of
+     different heights read as one card and one orphan.
+
+     The rules are shadows, not borders, because the board changes axis: three
+     lanes are columns at 1728 and a stack at 900, and `+ .card { border-left }`
+     draws nothing when they stack. Every card carries a rule above it and one
+     to its left; the left one on a card that begins a row lands one pixel
+     outside the band, where the frame clips it. One declaration, both axes,
+     and no spurious rule on the first card of a wrapped row. */
+  .card {
+    min-width: 0; background: var(--surface); overflow: hidden;
+    box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line);
+  }
+  /* The row of shadows above the first row of cards is the band's own rule. */
+  .board { border-top: 0; }
+  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px var(--pad); border-bottom: 1px solid var(--line-soft); }
   .card .kind { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
   .card .kind.barrier { color: var(--accent-ink); }
   .card .branch {
@@ -180,8 +356,14 @@
     background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px;
     padding: 1px 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* A branch name is a string you retype into a terminal, so it copies. It
+     already looked like a chip; what changes is the cursor and the hover. */
+  button.branch { margin: 0; text-align: left; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  button.branch:hover { background: var(--hover); color: var(--text); border-color: var(--line); }
+  button.branch svg { flex: 0 0 auto; opacity: .7; }
+  button.branch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px var(--pad) 2px; }
   .chip {
     all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
     min-height: 24px; padding: 2px 8px 2px 6px; border-radius: var(--radius-sm);
@@ -189,11 +371,14 @@
     font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums;
     transition: background .12s ease, border-color .12s ease, color .12s ease;
   }
+  /* The 6px left inset seats a glyph. Without one the number sat off-centre
+     in its own chip. */
+  .chip.done { padding-left: 8px; }
   .chip:hover { background: var(--hover); color: var(--text); border-color: var(--text-faint); }
   .chip.running { color: var(--text); border-color: color-mix(in srgb, var(--run) 42%, var(--line)); background: var(--run-soft); }
   .chip.failed, .chip.blocked { color: var(--text); border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); background: var(--fail-soft); }
 
-  .now { padding: 10px 14px 12px; display: grid; gap: 6px; min-width: 0; }
+  .now { padding: 10px var(--pad) 12px; display: grid; gap: 6px; min-width: 0; }
   .now .title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; }
   .now .title .tno { color: var(--text-2); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
   .now .title .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -201,44 +386,181 @@
   .now .meta .clock { font-variant-numeric: tabular-nums; color: var(--text-2); }
   .now .meta .tool { font-family: var(--mono); font-size: 11px; }
 
-  .feed { margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-2); max-height: 208px; overflow: auto; }
-  .feed .ln { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  /* time · [who] · result · tool · target · duration.
+     A log viewer's columns, for the same reason: the slow call is a glance
+     down the right edge instead of a hunt, and the eleven seconds a test run
+     took is a fact the old single-line row could not hold at all. */
+  .feed {
+    /* `fit-content` on the tool name, not `auto`: an auto track sizes to its
+       widest content and wins against `1fr` when space runs out, which at
+       320px gave `error_during_execution` 132px and left the target — the
+       column with the answer in it — fifteen. */
+    --feed-cols: 50px 12px fit-content(88px) minmax(0, 1fr) 36px;
+    --feed-pad: var(--pad);
+    /* The feed is one grid and the rows borrow its tracks. Rows that each own
+       their grid do not make columns: `auto` only ever agrees with itself, so
+       `Read` and `TodoWrite` pushed the target column 20px apart per line —
+       the same defect the lane table had before subgrid. */
+    display: grid; grid-template-columns: var(--feed-cols); align-content: start;
+    column-gap: 7px; padding: 0 var(--feed-pad);
+    /* Full bleed inside a card that no longer has a border: a rounded, tinted
+       box in there was the only box left, so it read as a card inside a card
+       — the nesting the pane was built to remove. */
+    margin: 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0;
+    background: transparent; max-height: 208px; overflow: auto;
+  }
+  .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(88px) minmax(0, 1fr) 36px; --feed-pad: var(--rail-pad, 12px); }
+  .feed .ln {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: var(--feed-cols); column-gap: 7px; align-items: center;
+    height: 26px; border-bottom: 1px solid var(--line-soft); white-space: nowrap;
+    /* A subgrid's own padding is taken out of the tracks it inherits; the
+       negative margin hands it back so the row's ground still reaches the
+       feed's edges. */
+    margin-inline: calc(-1 * var(--feed-pad)); padding: 0 var(--feed-pad);
+  }
+  @supports (grid-template-columns: subgrid) {
+    .feed .ln { grid-template-columns: subgrid; }
+  }
   .feed .ln:last-child { border-bottom: 0; }
-  .feed .ico { flex: 0 0 auto; display: grid; place-items: center; width: 12px; }
-  .feed .name { font-size: 12px; font-weight: 500; flex: 0 0 auto; }
+  /* A failed call is the line you came to find. Vercel gives it its own
+     ground rather than a coloured glyph you have to spot. The tint lightens
+     the row, which dropped the dim columns on it to 3.98:1 — so on a red row
+     they step up one token and clear AA again. */
+  .feed .ln.bad { background: var(--fail-soft); }
+  .feed .ln.bad .at, .feed .ln.bad .arg, .feed .ln.bad .took,
+  .feed .ln.bad .who, .feed .ln.bad .name.sub, .feed .ln.bad .say { color: var(--text-on-fail); }
+  /* --text-faint is for separators and empty glyphs; a timestamp is a fact
+     the reader reads, so it takes the lowest token that still clears AA. */
+  .feed .at { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+  .feed .who.barrier { color: var(--accent-ink); }
+  .feed .ico { display: grid; place-items: center; width: 12px; }
+  .feed .name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
   .feed .name.sub { color: var(--text-2); font-weight: 400; }
   .feed .arg { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
-  .feed .say { font-size: 12px; color: var(--text-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
-  .feed .empty { display: flex; align-items: center; height: 40px; padding: 0 10px; color: var(--text-3); font-size: 12px; }
+  .feed .arg .why { color: var(--fail); }
+  .feed .took { text-align: right; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .feed .say { grid-column: span 3; font-size: 12px; color: var(--text-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
+  .feed .empty { grid-column: 1 / -1; padding: 12px 0; color: var(--text-3); font-size: 12px; }
+  /* On a phone the duration is the first thing to go: it is the only column
+     whose absence costs nothing, and dropping it buys the target 36px. */
+  @media (max-width: 639px) {
+    .feed { --feed-cols: 50px 12px fit-content(70px) minmax(0, 1fr); }
+    .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(70px) minmax(0, 1fr); }
+    .feed .took { display: none; }
+    .feed .say { grid-column: span 2; }
+  }
+  /* The 320px rail cannot hold six columns either — same trade, same reason.
+     Only the rail: the cards at this width are in a 844px column. */
+  @media (min-width: 900px) and (max-width: 1279px) {
+    .feed.run { --feed-cols: 50px minmax(0, auto) 12px fit-content(70px) minmax(0, 1fr); }
+    .feed.run .took { display: none; }
+    .feed.run .say { grid-column: span 2; }
+  }
+
+  /* "Expand": the target column stops being one clipped line. On an error row
+     the preview is the whole reason the line is red, and the preview is
+     exactly what the ellipsis eats. */
+  /* `grid-auto-rows` is not decoration here. A row is a subgrid, and against
+     an implicit `auto` track Chrome measures its block size as if the columns
+     were unconstrained — every line reports 26px and the wrapped text spills
+     over the row below it. Naming the track sizing makes it measure for real. */
+  .feed.wrap { grid-auto-rows: min-content; }
+  .feed.wrap .ln { height: auto; min-height: 26px; align-items: start; padding-top: 5px; padding-bottom: 5px; white-space: normal; }
+  .feed.wrap .name, .feed.wrap .arg, .feed.wrap .say { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+  .feed.wrap .at, .feed.wrap .who, .feed.wrap .ico, .feed.wrap .took { padding-top: 1px; }
 
   .card > .foot {
-    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px 14px;
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px var(--pad);
     border-top: 1px solid var(--line-soft); background: var(--surface-2);
     font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
   }
 
   /* ------------------------------------------------------------ sections */
-  section { margin-top: 26px; }
-  h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
-  .list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  section { min-width: 0; }
+  h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
+  /* The label belongs to the band, not to the air above it. Floating over a
+     card with 8px of page showing between them is a document's section
+     heading; sitting on the band's own ground, on the band's own gutter, is
+     an application's. */
+  main > section > h2 { padding: 13px var(--pad) 9px; }
+  .list { background: transparent; overflow: hidden; }
+  /* Columns, not two clumps pinned to the far edges. Comparing $7.87 against
+     $4.44 used to mean sweeping 750px of empty row; in a column it is one
+     glance down. --num keeps the three numeric tracks the same width. */
+  .row, .list.table .grid {
+    --num: 76px;
+    --lane-cols: minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
+  }
   .row {
-    display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 14px;
+    display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px var(--pad);
     border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
     transition: background .12s ease;
   }
   .row:last-child { border-bottom: 0; }
+  .row > * { min-width: 0; }
+  .row.task { grid-template-columns: 15px 30px minmax(0, 1fr) minmax(0, auto); }
+  .row.lane { grid-template-columns: var(--lane-cols); }
+  .row.head {
+    min-height: 27px; border-bottom-color: var(--line); background: var(--surface-2);
+    font-size: 10.5px; font-weight: 600; letter-spacing: .045em; text-transform: uppercase; color: var(--text-2);
+  }
   .row[data-task] { cursor: pointer; }
   .row[data-task]:hover { background: var(--hover); }
-  .row .tag { color: var(--text-2); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .mono { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .right { margin-left: auto; display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-  .row .err { color: var(--fail); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .ic, .row .cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .row .tag { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .name, .row .mono, .row .err, .row .right {
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .mono { color: var(--text-3); }
+  .row .err { color: var(--fail); flex: 0 1 auto; }
+  .row .num {
+    text-align: right; white-space: nowrap; color: var(--text-3);
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+  }
+  .row .num b { font-weight: 500; color: var(--text-2); }
+  .row .right { justify-self: end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .row .chips { padding: 0; }
+  /* The number that only existed in the topbar now closes the column that
+     composes it. It sums the rows above it — never the whole run, which would
+     be a total that does not add up to the table it sits under. */
+  .row.lane.foot { border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface-2); }
+  .row.foot .tag { color: var(--text-2); font-weight: 600; }
+  .row.foot .num b { color: var(--text); font-weight: 600; }
+  .row.foot .mono { color: var(--text-2); }
+  /* The same control as the card's branch chip, without the chip: inside a
+     table row a bordered box would read as a second table. */
+  .cp-row {
+    all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    flex-direction: row-reverse; justify-content: flex-end;
+    min-width: 0; max-width: 100%; padding: 2px 6px; margin-left: -6px; border-radius: 5px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-3);
+  }
+  .cp-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-row:hover { background: var(--hover); color: var(--text); }
+  .cp-row.ok { color: var(--done); }
+  .cp-row.bad { color: var(--fail); }
+  .cp-row svg { flex: 0 0 auto; opacity: .6; }
+  /* An `auto` track only agrees with itself: every row being its own grid is
+     why the header sat 30px off its own column. One grid for the table, rows
+     borrowing its tracks via subgrid — and the row still draws its own box,
+     which `display: contents` would have thrown away along with the hover. */
+  .list.table { overflow: auto; }
+  .list.table .grid { display: grid; grid-template-columns: var(--lane-cols); column-gap: 12px; padding: 0 var(--pad); min-width: 600px; }
+  @supports (grid-template-columns: subgrid) {
+    /* The row keeps its own padding so its background and rule still reach the
+       card edges — but a subgrid's padding eats the tracks it inherits (a 15px
+       icon column became 1px). The negative margin gives the padding back. */
+    .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: calc(-1 * var(--pad)); }
+  }
 
-  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  /* The record only ever renders inside the rail, so it takes the rail's
+     gutter — one vertical line with the head above it and the feed below. */
+  .kv-row { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 5px var(--rail-pad, var(--pad)); border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
   .kv-row:last-child { border-bottom: 0; }
-  .kv-row .k { color: var(--text-2); width: 150px; flex: 0 0 auto; }
+  .kv-row .k { display: flex; align-items: center; gap: 8px; color: var(--text-2); width: 128px; flex: 0 0 auto; }
+  .kv-row .k svg { flex: 0 0 auto; opacity: .8; }
   .kv-row .v { overflow-wrap: anywhere; min-width: 0; }
   .pill {
     display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
@@ -248,15 +570,102 @@
   .pill.bad { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
   .pill.live { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: var(--accent-soft); }
 
-  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
-  .flow .arrow { color: var(--text-faint); }
-  .flow .node { font-variant-numeric: tabular-nums; }
-  .flow .node.done { color: var(--text-3); }
-  .flow .node.running { color: var(--text); font-weight: 600; }
 
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
 
-  /* -------------------------------------------------------------- drawer */
+  /* ---------------------------------------------------------- timeline */
+  /* One band per lane on a shared clock.
+     `Lane plan` drew `T1 → T2 → T3`: the order the scheduler chose. It could
+     not say that A and B overlapped for eleven minutes, that four minutes
+     passed between the last lane and the barrier with nothing running, or
+     that the serial barrier cost more than the parallel part saved. Those
+     answers are positions on a time axis, and an arrow has no axis. */
+  .tl {
+    --tl-cols: max-content minmax(0, 1fr) max-content;
+    display: grid; grid-template-columns: var(--tl-cols); align-content: start;
+    column-gap: 10px; padding: 2px var(--pad) 14px;
+    background: transparent;
+  }
+  /* Same reason the lane table and the feed use it: an `auto` track only ever
+     agrees with itself, so per-row grids would put every lane letter in a
+     different place. */
+  .tl-row {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: var(--tl-cols); column-gap: 10px; align-items: center;
+    min-height: 26px;
+  }
+  @supports (grid-template-columns: subgrid) { .tl-row { grid-template-columns: subgrid; } }
+  .tl-lane {
+    font-size: 11.5px; font-weight: 600; color: var(--text-2); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .tl-lane.barrier { font-weight: 500; color: var(--accent-ink); }
+  .tl-scale { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .tl-scale b { font-weight: 500; }
+  .tl-total { color: var(--text-3); }
+  .tl-total b { color: var(--text-2); font-weight: 500; }
+  .tl-top { min-height: 20px; }
+  .tl-top .tl-q { font-size: 10.5px; color: var(--text-3); }
+
+  /* Quarter marks, drawn by the background so they rescale with the axis
+     instead of needing a write per second while the run is still growing. */
+  .tl-track {
+    position: relative; height: 20px; border-radius: 4px;
+    background: repeating-linear-gradient(to right, var(--line-soft) 0 1px, transparent 1px 25%);
+  }
+  /* "not started" is a fact the reader reads, not a separator: --text-faint
+     is for glyphs nobody has to make out. */
+  .tl-none { position: absolute; inset: 0; display: flex; align-items: center; font-size: 10.5px; color: var(--text-3); }
+  /* The block's geometry is two numbers and a division: `--s` and `--e` are
+     seconds from the run's origin, `--span` is the axis. While a task runs it
+     has no right edge — it is pinned to the end of the axis, so the second
+     that grows the run grows the bar with one property write. */
+  .tl-b {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    position: absolute; top: 2px; bottom: 2px;
+    left: calc(var(--s) / var(--span) * 100%);
+    width: max(3px, calc((var(--e) - var(--s)) / var(--span) * 100%));
+    display: flex; align-items: center; overflow: hidden;
+    padding: 0 5px; border: 1px solid transparent; border-radius: 3px;
+    font-size: 10.5px; font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tl-b.open { right: 0; width: auto; }
+  /* Half a glyph is worse than no glyph: under ~24px the bar carries no label
+     and says what it is through its accessible name and its tooltip. */
+  .tl-b.bare { padding: 0; }
+  .tl-b.bare .tl-t { display: none; }
+  .tl-b:hover { border-color: currentColor; }
+  .tl-b.done { background: var(--accent-soft); color: var(--accent-ink); }
+  .tl-b.running { background: var(--run-soft); color: var(--run); }
+  /* 10% and not 16%: in the light theme a warn tint darkens the ground under
+     its own label, and at 16% the pair measured 4.09:1. */
+  .tl-b.interrupted { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+  /* The one state that must not depend on hue: a failed bar is hatched. */
+  .tl-b.failed, .tl-b.blocked {
+    color: var(--fail);
+    background:
+      repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--fail) 20%, transparent) 4px 7px),
+      var(--fail-soft);
+  }
+  .tl-q { display: flex; align-items: center; gap: 4px; }
+  /* A task with no start time has no place on a time axis, and drawing it a
+     bar would be a lie in the one language this chart speaks. It waits beside
+     the axis — which is also where it is in the run. */
+  .tl-qb {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    display: inline-flex; align-items: center; min-height: 18px; padding: 0 7px;
+    border: 1px dashed var(--line); border-radius: 999px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+  .tl-qb:hover { border-style: solid; color: var(--text); background: var(--hover); }
+  /* On a phone the axis is under 120px wide; the run's total is already in
+     the topbar, and here it only pushed the two clock labels apart. */
+  @media (max-width: 639px) { .tl-total { display: none; } }
+  .tl-more { font-size: 10.5px; color: var(--text-3); }
+
+  /* --------------------------------------------------------------- panel */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .14s ease; z-index: 4; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   aside {
@@ -272,87 +681,282 @@
   }
   aside.open { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
   @media (prefers-reduced-motion: reduce) { aside, .scrim, .row, .chip { transition: none } }
-  aside .head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+
+  /* Above 900px the panel stops covering the board and becomes the column
+     beside it. The dialog semantics leave with the scrim: a panel you can
+     read past must not trap Tab, and `aria-modal` on it would tell a screen
+     reader the rest of the page is unavailable when it plainly is not.
+     `applyPanel()` sets and clears those attributes per mode. */
+  /* In the frame the rail is a grid column and nothing more. The sticky
+     offset, the `contain: size` and the viewport `max-height` the last pass
+     needed are all gone with it: they existed to make a box inside a
+     scrolling document behave like a column of a window, and now it is one.
+     What remains is the rule that divides it from the board. */
+  @media (min-width: 900px) {
+    .scrim { display: none; }
+    aside {
+      position: static; right: auto; z-index: auto;
+      width: auto; min-height: 0; transform: none; visibility: visible; transition: none;
+      border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
+    }
+  }
+  /* One gutter for the whole rail. The head sat at 16px over a feed whose
+     rows sit at 12px, so the title hung four pixels right of every timestamp
+     under it and the count stopped four short of the duration column — the
+     one vertical line sixty rows draw, broken by the heading above them.
+     12 and not 16 because the feed's padding is load-bearing: it is taken out
+     of the tracks the rows inherit, and the four pixels come off `arg`, the
+     column with the answer in it. */
+  aside { --rail-pad: 12px; }
+  /* A height, not a padding: the head carried different children in each of
+     its three states — title alone, title + Esc, back + title — and vertical
+     padding turned that into 47 / 53 / 55px, so the feed's first row moved
+     eight pixels every time you opened a task. */
+  aside .head {
+    display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+    min-height: 47px; padding: 0 var(--rail-pad); border-bottom: 1px solid var(--line);
+  }
+  aside .count { flex: 0 0 auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  aside #p-feed {
+    flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto;
+    margin: 0; border: 0; border-radius: 0; background: transparent;
+  }
+  aside #p-feed .ln:last-child { border-bottom: 1px solid var(--line-soft); }
   aside h2#d-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text); min-width: 0; }
   aside h2#d-title .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  aside .body { overflow: auto; padding: 12px 0 48px; }
-  aside h3 { margin: 22px 16px 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
-  aside .pad { padding: 0 16px; }
-  aside pre { margin: 0 16px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-2); font: 400 11.5px/1.6 var(--mono); }
+  aside .body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 0 48px; }
+  aside h3 { margin: 22px var(--rail-pad) 8px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+  aside .pad { padding: 0 var(--rail-pad); }
+  aside pre { margin: 0 var(--rail-pad); padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-2); font: 400 11.5px/1.6 var(--mono); }
+
+  /* Rendered prose, so it is set as prose: the sans face, a reading measure,
+     and no box. The bordered monospace panel was right when the content was a
+     path list and wrong the moment it became the agent's report — a box around
+     running text says "this is a literal", which is the one thing it is not.
+     A fenced block inside it keeps its box, because that part *is* literal. */
+  aside .md { padding: 0 var(--rail-pad); font-size: 12.5px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+  aside .md > :first-child { margin-top: 0; }
+  aside .md > :last-child { margin-bottom: 0; }
+  aside .md p { margin: 0 0 9px; }
+  aside .md strong { color: var(--text); font-weight: 600; }
+  aside .md em { font-style: italic; }
+  aside .md del { text-decoration: line-through; color: var(--text-3); }
+  aside .md h4, aside .md h5 { margin: 15px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  aside .md h5 { color: var(--text-2); }
+  aside .md ul, aside .md ol { margin: 0 0 9px; padding-left: 17px; }
+  aside .md li { margin: 2px 0; }
+  aside .md ul.tick, aside .md ol.tick { padding-left: 0; margin-bottom: 9px; }
+  aside .md blockquote { margin: 0 0 9px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--text-3); }
+  aside .md hr { border: 0; border-top: 1px solid var(--line-soft); margin: 13px 0; }
+  aside .md a { color: var(--accent-ink); }
+  aside .md pre { margin: 0 0 9px; }
+  /* A table in a 320px column scrolls inside its own box rather than dragging
+     the page sideways — the same trade the stage strip and the lane table
+     already make. */
+  aside .md-table { margin: 0 0 10px; overflow-x: auto; }
+  aside .md table { border-collapse: collapse; font-size: 11.5px; }
+  /* `overflow-wrap: anywhere` is right for a paragraph carrying a 90-character
+     path and wrong inside a cell: a column narrow enough will break a word in
+     half rather than admit it needs more room. Here the cell asks for the room
+     and the box scrolls if the panel cannot give it. */
+  aside .md th, aside .md td { padding: 5px 10px 5px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-soft); overflow-wrap: normal; word-break: normal; }
+  aside .md th { font-weight: 600; color: var(--text-2); white-space: nowrap; }
+  aside .md tbody tr:last-child td { border-bottom: 0; }
+  /* Inside a block that is already monospace on its own ground, the inline
+     chip would be a second box saying the same thing. */
+  aside .md pre code { padding: 0; background: none; font-size: inherit; color: inherit; }
+  /* `all: unset` re-inherits `white-space`, so "← Activity" broke over two
+     lines the moment the title beside it got long and made the whole head
+     47px → 71px. It is a control, not prose: it does not wrap and it does not
+     shrink — the title is what ellipsizes. */
   .close {
-    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
     padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px;
+    white-space: nowrap;
   }
   .close:hover { background: var(--hover); color: var(--text); }
+  /* The padding is a hover target, not a margin. Pull it back over the gutter
+     so the label lands on the same line as everything below it. */
+  aside .head > .close:first-child { margin-left: -8px; }
+  aside .head > .close:last-child { margin-right: -8px; }
+
+  /* A tail of eight lines is not observability, and neither is sixty you have
+     to read in order. Search, one kind at a time, and a way to stop clipping. */
+  aside .tools {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto;
+    padding: 8px var(--rail-pad); border-bottom: 1px solid var(--line);
+  }
+  .q, .sel {
+    box-sizing: border-box; min-height: 26px; padding: 3px 7px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+    font: 400 12px var(--ui); color: var(--text); letter-spacing: -.011em;
+  }
+  .q { flex: 1 1 108px; min-width: 0; }
+  .q::placeholder { color: var(--text-2); }
+  .q::-webkit-search-cancel-button { filter: grayscale(1); opacity: .5; }
+  .sel { flex: 0 0 auto; color: var(--text-2); cursor: pointer; padding-right: 2px; }
+  .tgl {
+    all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; flex: 0 0 auto;
+    min-height: 26px; padding: 3px 9px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--surface-2); font-size: 11.5px; color: var(--text-2);
+  }
+  .tgl:hover { background: var(--hover); color: var(--text); }
+  .tgl[aria-pressed="true"] {
+    color: var(--text); background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  }
+
+  /* One copy control, four places: the resume command, a session id, a log
+     path, a lane branch — every string on this page a reader retypes. */
+  .cp {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
+    min-height: 22px; padding: 2px 6px; border-radius: 5px; color: var(--text-3);
+  }
+  .cp.wide { min-height: 24px; padding: 2px 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font-size: 11.5px; }
+  .cp:hover { background: var(--hover); color: var(--text); }
+  .cp.ok { color: var(--done); }
+  .cp.bad { color: var(--fail); }
+  .kv-row .v-cp { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .kv-row .v-cp .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Below 900px there is no rail, so the run feed needs a door of its own. */
+  .railbtn {
+    all: unset; cursor: pointer; display: inline-flex; align-items: center;
+    min-height: 26px; padding: 3px 10px; margin-left: 4px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+    font-size: 11.5px; color: var(--text-2); white-space: nowrap;
+  }
+  .railbtn:hover { background: var(--hover); color: var(--text); }
+  @media (min-width: 900px) { .railbtn { display: none } }
   kbd {
     font-family: var(--ui); font-size: 10.5px; line-height: 1; padding: 3px 5px;
     border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
     background: var(--surface-2); color: var(--text-2);
   }
-  ul.steps { margin: 0; padding: 0 16px 0 34px; color: var(--text-2); font-size: 12.5px; }
-  ul.steps li { margin: 3px 0; }
-  ul.steps li.on { color: var(--text); }
+  /* A checklist, drawn as one. `padding-left: 30px` with a `☐` in the text was
+     a bullet list wearing a glyph: the box sat on the text baseline, at
+     whatever size the font felt like, and a step that wrapped ran back under
+     it. Two tracks fix both — the box has a column and the text has a column,
+     and the second line of a long step starts under the first. */
+  .steps, .md ul.tick, .md ol.tick { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+  .steps { padding: 0 var(--rail-pad); font-size: 12.5px; }
+  .steps li, .md .tick li {
+    display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 9px;
+    align-items: start; padding: 4px 0; margin: 0; color: var(--text);
+  }
+  /* Done recedes here too: the box carries the state and the tone agrees with
+     it, so what is left to do is what reads first. */
+  .steps li.on, .md .tick li.on { color: var(--text-2); }
+  .steps svg, .md .tick svg { margin-top: 2px; }
+  .steps strong, .md .tick strong { font-weight: 500; color: inherit; }
+
+  /* --text-3 is calibrated against --surface, where it reads 4.63:1, and it
+     lands at 4.42 on --surface-2 — the tinted grounds: the branch chip, a
+     card's foot, a table's head and its total row. Phase 3 found this exact
+     pair and fixed the two places it had then; these are the rest of them.
+     In the light theme --text-2 and --text-3 are the same value, so stepping
+     up costs nothing there and buys the whole dark column. */
+  .card .branch, .card > .foot, .row.head .num, .row.foot .num { color: var(--text-2); }
+
+  /* ------------------------------------------------------------- focus */
+  /* Last on purpose, and it has to stay last.
+     Every control on this page that resets itself with `all: unset` — the
+     copy buttons, the chips, the wrap toggle, the timeline blocks — sets
+     `outline: initial` at class specificity. Declared at the top of the file
+     this rule tied with them on specificity and lost on source order, so a
+     keyboard reader tabbed through the whole page with no visible focus at
+     all. Measured with `CSS.forcePseudoState`: `outline-style: none` on
+     seven controls, ring intact only on the plain `<input>` and the one row
+     that is a div. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 </style>
 </head>
 <body>
 
+<!-- One frame, and everything the page has is inside it. The window chrome
+     is the topbar and the frame's own edge; the only thing that scrolls is
+     `.scroller`, so the border never leaves the screen. Below 900px the
+     frame dissolves back into the document — see the CSS. -->
+<div class="frame">
+
 <header class="topbar">
   <div class="crumbs">
-    <span class="badge-app" aria-hidden="true">plo</span>
+    <span class="badge-app" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" focusable="false"><path d="M6 1.15 L10.2 10.85 L6 8.35 L1.8 10.85 Z" fill="var(--on-brand)" /></svg></span>
     <h1 id="plan-title">…</h1>
   </div>
   <div class="grow"></div>
   <div class="stats">
     <span class="stat"><b id="m-progress">–</b> done</span>
-    <span class="stat"><b id="m-cost">–</b> spent</span>
+    <span class="stat"><b id="m-cost">–</b> tokens</span>
     <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
+    <button class="railbtn" id="open-feed" aria-controls="panel">Activity</button>
     <span class="live off" id="live"><i class="pip"></i><span id="live-text">connecting…</span></span>
   </div>
 </header>
 
-<div class="wrap">
-  <div class="summary">
-    <div class="track" id="bar" aria-hidden="true"></div>
-    <div class="legend" id="counts" role="status" aria-live="polite"></div>
+<div class="frame-body">
+  <div class="scroller">
+  <div class="wrap">
+    <div class="summary">
+      <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+      <div class="subline" id="plan-sub"></div>
+    </div>
+
+    <ol class="stages" id="stages" aria-label="Run pipeline" hidden></ol>
+
+    <main>
+      <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
+
+      <section id="timeline-section" hidden>
+        <h2>Timeline</h2>
+        <div class="tl" id="timeline" aria-label="Run timeline"></div>
+      </section>
+
+      <div class="board" id="board"></div>
+
+      <section id="settled-section" hidden>
+        <h2>Settled lanes</h2>
+        <div class="list table" id="settled" role="table" aria-label="Settled lanes"></div>
+      </section>
+
+      <section id="barriers-section" hidden>
+        <h2>Barriers</h2>
+        <div class="list" id="barriers"></div>
+      </section>
+
+    </main>
   </div>
-  <div class="subline" id="plan-sub"></div>
+  </div>
 
-  <main>
-    <div class="alerts" id="alerts" role="status" aria-live="polite"></div>
+  <!-- The rail is a column of the frame, not of the scrolling document: it
+       reaches the top and the bottom of the window because it *is* the
+       window's height, which is what let the sticky offset, the `contain`
+       and the viewport `max-height` go away. -->
+  <aside id="panel" aria-labelledby="d-title">
+    <div class="head">
+      <button class="close" id="p-back" hidden>&larr; Activity</button>
+      <h2 id="d-title">Run activity</h2>
+      <div class="grow"></div>
+      <span class="count" id="p-count"></span>
+      <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
+    </div>
+    <div class="tools" id="p-tools">
+      <input type="search" class="q" id="p-q" placeholder="Filter events" aria-label="Filter run activity" autocomplete="off" spellcheck="false" />
+      <select class="sel" id="p-kind" aria-label="Kind of event">
+        <option value="">All</option>
+        <option value="err">Errors</option>
+        <option value="bash">Bash</option>
+        <option value="edit">Edits</option>
+      </select>
+      <button class="tgl" id="p-wrap" aria-pressed="false" aria-controls="p-feed" title="Show each line in full instead of clipping it">Wrap</button>
+    </div>
+    <div class="feed run" id="p-feed"></div>
+    <div class="body" id="d-body" hidden></div>
+  </aside>
+</div>
 
-    <div class="board" id="board"></div>
-
-    <section id="settled-section" hidden>
-      <h2>Settled lanes</h2>
-      <div class="list" id="settled"></div>
-    </section>
-
-    <section id="barriers-section" hidden>
-      <h2>Barriers</h2>
-      <div class="list" id="barriers"></div>
-    </section>
-
-    <section id="integration-section" hidden>
-      <h2>Integration</h2>
-      <div class="list" id="integration"></div>
-    </section>
-
-    <section id="dag-section" hidden>
-      <h2>Lane plan</h2>
-      <div class="list" id="dag"></div>
-    </section>
-  </main>
 </div>
 
 <div class="scrim" id="scrim"></div>
-<aside id="drawer" role="dialog" aria-modal="true" aria-hidden="true" inert aria-labelledby="d-title">
-  <div class="head">
-    <h2 id="d-title">Task</h2>
-    <div class="grow"></div>
-    <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
-  </div>
-  <div class="body" id="d-body"></div>
-</aside>
 
 <script>
 'use strict';
@@ -361,8 +965,15 @@ const $ = (id) => document.getElementById(id);
 
 let snap = null;       // last snapshot payload
 let skew = 0;          // serverNow - clientNow, so timers agree with the run
-let openTask = null;   // task number shown in the drawer
+let openTask = null;   // task number shown in the panel, or null for the feed
 let openedFrom = null; // element that opened it, to hand focus back on close
+let modalOpen = false; // only meaningful below 900px, where the panel is modal
+let feedQuery = '';    // what the reader typed into the feed's filter
+let feedKind = '';     // '' | 'err' | 'bash' | 'edit'
+
+/** The one query the panel's two personalities hang off. */
+const wide = window.matchMedia('(min-width: 900px)');
+const panelOn = () => wide.matches || modalOpen;
 
 /**
  * Rewriting innerHTML that did not change is not just wasted work: it destroys
@@ -378,12 +989,112 @@ function paint(el, html) {
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const short = (sha) => String(sha || '').slice(0, 7);
+
+/**
+ * The smallest Markdown that covers what an agent actually writes back.
+ *
+ * An agent's final report is Markdown — it is written to be read as Markdown
+ * and there is no mode where it is not. Printing it raw put `**marcada**` and
+ * `` `lib/day-close.ts` `` on screen as literal punctuation, which is the one
+ * rendering guaranteed to be wrong.
+ *
+ * No dependency, because this CLI has none and a monitor that needs an
+ * install to watch a run is a monitor nobody starts. Safety comes from order:
+ * the source is escaped **first**, so by the time any rule runs there is no
+ * `<` left in the string and nothing the content can do produces a tag. The
+ * only tags in the output are the ones these rules put there.
+ */
+const MD_FENCE = '\u0000';
+const MD_CODE = '\u0001';
+
+/** Runs on already-escaped text. Code spans are held out first: a backtick
+ *  span is literal, and `a**b` must not come back bold. */
+function mdInline(t) {
+  const held = [];
+  let out = String(t).replace(/`([^`]+)`/g, (_, c) => { held.push(c); return `${MD_CODE}${held.length - 1}${MD_CODE}`; });
+  out = out
+    // Only http(s). The scheme survives escaping intact, so this test is on
+    // the real thing, and anything else stays the text it already was.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noreferrer noopener">${label}</a>`)
+    .replace(/\*\*(\S[^*]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/~~(\S[^~]*?)~~/g, '<del>$1</del>')
+    // A lone marker needs a non-word neighbour on both sides, or `snake_case`
+    // and `a * b` become emphasis in the middle of a path or an expression.
+    .replace(/(^|[^*\w])\*(\S[^*]*?)\*(?![*\w])/g, '$1<em>$2</em>')
+    .replace(/(^|[^_\w])_(\S[^_]*?)_(?![_\w])/g, '$1<em>$2</em>');
+  return out.replace(new RegExp(MD_CODE + '(\\d+)' + MD_CODE, 'g'), (_, i) => `<code>${held[+i]}</code>`);
+}
+
+function md(src) {
+  const raw = String(src == null ? '' : src).replace(/\r\n?/g, '\n').trim();
+  if (!raw) return '';
+  const fenced = [];
+  const lines = esc(raw)
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, (_, body) => { fenced.push(body.replace(/\n+$/, '')); return `${MD_FENCE}${fenced.length - 1}${MD_FENCE}`; })
+    .split('\n');
+
+  const out = [];
+  let para = [];
+  let list = null;
+  let quote = [];
+  let table = null;
+  const closePara = () => { if (para.length) { out.push(`<p>${mdInline(para.join('\n')).replace(/\n/g, '<br>')}</p>`); para = []; } };
+  const closeList = () => {
+    if (!list) return;
+    out.push(`<${list.tag}${list.tick ? ' class="tick"' : ''}>` + list.items.map((i) => (i.box == null
+      ? `<li>${mdInline(i.text)}</li>`
+      : `<li class="${i.box ? 'on' : ''}">${checkbox(i.box)}<span>${mdInline(i.text)}</span></li>`)).join('') + `</${list.tag}>`);
+    list = null;
+  };
+  const closeQuote = () => { if (quote.length) { out.push(`<blockquote>${mdInline(quote.join(' '))}</blockquote>`); quote = []; } };
+  const RULE = /^\|[\s:|-]+\|$/;
+  const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => mdInline(c.trim()));
+  const closeTable = () => {
+    if (!table) return;
+    const rows = table.slice();
+    // A run of pipes is only a table if the second line is the rule. Without
+    // it this is prose that happens to contain a pipe, and a `<table>` around
+    // it would be a worse lie than the run-on paragraph it replaces.
+    const head = rows.length > 1 && RULE.test(rows[1].trim()) ? (rows.splice(1, 1), rows.shift()) : null;
+    const body = rows.filter((r) => !RULE.test(r.trim()));
+    out.push('<div class="md-table"><table>'
+      + (head ? `<thead><tr>${cells(head).map((c) => `<th>${c}</th>`).join('')}</tr></thead>` : '')
+      + `<tbody>${body.map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    table = null;
+  };
+  const close = () => { closePara(); closeList(); closeQuote(); closeTable(); };
+  const item = (tag, text) => {
+    closePara(); closeQuote(); closeTable();
+    if (!list || list.tag !== tag) closeList(), list = { tag, items: [], tick: false };
+    const box = text.match(/^\[([ xX])\]\s+(.*)$/);
+    if (box) { list.tick = true; list.items.push({ box: box[1] !== ' ', text: box[2] }); }
+    else list.items.push({ box: null, text });
+  };
+
+  for (const line of lines) {
+    const fence = line.match(new RegExp('^' + MD_FENCE + '(\\d+)' + MD_FENCE + '$'));
+    if (fence) { close(); out.push(`<pre><code>${fenced[+fence[1]]}</code></pre>`); continue; }
+    if (!line.trim()) { close(); continue; }
+    let m;
+    // A panel column is not a document: an agent's `#` is a run of prose, not
+    // a page title, so every level lands on one of two sizes.
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { close(); out.push(`<h${m[1].length <= 2 ? 4 : 5}>${mdInline(m[2])}</h${m[1].length <= 2 ? 4 : 5}>`); continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { close(); out.push('<hr>'); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) { closePara(); closeList(); closeQuote(); (table || (table = [])).push(line.trim()); continue; }
+    if ((m = line.match(/^\s*&gt;\s?(.*)$/))) { closePara(); closeList(); closeTable(); quote.push(m[1]); continue; }
+    if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { item('ul', m[1]); continue; }
+    if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { item('ol', m[1]); continue; }
+    closeList(); closeQuote(); closeTable(); para.push(line);
+  }
+  close();
+  return out.join('');
+}
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
  * An agent that blocks writes a report, not a sentence — headings, bold, the
  * whole account. A banner takes its first real line; the rest is one click
- * away in the drawer, where there is room for it.
+ * away in the panel, where there is room for it.
  */
 function gist(text, max = 150) {
   const line = String(text || '')
@@ -403,9 +1114,24 @@ function dur(ms) {
 const since = (iso) => (iso ? dur(Date.now() + skew - Date.parse(iso)) : '–');
 /** A settled task gets the time it took, not a clock that keeps running. */
 const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date.parse(t.startedAt)) : t.startedAt ? since(t.startedAt) : '–');
-// Cost lands only when a process exits, so zero means "not reported yet",
-// not "this was free". Saying $0.00 there is a lie the reader acts on.
-const money = (v) => (typeof v === 'number' && v > 0 ? `$${v.toFixed(2)}` : '—');
+/**
+ * Output tokens, not dollars.
+ *
+ * The agent reports `total_cost_usd` and it is an API price. Nobody running
+ * this off a subscription pays it, so on this page it was a number with no
+ * referent — precise to the cent and about someone else's bill. Tokens are
+ * what the run actually spends, and what a usage limit is counted in.
+ *
+ * Same rule as the cost it replaces: a task that has not reported did not
+ * spend nothing, so nothing is `—` and never `0`.
+ */
+const tokens = (v) => {
+  if (typeof v !== 'number' || v <= 0) return '—';
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
+};
 
 // ------------------------------------------------------------ status marks
 
@@ -426,8 +1152,13 @@ function statusIcon(status, size = 15) {
 
   switch (status) {
     case 'done':
-      return `${open}<circle cx="${c}" cy="${c}" r="${c - 0.5}" fill="var(--accent)" />
-        <path d="M${c * 0.6} ${c + c * 0.03} l${c * 0.28} ${c * 0.3} l${c * 0.55} -${c * 0.6}" fill="none" stroke="var(--on-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+      // No disc, and not the accent. A filled accent disc for `done` put the
+      // loudest mark on the page on its least urgent state — eleven of them on
+      // a finished run, against one red ring for the thing that broke. It is
+      // the same check the feed draws for a call that returned, at a bigger
+      // size: one glyph, one meaning, two scales.
+      return `${open}<path d="M${(s * 0.22).toFixed(2)} ${(s * 0.52).toFixed(2)} L${(s * 0.42).toFixed(2)} ${(s * 0.72).toFixed(2)} L${(s * 0.78).toFixed(2)} ${(s * 0.30).toFixed(2)}"
+        fill="none" stroke="var(--done)" stroke-width="${(s / 9.5).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
     case 'running': {
       // Half-filled ring: a pie drawn as one fat dashed stroke, Linear-style.
       const r = (c - 1.25) / 2;
@@ -467,11 +1198,47 @@ const alertIcon = (bad) => {
     <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
 };
 
+const copyIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <rect x="3.7" y="3.7" width="6.8" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path d="M8.3 1.6 H3.2 A1.6 1.6 0 0 0 1.6 3.2 V8.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>`;
+
+const okIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M2.4 6.3 L4.7 8.6 L9.6 3.5" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
 /** Two branches folding into one: the barrier card's mark. */
 const mergeIcon = () => `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
   <path d="M2.8 1.6 v2.6 c0 2.2 1.5 2.9 3.2 2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
   <path d="M2.8 11.4 v-2.6 c0-2.2 1.5-2.9 3.2-2.9 h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
   <circle cx="10.2" cy="6.5" r="1.7" fill="currentColor" /></svg>`;
+
+/** A drawn box, not `☐` — the glyph is a font's opinion and it lands at a
+ *  different size and baseline in every one of them. */
+const checkbox = (on) => (on
+  ? `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
+      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="var(--done-soft)" stroke="var(--done)" stroke-width="1.15" />
+      <path d="M3.5 6.6 L5.5 8.6 L9.5 4.5" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+  : `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
+      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="none" stroke="var(--idle)" stroke-width="1.15" /></svg>`);
+
+/**
+ * One glyph per row of the record, in `currentColor` so they stay the label's
+ * tone. Ten different marks appearing once each is a legend; it is the
+ * opposite of the same mark repeated twelve times, which is what this pass
+ * took out of the board.
+ */
+const kvSvg = (body) => `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+const KV_ICON = {
+  Status: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><circle cx="6.5" cy="6.5" r="1.9" fill="currentColor" stroke="none" />'),
+  Lane: kvSvg('<path d="M1.6 3.3 h9.8 M1.6 6.5 h6.4 M1.6 9.7 h8.2" />'),
+  Duration: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><path d="M6.5 3.6 V6.7 L8.6 8.1" />'),
+  Turns: kvSvg('<path d="M11 6.5a4.5 4.5 0 1 1-1.6-3.4" /><path d="M11.2 1.9 V4.1 H9" />'),
+  Attempts: kvSvg('<path d="M2 6.5a4.5 4.5 0 1 0 1.6-3.4" /><path d="M1.8 1.9 V4.1 H4" />'),
+  'Output tokens': kvSvg('<path d="M2.4 10.6 V7.4 M6.5 10.6 V4.6 M10.6 10.6 V2.4" stroke-width="1.45" />'),
+  Model: kvSvg('<rect x="3.4" y="3.4" width="6.2" height="6.2" rx="1.4" /><path d="M5.2 1.5v1.9 M7.8 1.5v1.9 M5.2 9.6v1.9 M7.8 9.6v1.9 M1.5 5.2h1.9 M1.5 7.8h1.9 M9.6 5.2h1.9 M9.6 7.8h1.9" />'),
+  Session: kvSvg('<path d="M7.6 2.1 H10a.9.9 0 0 1 .9.9v7a.9.9 0 0 1-.9.9H7.6" /><path d="M5.4 2.1H3a.9.9 0 0 0-.9.9v7a.9.9 0 0 0 .9.9h2.4" /><path d="M4.5 6.5h4" />'),
+  Commits: kvSvg('<circle cx="6.5" cy="6.5" r="2.4" /><path d="M1.4 6.5h2.7 M8.9 6.5h2.7" />'),
+  Log: kvSvg('<path d="M3.1 1.7h4.3l2.5 2.5v7.1H3.1z" /><path d="M7.2 1.8v2.6h2.6 M4.7 7.1h3.6 M4.7 9.2h2.6" />'),
+};
 
 // --------------------------------------------------------------- rendering
 
@@ -482,10 +1249,11 @@ function render(s) {
   if (!s.ready) {
     $('plan-sub').textContent = s.plan || '';
     paint($('board'), `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`);
-    paint($('bar'), '');
-    $('counts').textContent = '';
+    paint($('verdict'), '');
     paint($('alerts'), '');
-    for (const id of ['settled-section', 'barriers-section', 'integration-section', 'dag-section']) $(id).hidden = true;
+    renderFeed(s);
+    $('stages').hidden = true;
+    for (const id of ['settled-section', 'barriers-section', 'timeline-section']) $(id).hidden = true;
     return;
   }
 
@@ -498,36 +1266,181 @@ function render(s) {
   ].filter(Boolean).join('<span class="sep">·</span>');
 
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
-  $('m-cost').textContent = money(s.totals.costUsd);
+  $('m-cost').textContent = tokens(s.totals.outputTokens);
   // This page is made to sit in a background tab; the tab strip should report.
   const stuck = s.totals.failed + s.totals.blocked;
   document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
 
-  paint($('bar'), all.map((t) => `<i class="${t.status}"></i>`).join(''));
-  $('counts').textContent = ['running', 'failed', 'blocked', 'interrupted', 'pending']
-    .filter((k) => s.totals[k]).map((k) => `${s.totals[k]} ${k}`).join('  ·  ') || 'all tasks settled';
+  paint($('verdict'), verdictHtml(s));
 
+  renderStages(s);
   renderAlerts(s);
+  renderTimeline(s);
+  renderFeed(s);
   renderBoard(s);
   renderBarriers(s);
-  renderIntegration(s);
-  renderDag(s);
   tick();
 }
 
+/**
+ * The run in one sentence, at the top, in the largest type on the page.
+ * Making the reader count rings to learn "nothing is running and T4 died six
+ * hours ago" is making them work for the one fact they came for.
+ */
+function verdictHtml(s) {
+  const t = s.totals;
+  const all = [...s.lanes.flatMap((l) => l.tasks), ...s.barriers];
+  const hurt = all.filter((x) => x.status === 'failed' || x.status === 'blocked' || x.status === 'interrupted');
+  const running = all.filter((x) => x.status === 'running');
+  const complete = t.done === t.total;
+
+  const parts = [complete ? `All ${plural(t.total, 'task')} done` : `${t.done} of ${t.total} done`];
+  for (const x of hurt.slice(0, 2)) {
+    const word = esc((STATUS_WORD[x.status] || x.status).toLowerCase());
+    const held = x.endedAt ? `<span class="soft"> for <span data-since="${esc(x.endedAt)}">–</span></span>` : '';
+    parts.push(`<span class="bad">T${x.n} ${word}${held}</span>`);
+  }
+  if (hurt.length > 2) parts.push(`<span class="soft">+${hurt.length - 2} more</span>`);
+  if (running.length) parts.push(`<span class="soft">${plural(running.length, 'task')} running</span>`);
+  else if (!complete) parts.push('<span class="soft">nothing running</span>');
+
+  const mark = hurt.length ? hurt[0].status : running.length ? 'running' : complete ? 'done' : 'pending';
+  return statusIcon(mark, 17) + parts.join('<span class="sep">·</span>');
+}
+
+/**
+ * The run in one column, in order.
+ *
+ * Each lane writes its own log, so a per-card tail can say what a lane is
+ * doing but never what happened across the run — which is the question the
+ * empty right half of this page was refusing to answer.
+ */
+/**
+ * The pipeline, full width, above everything it explains.
+ *
+ * The four key-value rows this replaces reported `barrier-failed` as a word,
+ * which asks the reader to already know that barriers run after the merge and
+ * before the suite in order to place it. Here the position carries that.
+ */
+function renderStages(s) {
+  const stages = (s && s.ready && s.stages) || [];
+  $('stages').hidden = !stages.length;
+  paint($('stages'), stages.map((st) => `<li class="stage ${esc(st.status)}">`
+    + statusIcon(st.status, 14)
+    + `<span class="st-label">${esc(st.label)}</span>`
+    + `<span class="sr">${esc(STATUS_WORD[st.status] || st.status)}${st.detail ? ',' : ''}</span>`
+    + (st.detail ? `<span class="st-detail" title="${esc(st.detail)}">${esc(st.detail)}</span>` : '')
+    + '</li>').join(''));
+}
+
+const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Update']);
+/** Everything on a line a reader could plausibly be looking for. */
+const feedText = (a) => [a.name, a.target, a.text, a.preview, a.label, whoLabel(a)].filter(Boolean).join(' ').toLowerCase();
+
+function feedMatch(a) {
+  if (feedKind === 'err' && a.ok !== false) return false;
+  if (feedKind === 'bash' && a.name !== 'Bash') return false;
+  if (feedKind === 'edit' && !EDIT_TOOLS.has(a.name)) return false;
+  return !feedQuery || feedText(a).includes(feedQuery);
+}
+
+function renderFeed(s) {
+  const all = (s && s.ready && s.feed) || [];
+  const feed = all.filter(feedMatch);
+  // A filtered count that hides the total reads as a shrinking run.
+  $('p-count').textContent = !all.length ? ''
+    : feed.length === all.length ? plural(all.length, 'event') : `${feed.length} of ${all.length}`;
+
+  const host = $('p-feed');
+  // Repainted every second: a reader who scrolled back must not be yanked to
+  // the top by an event they were not reading.
+  const top = host.scrollTop;
+  const changed = paint(host, feed.length
+    ? feed.slice().reverse().map((a) => activityHtml(a, true)).join('')
+    : `<div class="empty">${all.length ? 'no event matches' : 'no agent events yet'}</div>`);
+  if (changed) host.scrollTop = top;
+}
+
+/**
+ * The command the reader is about to retype, in the form they would type it:
+ * from the repo root, with the plan relative to it.
+ */
+function cmd(s, verb) {
+  const root = s.repoRoot ? `${s.repoRoot}/` : '';
+  const plan = root && s.plan && s.plan.startsWith(root) ? s.plan.slice(root.length) : s.plan;
+  return `plo ${verb} --plan ${plan}`;
+}
+
+/**
+ * A banner that says what went wrong and leaves the reader to retype the fix
+ * has done half the job. Every alert here ends in the command it implies.
+ */
 function renderAlerts(s) {
   const out = [];
+  const acts = (html) => `<div class="acts">${html}</div>`;
+  const resume = () => copyBtnHtml(cmd(s, 'resume'), 'the resume command', { label: 'Copy resume' });
+
   if (s.rateLimit) {
     const at = s.rateLimit.resetsAt ? new Date(s.rateLimit.resetsAt * 1000).toLocaleTimeString() : null;
-    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div></div>`);
+    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div>${acts(resume())}</div>`);
   }
   if (s.planChanged) {
-    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div></div>`);
+    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div>${acts(copyBtnHtml(cmd(s, 'analyze'), 'the analyze command', { label: 'Copy analyze' }))}</div>`);
   }
   for (const t of [...s.lanes.flatMap((l) => l.tasks), ...s.barriers].filter((t) => t.status === 'failed' || t.status === 'blocked')) {
-    out.push(`<div class="alert bad" data-task="${t.n}" role="button" tabindex="0" aria-haspopup="dialog">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div><span class="more">Details</span></div>`);
+    out.push(`<div class="alert bad">${alertIcon(true)}<div><b>T${t.n}</b> ${esc((STATUS_WORD[t.status] || t.status).toLowerCase())} — ${esc(gist(t.error) || 'no error recorded')}</div>`
+      + acts(resume() + `<button class="chip" data-task="${t.n}" aria-controls="panel">Details</button>`) + '</div>');
   }
   paint($('alerts'), out.join(''));
+}
+
+/**
+ * One copy control, four places: the resume command, a session id, a log path,
+ * a lane branch — every string on this page that otherwise gets retyped.
+ */
+function copyBtnHtml(text, what, { label = '', cls = 'cp', title = '' } = {}) {
+  const wide = cls === 'cp' && label ? ' wide' : '';
+  return `<button class="${cls}${wide}" data-copy="${esc(text)}" data-what="${esc(what)}" data-label="${esc(label)}"`
+    + ` aria-label="Copy ${esc(what)}" title="${esc(title || `Copy ${what}`)}">`
+    + copyIcon() + (label ? `<span>${esc(label)}</span>` : '') + '</button>';
+}
+
+/**
+ * `navigator.clipboard` needs a secure context. Loopback is one; the address
+ * `--host` hands another machine is not — and that is exactly the reader who
+ * cannot retype a session id by hand. The textarea is the fallback for them.
+ */
+async function copyText(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+/** `done` is null at rest, true after a copy, false after a refusal. */
+function paintCopyBtn(btn, done) {
+  btn.classList.toggle('ok', done === true);
+  btn.classList.toggle('bad', done === false);
+  const label = btn.dataset.label;
+  const word = done === true ? 'Copied' : done === false ? 'Copy failed' : label;
+  btn.innerHTML = (done === true ? okIcon() : copyIcon()) + (label ? `<span>${esc(word)}</span>` : '');
+  btn.setAttribute('aria-label', done === true ? `${btn.dataset.what} copied` : `Copy ${btn.dataset.what}`);
+}
+
+async function handleCopy(btn) {
+  const ok = await copyText(btn.dataset.copy || '');
+  paintCopyBtn(btn, ok);
+  clearTimeout(btn.restore);
+  btn.restore = setTimeout(() => paintCopyBtn(btn, null), 1400);
 }
 
 /** The first thing in a task list that still wants attention. */
@@ -539,20 +1452,64 @@ function currentOf(tasks) {
 
 const sumTurns = (tasks) => tasks.reduce((n, t) => n + (t.turns || 0), 0);
 const sumCommits = (tasks) => tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0);
-const sumCost = (tasks) => tasks.reduce((n, t) => n + (typeof t.costUsd === 'number' ? t.costUsd : 0), 0);
+const sumTokens = (tasks) => tasks.reduce((n, t) => n + (typeof t.outputTokens === 'number' ? t.outputTokens : 0), 0);
 
 function chipsHtml(tasks) {
   return `<div class="chips">${tasks.map((t) => {
     const name = `Task ${t.n}, ${esc(t.title)}, ${esc(STATUS_WORD[t.status] || t.status)}`;
-    return `<button class="chip ${t.status}" data-task="${t.n}" aria-haspopup="dialog" aria-label="${name}" title="${name}">${statusIcon(t.status, 13)}${t.n}</button>`;
+    // A done chip is a number. Every other status keeps its glyph, so a
+    // glyph inside a chip goes back to meaning "this one, not the others".
+    const mark = t.status === 'done' ? '' : statusIcon(t.status, 13);
+    return `<button class="chip ${t.status}" data-task="${t.n}" aria-controls="panel" aria-label="${name}" title="${name}">${mark}${t.n}</button>`;
   }).join('')}</div>`;
 }
 
-function activityHtml(a) {
-  if (a.kind === 'text') return `<div class="ln"><span class="ico"></span><span class="say">${esc(a.text)}</span></div>`;
-  if (a.kind === 'run') return `<div class="ln"><span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
-  if (a.kind === 'result') return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg">${esc(a.text || '')}</span></div>`;
-  return `<div class="ln"><span class="ico">${resultIcon(a.ok)}</span><span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span><span class="arg">${esc(a.target || '')}</span></div>`;
+const clock = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', { hour12: false }) : '';
+};
+/** An axis label is a time of day, not a stopwatch: seconds are noise there. */
+const hhmm = (iso) => clock(iso).slice(0, 5);
+
+/**
+ * How long a call took, once its result came back. Anything under a second
+ * gets nothing: a column of "0s" hides the one line this is for, which is the
+ * test run that sat there for four minutes.
+ */
+function took(a) {
+  if (!a.at || !a.doneAt) return '';
+  const ms = Date.parse(a.doneAt) - Date.parse(a.at);
+  if (!isFinite(ms) || ms < 1000) return '';
+  return ms < 60000 ? `${Math.round(ms / 1000)}s` : dur(ms);
+}
+
+/** Where an event came from, two characters wide. A barrier has no lane, so
+ *  it reads `T3` — the shape itself says "this one is not a lane". */
+const whoLabel = (a) => (a.lane ? `${String(a.lane).toUpperCase()}${a.n}` : `T${a.n}`);
+const whoTitle = (a) => (a.lane ? `Lane ${String(a.lane).toUpperCase()} · Task ${a.n}` : `Barrier · Task ${a.n}`);
+
+function activityHtml(a, who = false) {
+  const at = `<span class="at">${esc(clock(a.at))}</span>`;
+  // Deliberately not a button: sixty of them would be sixty tab stops through
+  // near-identical labels, and the same task is one keystroke away on the
+  // board, the alerts and the lane table.
+  const tag = who ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(whoTitle(a))}">${esc(whoLabel(a))}</span>` : '';
+  const bad = a.ok === false ? ' bad' : '';
+  const open = `<div class="ln${bad}">${at}${tag}`;
+
+  if (a.kind === 'text') return `${open}<span class="ico"></span><span class="say" title="${esc(a.text)}">${esc(a.text)}</span></div>`;
+  if (a.kind === 'run') return `${open}<span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
+  if (a.kind === 'result') {
+    const ran = a.durationMs > 1000 ? dur(a.durationMs) : '';
+    return `${open}<span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg" title="${esc(a.text || '')}">${esc(a.text || '')}</span><span class="took">${esc(ran)}</span></div>`;
+  }
+  // A failed call's preview is the whole reason the line is red; it rides in
+  // the target column after the target, and the tooltip carries both in full.
+  const why = a.ok === false && a.preview ? `<span class="why"> ${esc(a.preview)}</span>` : '';
+  return `${open}<span class="ico">${resultIcon(a.ok)}</span>`
+    + `<span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span>`
+    + `<span class="arg" title="${esc([a.target, a.ok === false ? a.preview : ''].filter(Boolean).join(' — '))}">${esc(a.target || '')}${why}</span>`
+    + `<span class="took">${esc(took(a))}</span></div>`;
 }
 
 function feedPlaceholder(t) {
@@ -567,17 +1524,19 @@ function feedPlaceholder(t) {
  * thing running, and a thin row under three "lane complete" cards is not a
  * report on it.
  */
-function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
+function cardHtml({ kind, label, sub, subTitle, copy, tasks, current }) {
   const live = current && current.status === 'running';
   const feed = live && current.activity.length
-    ? current.activity.slice().reverse().map(activityHtml).join('')
+    ? current.activity.slice().reverse().map((a) => activityHtml(a)).join('')
     : `<div class="empty">${current ? esc(feedPlaceholder(current)) : 'every task settled'}</div>`;
 
   return `
     <div class="head">
       <span class="kind ${kind}">${kind === 'barrier' ? mergeIcon() : ''}${esc(label)}</span>
       <div class="grow"></div>
-      ${sub ? `<span class="branch" title="${esc(subTitle || sub)}">${esc(sub)}</span>` : ''}
+      ${!sub ? '' : copy
+        ? copyBtnHtml(copy, 'the lane branch', { label: sub, cls: 'branch', title: `${subTitle || sub} — click to copy the branch` })
+        : `<span class="branch" title="${esc(subTitle || sub)}">${esc(sub)}</span>`}
     </div>
     ${chipsHtml(tasks)}
     <div class="now">
@@ -595,7 +1554,7 @@ function cardHtml({ kind, label, sub, subTitle, tasks, current }) {
     <div class="foot">
       <span>${plural(sumTurns(tasks), 'turn')}</span>
       <span>${plural(sumCommits(tasks), 'commit')}</span>
-      <span>${money(sumCost(tasks))}</span>
+      <span>${sumTokens(tasks) ? `${tokens(sumTokens(tasks))} tokens` : '—'}</span>
     </div>`;
 }
 
@@ -610,7 +1569,7 @@ function renderBoard(s) {
     sig: JSON.stringify(lane),
     html: cardHtml({
       kind: 'lane', label: `Lane ${lane.label}`, sub: lane.branch || 'no branch yet',
-      subTitle: lane.worktree, tasks: lane.tasks, current: currentOf(lane.tasks),
+      subTitle: lane.worktree, copy: lane.branch || '', tasks: lane.tasks, current: currentOf(lane.tasks),
     }),
   }));
 
@@ -647,17 +1606,42 @@ function renderBoard(s) {
 
   const settled = s.lanes.filter((l) => l.settled);
   $('settled-section').hidden = !settled.length;
-  paint($('settled'), settled.map((lane) => `<div class="row">
-      ${statusIcon('done')}
-      <span class="tag">Lane ${esc(lane.label)}</span>
-      ${chipsHtml(lane.tasks)}
-      <span class="mono">${esc(lane.branch || '')}</span>
-      <span class="right">
-        <span>${plural(sumTurns(lane.tasks), 'turn')}</span>
-        <span>${plural(sumCommits(lane.tasks), 'commit')}</span>
-        <span>${money(sumCost(lane.tasks))}</span>
-      </span>
-    </div>`).join(''));
+  const head = `<div class="row lane head" role="row">
+      <span role="columnheader">Lane</span>
+      <span role="columnheader">Tasks</span>
+      <span role="columnheader">Branch</span>
+      <span class="num" role="columnheader">Turns</span>
+      <span class="num" role="columnheader">Commits</span>
+      <span class="num" role="columnheader">Tokens</span>
+    </div>`;
+  paint($('settled'), !settled.length ? '' : `<div class="grid" role="rowgroup">` + head + settled.map((lane) => `<div class="row lane" role="row">
+      <span class="tag" role="cell">Lane ${esc(lane.label)}</span>
+      <span class="cell" role="cell">${chipsHtml(lane.tasks)}</span>
+      <span class="cell" role="cell">${lane.branch
+        ? copyBtnHtml(lane.branch, 'the lane branch', { label: lane.branch, cls: 'cp-row', title: `${lane.worktree || lane.branch} — click to copy the branch` })
+        : ''}</span>
+      <span class="num" role="cell"><b>${sumTurns(lane.tasks)}</b></span>
+      <span class="num" role="cell"><b>${sumCommits(lane.tasks)}</b></span>
+      <span class="num" role="cell"><b>${tokens(sumTokens(lane.tasks))}</b></span>
+    </div>`).join('') + totalsRow(settled, s.lanes.length) + '</div>');
+}
+
+/**
+ * The row that closes the columns above it. It sums the lanes in the table,
+ * never the whole run: a total that does not add up to the rows under it is
+ * worse than no total.
+ */
+function totalsRow(lanes, allLanes) {
+  const tasks = lanes.flatMap((l) => l.tasks);
+  const note = lanes.length < allLanes ? `${lanes.length} of ${allLanes} lanes settled` : '';
+  return `<div class="row lane foot" role="row">
+      <span class="tag" role="cell">Total</span>
+      <span class="cell" role="cell">${plural(tasks.length, 'task')}</span>
+      <span class="mono" role="cell">${esc(note)}</span>
+      <span class="num" role="cell"><b>${sumTurns(tasks)}</b></span>
+      <span class="num" role="cell"><b>${sumCommits(tasks)}</b></span>
+      <span class="num" role="cell"><b>${tokens(sumTokens(tasks))}</b></span>
+    </div>`;
 }
 
 function rowHtml(t) {
@@ -666,11 +1650,13 @@ function rowHtml(t) {
   if (t.turns) bits.push(plural(t.turns, 'turn'));
   if (t.attempts > 1) bits.push(`${t.attempts} attempts`);
   if (t.reconciled) bits.push('reconciled from git');
-  return `<div class="row" data-task="${t.n}" tabindex="0" role="button" aria-haspopup="dialog">
-    ${statusIcon(t.status)}
+  return `<div class="row task" data-task="${t.n}" tabindex="0" role="button" aria-controls="panel">
+    <span class="ic">${statusIcon(t.status)}</span>
     <span class="tag">T${t.n}</span>
-    <span class="name">${esc(t.title)}</span>
-    ${t.error ? `<span class="err">${esc(gist(t.error, 70))}</span>` : ''}
+    <span class="cell">
+      <span class="name">${esc(t.title)}</span>
+      ${t.error ? `<span class="err">${esc(gist(t.error, 70))}</span>` : ''}
+    </span>
     <span class="right">${esc(bits.join('  ·  '))}</span>
   </div>`;
 }
@@ -680,29 +1666,92 @@ function renderBarriers(s) {
   paint($('barriers'), s.barriers.map(rowHtml).join(''));
 }
 
-function renderIntegration(s) {
-  const i = s.integration || {};
-  const pill = (text, kind) => `<span class="pill ${kind}">${esc(text)}</span>`;
-  const statusKind = i.status === 'done' ? 'ok'
-    : String(i.status).includes('failed') ? 'bad'
-      : i.status === 'pending' ? '' : 'live';
+/**
+ * The run on one clock.
+ *
+ * Two questions justify this tool existing — did running these lanes at the
+ * same time pay, and who held the run up — and both are read off positions on
+ * a shared axis. `Lane plan` listed each lane's tasks in scheduled order,
+ * which answers neither.
+ *
+ * The blocks carry offsets in seconds and the axis carries the span; the
+ * division happens in CSS, so a run that is still growing costs one property
+ * write per second and never rewrites a node the reader might have focused.
+ */
+const QUEUE_SHOWN = 3;
 
-  const rows = [
-    ['Status', pill(i.status || 'pending', statusKind)],
-    ['Merged lanes', (i.mergedLanes || []).length ? esc(i.mergedLanes.join(', ')) : '<span class="mono">none</span>'],
-    ['Full suite', i.suite ? pill(i.suite.ok ? 'pass' : 'fail', i.suite.ok ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
-    ['Cross-lane review', i.review ? pill(i.review.verdict || (i.review.clean ? 'clean' : 'findings'), i.review.clean ? 'ok' : 'bad') : '<span class="mono">not run</span>'],
-  ];
-  $('integration-section').hidden = false;
-  paint($('integration'), rows.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join(''));
+function renderTimeline(s) {
+  const tl = s && s.ready ? s.timeline : null;
+  $('timeline-section').hidden = !tl;
+  if (!tl) return;
+
+  const ends = tl.live ? '<b>now</b>' : `<b>${esc(hhmm(new Date(Date.parse(tl.origin) + tl.span * 1000).toISOString()))}</b>`;
+  // Between two times of day, a bare duration reads as a third one.
+  const total = tl.live
+    ? `<span class="tl-total"><b data-since="${esc(tl.origin)}">–</b> total</span>`
+    : `<span class="tl-total"><b>${esc(dur(tl.span * 1000))}</b> total</span>`;
+
+  const head = `<div class="tl-row tl-top">
+      <span class="tl-lane"></span>
+      <span class="tl-scale"><b>${esc(hhmm(tl.origin))}</b>${total}${ends}</span>
+      <span class="tl-q">${tl.rows.some((r) => r.queued.length) ? 'queued' : ''}</span>
+    </div>`;
+
+  const rows = tl.rows.map((r) => {
+    const blocks = r.blocks.map(blockHtml).join('')
+      || '<span class="tl-none">not started</span>';
+    const shown = r.queued.slice(0, QUEUE_SHOWN).map((t) =>
+      `<button class="tl-qb" data-task="${t.n}" aria-controls="panel"
+        aria-label="Task ${t.n}, ${esc(STATUS_WORD[t.status] || t.status)} — ${esc(t.title)}"
+        title="T${t.n} · ${esc(t.title)}">T${t.n}</button>`).join('');
+    const rest = r.queued.length - QUEUE_SHOWN;
+    return `<div class="tl-row">
+        <span class="tl-lane ${esc(r.kind)}">${esc(r.label)}</span>
+        <span class="tl-track">${blocks}</span>
+        <span class="tl-q">${shown}${rest > 0 ? `<span class="tl-more">+${rest}</span>` : ''}</span>
+      </div>`;
+  }).join('');
+
+  if (paint($('timeline'), head + rows)) tick();
+  layoutTimeline();
 }
 
-function renderDag(s) {
-  $('dag-section').hidden = false;
-  const flow = (tasks) => tasks.map((t) => `<span class="node ${t.status}">T${t.n}</span>`).join('<span class="arrow">→</span>');
-  const rows = s.lanes.map((l) => `<div class="kv-row"><span class="k">Lane ${esc(l.label)}</span><span class="v"><span class="flow">${flow(l.tasks)}</span></span></div>`);
-  if (s.barriers.length) rows.push(`<div class="kv-row"><span class="k">Barriers</span><span class="v"><span class="flow">${flow(s.barriers)}</span></span></div>`);
-  paint($('dag'), rows.join(''));
+function blockHtml(b) {
+  const open = b.to == null;
+  const took = open
+    ? `running since ${hhmm(b.startedAt)}`
+    : `${hhmm(b.startedAt)} for ${dur((b.to - b.from) * 1000)}`;
+  const name = `Task ${b.n}, ${STATUS_WORD[b.status] || b.status}, ${took} — ${b.title}`;
+  return `<button class="tl-b ${esc(b.status)}${open ? ' open' : ''}" data-task="${b.n}" aria-controls="panel"
+    style="--s:${b.from}${open ? '' : `;--e:${b.to}`}" data-s="${b.from}"${open ? '' : ` data-e="${b.to}"`}
+    aria-label="${esc(name)}" title="T${b.n} · ${esc(b.title)}\n${esc(took)}"><span class="tl-t">T${b.n}</span></button>`;
+}
+
+/**
+ * The one number the server refuses to send. While a task is running the axis
+ * ends at the reader's clock, not at anything on disk — and writing it here
+ * rather than into the markup keeps the painted signature stable, so the
+ * blocks survive as nodes the reader can focus and click.
+ */
+const LABEL_MIN = 24;
+
+function layoutTimeline() {
+  const tl = snap && snap.ready ? snap.timeline : null;
+  if (!tl) return;
+  const host = $('timeline');
+  const span = Math.max(1, Math.round(tl.live ? (Date.now() + skew - Date.parse(tl.origin)) / 1000 : tl.span));
+  host.style.setProperty('--span', String(span));
+
+  // One rect read for the whole chart. Every block's width is arithmetic from
+  // there, so deciding which bars are too narrow for a label costs no layout
+  // per node — this runs once a second for as long as the tab is open.
+  const track = host.querySelector('.tl-track');
+  const px = track ? track.getBoundingClientRect().width : 0;
+  for (const b of host.querySelectorAll('.tl-b')) {
+    const from = Number(b.dataset.s);
+    const to = b.classList.contains('open') ? span : Number(b.dataset.e);
+    b.classList.toggle('bare', Math.max(3, ((to - from) / span) * px) < LABEL_MIN);
+  }
 }
 
 // ------------------------------------------------------------------ timers
@@ -713,29 +1762,110 @@ function tick() {
   for (const el of document.querySelectorAll('[data-since]')) {
     el.textContent = el.dataset.since ? since(el.dataset.since) : '–';
   }
+  layoutTimeline();
 }
 setInterval(tick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 
-// ------------------------------------------------------------------ drawer
+// ------------------------------------------------------------------- panel
 
-async function showTask(n, trigger) {
-  if (trigger) openedFrom = trigger;
-  const firstOpen = openTask == null;
-  openTask = n;
-  $('drawer').classList.add('open');
-  $('drawer').setAttribute('aria-hidden', 'false');
-  $('drawer').removeAttribute('inert');
-  $('scrim').classList.add('open');
-  if (firstOpen) $('d-close').focus();
+/**
+ * The panel has two personalities and only one of them is a dialog.
+ *
+ * Beside the board it is a region: it takes no focus, holds no scrim, and
+ * must not trap Tab — a reader can see and use the page behind it, and
+ * `aria-modal` there would tell a screen reader otherwise. Below 900px there
+ * is no room for two columns, it covers the page, and every one of those
+ * attributes becomes true again. This is the only place they are set.
+ */
+function applyPanel() {
+  const modal = !wide.matches;
+  const open = panelOn();
+  const panel = $('panel');
+  const onTask = openTask != null;
+
+  panel.classList.toggle('open', open);
+  $('scrim').classList.toggle('open', modal && modalOpen);
+
+  if (modal) {
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) panel.removeAttribute('inert');
+    else panel.setAttribute('inert', '');
+  } else {
+    for (const attr of ['role', 'aria-modal', 'aria-hidden', 'inert']) panel.removeAttribute(attr);
+  }
+
+  $('p-feed').hidden = onTask;
+  $('p-tools').hidden = onTask;
+  $('d-body').hidden = !onTask;
+  $('p-back').hidden = !onTask;
+  $('p-count').hidden = onTask;
+  $('d-close').hidden = !modal;
+  if (!onTask) $('d-title').textContent = 'Run activity';
+}
+
+/** Fetch and draw, without touching what is open. The stream calls this once
+ *  a second: a task that finishes while its record is up should say so. */
+async function loadTask(n) {
   try {
     const r = await fetch(`/api/task?n=${encodeURIComponent(n)}`);
     const body = await r.json();
+    if (openTask !== n) return; // a newer click already won the panel
     if (!r.ok) { $('d-body').innerHTML = `<pre>${esc(body.error || r.statusText)}</pre>`; return; }
     drawTask(body.task);
   } catch (e) {
-    $('d-body').innerHTML = `<pre>${esc(e.message)}</pre>`;
+    if (openTask === n) $('d-body').innerHTML = `<pre>${esc(e.message)}</pre>`;
   }
+}
+
+/**
+ * `#task=4` survives a reload and pastes into Slack, which is most of what a
+ * URL is for. `pushState` never fires `hashchange`, so the page can write the
+ * hash without hearing itself and reopening what it just opened.
+ */
+const hashTask = () => {
+  const m = /^#task=(\d+)$/.exec(location.hash || '');
+  return m ? Number(m[1]) : null;
+};
+
+function writeHash(n) {
+  const want = n == null ? '' : `#task=${n}`;
+  if (location.hash === want) return;
+  if (n == null) history.replaceState(null, '', location.pathname + location.search);
+  else history.pushState(null, '', want);
+}
+
+window.addEventListener('hashchange', () => {
+  const n = hashTask();
+  if (n == null) { if (openTask != null) backToFeed(); return; }
+  if (n !== openTask) showTask(n);
+});
+
+function showTask(n, trigger) {
+  if (trigger) openedFrom = trigger;
+  const wasModal = modalOpen;
+  openTask = n;
+  modalOpen = true;
+  writeHash(n);
+  applyPanel();
+  // Only a modal takes the reader's focus. In the rail the panel simply
+  // changes what it shows, and yanking focus off the row they clicked would
+  // cost them their place in the list.
+  if (!wide.matches && !wasModal) $('d-close').focus();
+  loadTask(n);
+}
+
+/** The panel's resting state, and the only way into it below 900px. */
+function showFeed(trigger) {
+  if (trigger) openedFrom = trigger;
+  openTask = null;
+  modalOpen = true;
+  writeHash(null);
+  applyPanel();
+  renderFeed(snap);
+  if (!wide.matches) $('d-close').focus();
 }
 
 function drawTask(t) {
@@ -745,60 +1875,90 @@ function drawTask(t) {
   const kv = [
     ['Status', `<span class="pill ${statusPill}">${esc(STATUS_WORD[t.status] || t.status)}${t.barrier ? ' · barrier' : ''}</span>`],
     ['Lane', t.lane ? esc(String(t.lane).toUpperCase()) : '—'],
-    ['Duration', esc(span(t))],
+    // A running task's duration is a clock, and a clock in the payload would
+    // repaint this panel every second — with the reader's focus inside it.
+    ['Duration', t.status === 'running' && t.startedAt ? `<span data-since="${esc(t.startedAt)}">–</span>` : esc(span(t))],
     ['Turns', String(t.turns || 0)],
     ['Attempts', String(t.attempts || 0)],
-    ['Output tokens', (t.outputTokens || 0).toLocaleString()],
-    ['Cost', money(t.costUsd)],
+    ['Output tokens', typeof t.outputTokens === 'number' ? t.outputTokens.toLocaleString() : '—'],
     ['Model', `<span class="mono">${esc(t.model || '—')}</span>`],
-    ['Session', `<span class="mono">${esc(t.sessionId || '—')}</span>`],
+    ['Session', t.sessionId
+      ? `<span class="v-cp"><span class="mono">${esc(t.sessionId)}</span>${copyBtnHtml(t.sessionId, 'the session id')}</span>`
+      : '<span class="mono">—</span>'],
     ['Commits', (t.commits || []).length ? `<span class="mono">${t.commits.map((c) => esc(short(c))).join(' ')}</span>` : '—'],
-    ['Log', `<span class="mono">${esc(t.logFile || '—')}</span>`],
+    ['Log', t.logFile
+      ? `<span class="v-cp"><span class="mono">${esc(t.logFile)}</span>${copyBtnHtml(t.logFile, 'the log path')}</span>`
+      : '<span class="mono">—</span>'],
   ];
 
-  const parts = [`<div class="pad"><div class="list">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div></div>`];
+  // No `.pad` wrapper. The rows were inset 12px from a panel that already has
+  // a gutter, so every rule between them stopped short of the edge it divided
+  // — a table drawn inside a margin instead of a table drawn in the panel.
+  // The padding moved onto the row, where it separates the text and not the
+  // ground under it.
+  const parts = [`<div class="list kv">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${KV_ICON[k] || ''}${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div>`];
 
-  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><pre>${esc(t.error)}</pre>`);
+  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><div class="md">${md(t.error)}</div>`);
   // A blocked task's error IS its final message; printing both twice reads as
   // two findings when there is one.
   // The stored error keeps the report's line breaks; the digest collapses
   // them. Compare on flattened text or the duplicate slips through.
   const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
-  const resultText = t.result && t.result.text;
+  // `body` keeps the report's line breaks; `text` is the feed's one-liner and
+  // only stands in for an old checkpoint that has no body.
+  const resultText = t.result && (t.result.body || t.result.text);
   const duplicated = resultText && t.error
     && (flat(t.error).includes(flat(resultText).slice(0, 60)) || flat(resultText).includes(flat(t.error).slice(0, 60)));
-  if (resultText && !duplicated) parts.push(`<h3>Agent result</h3><pre>${esc(resultText)}</pre>`);
+  // Both of these are the agent's own prose — a blocked task's error IS its
+  // final message — so both are Markdown. The two below stay `<pre>`: a list
+  // of paths is a list of paths, and a renderer would eat the underscores.
+  if (resultText && !duplicated) parts.push(`<h3>Agent result${t.result.clipped ? ' · clipped' : ''}</h3><div class="md">${md(resultText)}</div>`);
   if (t.files && t.files.writes.length) parts.push(`<h3>Declared writes</h3><pre>${t.files.writes.map(esc).join('\n')}</pre>`);
   if (t.files && t.files.excluded.length) parts.push(`<h3>Excluded by negation</h3><pre>${t.files.excluded.map(esc).join('\n')}</pre>`);
   if (t.steps && t.steps.length) {
-    parts.push(`<h3>Plan steps</h3><ul class="steps">${t.steps.map((s) => `<li class="${s.checked ? 'on' : ''}">${s.checked ? '☑' : '☐'} ${esc(s.text)}</li>`).join('')}</ul>`);
+    parts.push(`<h3>Plan steps</h3><ul class="steps tick">${t.steps.map((st) => `<li class="${st.checked ? 'on' : ''}">${checkbox(st.checked)}<span>${mdInline(esc(st.text))}</span></li>`).join('')}</ul>`);
   }
   parts.push(`<h3>Activity${t.truncated ? ' · tail' : ''}</h3><div class="pad"><div class="feed" style="margin:0;max-height:none">${
-    t.activity.length ? t.activity.slice().reverse().map(activityHtml).join('') : '<div class="empty">no agent events recorded</div>'
+    t.activity.length ? t.activity.slice().reverse().map((a) => activityHtml(a)).join('') : '<div class="empty">no agent events recorded</div>'
   }</div></div>`);
 
-  $('d-body').innerHTML = parts.join('');
+  // Painted, not assigned: the stream redraws this every second while a task
+  // is open, and an unguarded write destroys whatever the reader had focused
+  // — which now includes two copy buttons.
+  if (paint($('d-body'), parts.join(''))) tick();
 }
 
-function closeDrawer() {
-  if (openTask == null) return;
+/** Back to the run feed, keeping the panel where it is. */
+function backToFeed() {
   openTask = null;
+  writeHash(null);
+  applyPanel();
+  renderFeed(snap);
+  $('p-feed').scrollTop = 0;
+}
+
+/** Esc and the close button: dismiss the modal below 900px, fall back to the
+ *  feed above it, where there is no such thing as a closed panel. */
+function closePanel() {
+  if (openTask == null && !modalOpen) return;
+  openTask = null;
+  modalOpen = false;
+  writeHash(null);
   // Focus must not stay inside a container that is about to be aria-hidden.
   if (openedFrom && document.contains(openedFrom)) openedFrom.focus();
   openedFrom = null;
-  $('drawer').classList.remove('open');
-  $('drawer').setAttribute('aria-hidden', 'true');
-  // Off-screen is not out of the tab order: without inert the drawer's
-  // controls stay focusable behind an aria-hidden container.
-  $('drawer').setAttribute('inert', '');
-  $('scrim').classList.remove('open');
+  applyPanel();
+  renderFeed(snap);
 }
 
-/** Keep Tab inside the drawer while it is open — a modal that leaks focus
- *  behind its own scrim is worse than one that never claimed to be modal. */
+wide.addEventListener('change', applyPanel);
+
+/** Keep Tab inside the panel while it is modal — a modal that leaks focus
+ *  behind its own scrim is worse than one that never claimed to be modal.
+ *  Above 900px there is nothing to trap: the page behind it is in use. */
 function trapTab(e) {
-  if (openTask == null || e.key !== 'Tab') return;
-  const focusable = $('drawer').querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])');
+  if (wide.matches || !modalOpen || e.key !== 'Tab') return;
+  const focusable = [...$('panel').querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')].filter((el) => !el.hidden && el.offsetParent !== null);
   if (!focusable.length) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
@@ -806,17 +1966,35 @@ function trapTab(e) {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
+/** The feed's toolbar. It lives outside the painted region on purpose: a
+ *  filter that loses what you typed once a second is not a filter. */
+$('p-q').addEventListener('input', (e) => { feedQuery = e.target.value.trim().toLowerCase(); renderFeed(snap); });
+$('p-kind').addEventListener('change', (e) => { feedKind = e.target.value; renderFeed(snap); });
+$('p-wrap').addEventListener('click', () => {
+  const on = $('p-wrap').getAttribute('aria-pressed') !== 'true';
+  $('p-wrap').setAttribute('aria-pressed', String(on));
+  $('p-feed').classList.toggle('wrap', on);
+});
+
 document.addEventListener('click', (e) => {
+  const cp = e.target.closest('[data-copy]');
+  if (cp) { handleCopy(cp); return; }
+  if (e.target.closest('#p-back')) { backToFeed(); return; }
+  if (e.target.closest('#open-feed')) { showFeed(e.target.closest('#open-feed')); return; }
   const hit = e.target.closest('[data-task]');
   if (hit) { showTask(Number(hit.dataset.task), hit); return; }
-  if (e.target.id === 'scrim' || e.target.closest('#d-close')) closeDrawer();
+  if (e.target.id === 'scrim' || e.target.closest('#d-close')) closePanel();
 });
 document.addEventListener('keydown', (e) => {
   trapTab(e);
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key === 'Escape') closePanel();
   const hit = e.target.closest && e.target.closest('[data-task][tabindex]');
   if (hit && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showTask(Number(hit.dataset.task), hit); }
 });
+
+applyPanel();
+// A link into a task opens on it, at whichever width the reader arrived with.
+if (hashTask() != null) showTask(hashTask());
 
 // --------------------------------------------------------------- transport
 
@@ -832,9 +2010,9 @@ source.addEventListener('snapshot', (e) => {
   skew = payload.now - Date.now();
   lastEventAt = Date.now();
   render(payload.snapshot);
-  // The drawer is a live view too — a task finishing while it is open should
-  // show that, not a frozen snapshot from when it was clicked.
-  if (openTask != null) showTask(openTask);
+  // The panel is a live view too — a task finishing while its record is up
+  // should show that, not a frozen snapshot from when it was clicked.
+  if (openTask != null && panelOn()) loadTask(openTask);
 });
 source.onopen = () => setLive(true, 'live');
 source.onerror = () => setLive(false, 'reconnecting…');

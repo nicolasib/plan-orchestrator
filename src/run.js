@@ -150,6 +150,13 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     commits,
     turns: outcome.turns,
     costUsd: outcome.costUsd,
+    // Summed across attempts, unlike `costUsd` beside it: a task the fix loop
+    // ran five times spent five spawns' worth, and this is the number the page
+    // reports as what the run consumed. Stays null when nothing reported, so
+    // "not measured" never renders as zero.
+    outputTokens: outcome.outputTokens == null && rec.outputTokens == null
+      ? null
+      : (rec.outputTokens || 0) + (outcome.outputTokens || 0),
     error,
   });
 

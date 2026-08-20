@@ -84,7 +84,7 @@ function runAgent({ cwd, prompt, sessionId, model, allowedTools, permissionMode,
 
     const child = spawn(AGENT_BIN, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal });
 
-    const summary = { turns: 0, sessionId: sessionId || null, result: null, isError: false, subtype: null, costUsd: null, stderr: '' };
+    const summary = { turns: 0, sessionId: sessionId || null, result: null, isError: false, subtype: null, costUsd: null, outputTokens: null, stderr: '' };
     let buf = '';
     let timer = null;
     let timedOut = false;
@@ -112,6 +112,10 @@ function runAgent({ cwd, prompt, sessionId, model, allowedTools, permissionMode,
           summary.isError = ev.isError;
           summary.subtype = ev.subtype;
           summary.costUsd = ev.costUsd;
+          // The agent reports the spawn's own total here. Counting it off the
+          // log later cannot match it: a task writes tens of megabytes and
+          // anything reading that file reads its tail.
+          if (ev.usage && typeof ev.usage.output_tokens === 'number') summary.outputTokens = ev.usage.output_tokens;
           if (ev.sessionId) summary.sessionId = ev.sessionId;
         }
         if (onEvent) onEvent(ev);
