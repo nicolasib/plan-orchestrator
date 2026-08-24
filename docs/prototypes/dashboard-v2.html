@@ -984,19 +984,26 @@
      azul numa cor diferente — a diferença que menos se nota de relance. */
   .av .tick {
     position: absolute; right: -4px; top: -4px; width: 14px; height: 14px;
-    border-radius: 50%; background: var(--done); display: grid; place-items: center;
+    border-radius: 50%; display: grid; place-items: center;
     box-shadow: 0 0 0 2px var(--surface);
   }
+  .av .tick.ok { background: var(--done); }
+  .av .tick.bad { background: var(--fail); }
+  .av .tick.warn { background: var(--warn); }
   .av.sm .tick { width: 12px; height: 12px; right: -3px; top: -3px; }
 
   /* --------------------------------------------------------- a tripulação */
 
   .crew { display: grid; gap: 8px; }
-  .crew:empty::after {
-    content: 'nobody working right now';
-    display: block; padding: 22px; text-align: center;
+  /* "nobody working" dito duas vezes em 150px, nenhuma delas dizendo por quê,
+     enquanto a régua de fases logo acima tem a resposta. A primeira leitura
+     de uma tela assim é "travou?". */
+  .crew-empty {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 20px; border: 1px dashed var(--line); border-radius: var(--radius);
     color: var(--text-3); font-size: 12.5px;
   }
+  .crew-empty b { font-weight: 500; color: var(--text-2); }
 
   .ag {
     border: 1px solid var(--line); border-radius: var(--radius);
@@ -1021,7 +1028,10 @@
     flex: 0 0 auto; font: 500 10.5px/1 var(--mono); letter-spacing: .02em;
     color: var(--text-2); background: var(--code-bg); padding: 3px 6px; border-radius: 5px;
   }
-  .ag-tag.barrier { color: var(--accent-ink); background: var(--accent-soft); display: inline-flex; align-items: center; gap: 5px; }
+  /* 17px de altura num alvo focável: abaixo dos 24px que a WCAG 2.5.8 pede.
+     O padding vertical existe para o dedo e para o anel de foco, não para o
+     texto. */
+  .ag-tag.barrier { color: var(--accent-ink); background: var(--accent-soft); display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding-block: 0; }
   .ag-tag.barrier svg { flex: 0 0 auto; }
 
   /* Uma explicação que só aparece quando pedida. O `title` nativo chega tarde
@@ -1038,6 +1048,9 @@
     opacity: 0; pointer-events: none; transition: opacity .12s ease .18s; z-index: 20;
   }
   .tip:hover::after, .tip:focus-visible::after { opacity: 1; }
+  /* Perto do rodapé ele abre para cima: um tooltip que se explica fora da
+     tela não explica nada. */
+  .tip.up::after { top: auto; bottom: calc(100% + 7px); }
   @media (prefers-reduced-motion: reduce) { .tip::after { transition: none; } }
   .ag-name { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1130,6 +1143,10 @@
 
   /* ------------------------------------------------------------- a fila */
 
+  /* `.list` recorta para que o raio corte os cantos; aqui não há canto a
+     cortar e o recorte comia o tooltip inteiro na última linha da fila —
+     que é exatamente onde os chips de barreira se acumulam. */
+  #queue { overflow: visible; }
   .queue { display: grid; }
   .qrow {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -1140,6 +1157,20 @@
   .qrow .qtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
   .qrow .after { font-size: 11.5px; color: var(--text-3); }
   .qrow .after b { font-weight: 500; color: var(--text-2); }
+
+  /*
+   * A pergunta que paga a ferramenta — valeu a pena paralelizar — era
+   * respondida pela timeline que este redesenho cortou, e passou a não ser
+   * respondida por nada: a run terminava em 600px de painel vazio. Aqui ela
+   * é uma conta de duas linhas, que é o que ela sempre foi.
+   */
+  .outcome { display: grid; gap: 14px; padding: 15px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .outcome .headline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; font-size: 15px; color: var(--text-2); }
+  .outcome .headline b { font-size: 21px; font-weight: 600; letter-spacing: -.02em; color: var(--text); font-variant-numeric: tabular-nums; }
+  .outcome .headline .vs { color: var(--text-3); }
+  .outcome .facts { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 12px; color: var(--text-3); }
+  .outcome .facts b { font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .outcome .review { display: flex; align-items: flex-start; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text-2); }
 
   /* A faixa que fecha a página: o que já saiu do caminho, em uma linha. */
   .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -1210,6 +1241,11 @@
         <div class="list" id="queue"></div>
       </section>
 
+      <section id="outcome-section" hidden>
+        <h2>How it went</h2>
+        <div class="outcome" id="outcome"></div>
+      </section>
+
       <section id="settled-section" hidden>
         <h2>Out of the way</h2>
         <div class="strip" id="settled"></div>
@@ -1247,6 +1283,7 @@
   <span class="tag">mock</span>
   <button data-scn="running" class="on">running</button>
   <button data-scn="blocked">blocked</button>
+  <button data-scn="merging">merging</button>
   <button data-scn="integrating">integrating</button>
   <button data-scn="done">done</button>
 </div>
@@ -1368,12 +1405,51 @@ const chevIcon = () => `<svg class="chev" width="12" height="12" viewBox="0 0 12
  * Isso dá à tela a única coisa que uma lista de linhas não tem — alguém
  * reconhecível a quem atribuir o trabalho.
  */
-const AV_SKIN = [
-  { bg: '#5e6ad2', ink: '#f2f3ff' }, { bg: '#4cb782', ink: '#f2fff9' },
-  { bg: '#e0b23c', ink: '#2a2007' }, { bg: '#e2685f', ink: '#fff2f1' },
-  { bg: '#38a9d8', ink: '#f0fbff' }, { bg: '#a78bfa', ink: '#f7f3ff' },
-  { bg: '#f0803c', ink: '#2d1206' }, { bg: '#2dbfae', ink: '#f0fffd' },
+/*
+ * A cor diz a lane; o rosto diz quem.
+ *
+ * Antes a pele saía de `hash(id) % 8`, o que produzia duas coisas ruins ao
+ * mesmo tempo: a cor que se lê de longe não se correlacionava com nada que o
+ * leitor precise saber, e duas das oito peles *eram* os tokens de status
+ * (`#4cb782` é `--done`), então a paleta decorativa colidia com a semântica
+ * dentro de um círculo de 28px.
+ *
+ * Agora a cor é a lane — o único eixo que o leitor realmente rastreia — e a
+ * identidade individual passou para as feições, que continuam saindo do id.
+ * Duas lanes nunca são a mesma cor, dois agentes da mesma lane nunca são o
+ * mesmo rosto, e nenhum deles pode ser confundido com um estado.
+ *
+ * Nenhum matiz aqui encosta em `--done`, `--fail`, `--warn`, `--run` ou
+ * `--accent`, que são os cinco que a tela usa para dizer o que aconteceu.
+ */
+const LANE_SKIN = [
+  { bg: '#3b9fe0', ink: '#f0fbff' },  // A
+  { bg: '#a78bfa', ink: '#f7f3ff' },  // B
+  { bg: '#e06cb0', ink: '#fff2f9' },  // C
+  { bg: '#2dbfae', ink: '#f0fffd' },  // D
+  { bg: '#7d8cc4', ink: '#f4f6ff' },  // E
+  { bg: '#c98bd9', ink: '#fdf4ff' },  // F
 ];
+/** A barreira não pertence a lane nenhuma: ela é a costura entre todas. */
+const BARRIER_SKIN = { bg: '#5a5f7a', ink: '#f4f5fb' };
+
+/** O subagente é da lane do pai, um passo atrás dele. */
+function fadeSkin(skin) {
+  const mix = (hex, t) => {
+    const n = parseInt(hex.slice(1), 16);
+    const to = [0x6a, 0x6e, 0x78];
+    const out = [16, 8, 0].map((sh, i) => Math.round((((n >> sh) & 255) * (1 - t)) + (to[i] * t)));
+    return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  return { bg: mix(skin.bg, 0.42), ink: skin.ink };
+}
+
+function skinFor(a) {
+  if (a.barrier) return a.sub ? fadeSkin(BARRIER_SKIN) : BARRIER_SKIN;
+  const i = a.lane ? (a.lane.toUpperCase().charCodeAt(0) - 65) % LANE_SKIN.length : 0;
+  const skin = LANE_SKIN[i] || LANE_SKIN[0];
+  return a.sub ? fadeSkin(skin) : skin;
+}
 
 function hash(str) {
   let h = 2166136261;
@@ -1395,9 +1471,8 @@ function mouthPath(status) {
   }
 }
 
-function avatarSvg(seed, size, status) {
+function avatarSvg(seed, size, status, skin) {
   const h = hash(seed);
-  const skin = AV_SKIN[h % AV_SKIN.length];
   const cap = [0, 35, 70, 145, 215, 250, 290, 325][(h >> 3) % 8];
   const eyeY = 10.2 + ((h >> 6) % 3) * 0.6;
   const eyeR = 1.25 + ((h >> 9) % 2) * 0.35;
@@ -1423,13 +1498,34 @@ const MODEL_TAG = (m) => {
   return s ? s.slice(0, 1).toUpperCase() : '?';
 };
 
-const tickMark = () => `<span class="tick"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><path d="M1.8 4.6 L3.6 6.4 L7.2 2.6" fill="none" stroke="var(--on-brand)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></span>`;
+/*
+ * O anel separava running de done de failed só por matiz — indigo, verde,
+ * vermelho: exatamente o eixo que a deuteranopia colapsa. A régua de fases,
+ * dois centímetros acima, já fazia isso certo com forma. Aqui o anel toma
+ * emprestada a disciplina da própria página: cada estado encerrado ganha um
+ * glifo, e a forma decide antes da cor.
+ */
+function statusMark(status) {
+  const wrap = (cls, body) => `<span class="tick ${cls}"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">${body}</svg></span>`;
+  switch (status) {
+    case 'done':
+      return wrap('ok', '<path d="M1.8 4.6 L3.6 6.4 L7.2 2.6" fill="none" stroke="var(--on-brand)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />');
+    case 'failed':
+      return wrap('bad', '<path d="M2.6 2.6 l3.8 3.8 M6.4 2.6 l-3.8 3.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />');
+    case 'blocked':
+      return wrap('bad', '<path d="M2.4 4.5 h4.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />');
+    case 'interrupted':
+      return wrap('warn', '<path d="M3.4 2.8 v3.4 M5.6 2.8 v3.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />');
+    default:
+      return '';
+  }
+}
 
 function avatarHtml(a, size = 28) {
   const sm = size <= 22 ? ' sm' : '';
   const badge = a.model ? `<span class="badge" title="${esc(a.model)}">${esc(MODEL_TAG(a.model))}</span>` : '';
   return `<span class="av ${esc(a.status)}${sm}" title="${esc(a.model || '')}">
-    ${avatarSvg(a.id, size, a.status)}<span class="ring"></span>${a.status === 'done' ? tickMark() : ''}${badge}</span>`;
+    ${avatarSvg(a.id, size, a.status, skinFor(a))}<span class="ring"></span>${statusMark(a.status)}${badge}</span>`;
 }
 
 // ------------------------------------------------------- o que ele faz
@@ -1636,6 +1732,7 @@ function render(s) {
   renderAlerts(s);
   renderCrew(s);
   renderQueue(s);
+  renderOutcome(s);
   renderSettled(s);
   renderFeed(s);
   tick();
@@ -1663,6 +1760,13 @@ function verdictHtml(s) {
 }
 
 const STOPPED = new Set(['failed', 'blocked', 'interrupted']);
+/** A fase que está segurando a run enquanto nenhum agente está vivo. */
+function runningStage(s) {
+  const st = (s.stages || []).find((x) => x.status === 'running');
+  if (!st) return 'waiting to start';
+  return st.detail ? `${st.label.toLowerCase()} · ${st.detail}` : st.label.toLowerCase();
+}
+
 const allAgents = (s) => s.crew.flatMap((a) => [a, ...(a.children || [])]);
 const liveAgents = (s) => allAgents(s).filter((a) => a.status === 'running');
 
@@ -1702,7 +1806,9 @@ function renderCrew(s) {
     stopped ? `${stopped} stopped` : '',
     s.crew.length ? plural(s.crew.length, 'task') : '',
   ].filter(Boolean).join(' · ');
-  paint($('crew'), s.crew.map((a) => agentHtml(a)).join(''));
+  paint($('crew'), s.crew.length
+    ? s.crew.map((a) => agentHtml(a)).join('')
+    : `<div class="crew-empty">${statusIcon('running', 14)}<span>nobody working — <b>${esc(runningStage(s))}</b></span></div>`);
 }
 
 function agentHtml(a, kid = false) {
@@ -1710,6 +1816,9 @@ function agentHtml(a, kid = false) {
   const doing = humanize(a.doing);
   const live = a.status === 'running';
   const bad = a.status === 'failed' || a.status === 'blocked';
+  // Herda a natureza do pai para a cor, não para a etiqueta: um subagente
+  // despachado por uma barreira está dentro de uma, não é uma.
+  const isBarrierTask = a.barrier && !a.sub;
 
   const line = bad && a.error
     ? `<div class="ag-doing bad"><span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
@@ -1755,7 +1864,7 @@ function agentHtml(a, kid = false) {
       ${avatarHtml(a, kid ? 22 : 28)}
       <span class="ag-main">
         <span class="ag-who">
-          <span class="ag-tag${a.barrier ? ' barrier tip' : ''}"${a.barrier ? ` data-tip="${esc(BARRIER_TIP)}" tabindex="0"` : ''}>${a.barrier ? barrierIcon(11) : ''}${esc(a.tag)}</span>
+          <span class="ag-tag${isBarrierTask ? ' barrier tip' : ''}"${isBarrierTask ? ` data-tip="${esc(BARRIER_TIP)}"` : ''}>${isBarrierTask ? barrierIcon(11) : ''}${esc(a.tag)}${isBarrierTask ? `<span class="sr">. ${esc(BARRIER_TIP)}</span>` : ''}</span>
           <span class="ag-name">${esc(a.title)}</span>
         </span>
         ${line}
@@ -1800,10 +1909,31 @@ function renderQueue(s) {
   $('queue-tally').textContent = q.length ? String(q.length) : '';
   paint($('queue'), q.map((t) => `<div class="qrow">
       ${statusIcon('pending', 14)}
-      <span class="ag-tag${t.barrier ? ' barrier tip' : ''}"${t.barrier ? ` data-tip="${esc(BARRIER_TIP)}" tabindex="0"` : ''}>${t.barrier ? barrierIcon(11) : ''}${esc(t.tag)}</span>
+      <span class="ag-tag${t.barrier ? ' barrier tip' : ''}"${t.barrier ? ` data-tip="${esc(BARRIER_TIP)}" tabindex="0" role="note"` : ''}>${t.barrier ? barrierIcon(11) : ''}${esc(t.tag)}${t.barrier ? `<span class="sr">. ${esc(BARRIER_TIP)}</span>` : ''}</span>
       <span class="qtitle">${esc(t.title)}</span>
       <span class="after">${esc(t.after)}</span>
     </div>`).join(''));
+}
+
+/** O fechamento da run: o que ela custou e o que a paralelização rendeu. */
+function renderOutcome(s) {
+  const o = s.outcome;
+  $('outcome-section').hidden = !o;
+  if (!o) return;
+  const gain = (o.agentSeconds / o.wallSeconds).toFixed(1);
+  paint($('outcome'), `
+    <div class="headline">
+      <b>${esc(dur(o.wallSeconds * 1000))}</b> wall clock
+      <span class="vs">against <b style="font-size:15px">${esc(dur(o.agentSeconds * 1000))}</b> of agent time —
+        <b style="font-size:15px">${gain}×</b> from ${plural(s.lanes, 'lane')}</span>
+    </div>
+    <div class="facts">
+      <span><b>${plural(s.totals.total, 'task')}</b> across ${plural(s.lanes, 'lane')}</span>
+      <span><b>${tokens(s.totals.outputTokens)}</b> output tokens</span>
+      <span><b>${o.commits}</b> commits</span>
+      <span><b>${o.specs}</b> specs green</span>
+    </div>
+    <div class="review">${resultIcon(o.reviewOk)}<span>${mdInline(esc(o.review))}</span></div>`);
 }
 
 /** O que já saiu do caminho — uma faixa, não três seções. */
@@ -1870,6 +2000,22 @@ document.addEventListener('keydown', (e) => {
 
 $('p-q').addEventListener('input', (e) => { feedQuery = e.target.value.trim().toLowerCase(); renderFeed(snap); });
 $('p-kind').addEventListener('change', (e) => { feedKind = e.target.value; renderFeed(snap); });
+
+/*
+ * Um tooltip só sabe para onde abrir no instante em que abre: a linha rola,
+ * a tripulação cresce, e a mesma âncora está no meio da tela agora e a
+ * dezoito pixels do rodapé daqui a um minuto.
+ */
+document.addEventListener('mouseover', (e) => {
+  const tip = e.target.closest('.tip');
+  if (!tip) return;
+  const r = tip.getBoundingClientRect();
+  tip.classList.toggle('up', r.bottom + 76 > window.innerHeight);
+}, true);
+document.addEventListener('focusin', (e) => {
+  const tip = e.target.closest('.tip');
+  if (tip) tip.classList.toggle('up', tip.getBoundingClientRect().bottom + 76 > window.innerHeight);
+});
 
 /** Os relógios são o que faz uma tela parada parecer viva. */
 function tick() {
@@ -1957,10 +2103,16 @@ const subLog = (log, from, to) => log.slice(from, to).map((a) => ({ ...a, sub: f
 
 const agent = (o) => ({ children: [], activity: [], turns: 0, ...o, doing: o.doing || last(o.activity || []) });
 
+/** Quem despachou passa lane e natureza adiante — é o que a cor lê. */
+const lineage = (list) => list.map((a) => ({
+  ...a,
+  children: (a.children || []).map((k) => ({ ...k, lane: a.lane, barrier: a.barrier, sub: true })),
+}));
+
 function crewRunning() {
-  return [
+  return lineage([
     agent({
-      id: 'a-t1', tag: 'A · T1', title: 'Theme tokens in the design system',
+      id: 'a-t1', tag: 'A · T1', lane: 'A', title: 'Theme tokens in the design system',
       status: 'running', model: 'opus', startedAt: ago(9), turns: 54, outputTokens: 6200,
       activity: own(T1_LOG),
       children: [
@@ -1977,7 +2129,7 @@ function crewRunning() {
       ],
     }),
     agent({
-      id: 'b-t2', tag: 'B · T2', title: 'Toggle in the header',
+      id: 'b-t2', tag: 'B · T2', lane: 'B', title: 'Toggle in the header',
       status: 'running', model: 'opus', startedAt: ago(4, 20), turns: 12, outputTokens: 1900,
       activity: own(T2_LOG),
       children: [
@@ -1988,7 +2140,7 @@ function crewRunning() {
         }),
       ],
     }),
-  ];
+  ]);
 }
 
 /** O feed global sai da tripulação, nunca de uma segunda fonte. */
@@ -2042,8 +2194,8 @@ const SCENARIOS = {
 
   blocked() {
     const crew = crewRunning();
-    crew[1] = agent({
-      id: 'b-t2', tag: 'B · T2', title: 'Toggle in the header',
+    crew[1] = lineage([agent({
+      id: 'b-t2', tag: 'B · T2', lane: 'B', title: 'Toggle in the header',
       status: 'blocked', model: 'opus', startedAt: ago(4, 20), endedAt: ago(0, 50), turns: 12, outputTokens: 1900,
       error: '**Blocked.** The toggle needs `useTheme` from Task 1, which has not committed the hook yet.\n\nWaiting would deadlock the lane, so I stopped instead of guessing at the interface. Task 1 declares `Produces: useTheme()` and is still running its own reviewer, so the hook should land on its next commit.\n\n**To carry on:** let T1 settle, then resume — this lane picks up T2 from its own worktree, no rebase needed.',
       resume: 'plo resume --plan docs/plans/2026-08-20-dark-mode.md',
@@ -2057,7 +2209,7 @@ const SCENARIOS = {
           activity: subLog(T2_LOG, 3, 5),
         }),
       ],
-    });
+    })])[0];
     return {
       ...BASE,
       totals: { done: 2, total: 8, outputTokens: 18400 },
@@ -2067,8 +2219,27 @@ const SCENARIOS = {
     };
   },
 
+  /* Lanes encerradas, barreira ainda não começou: ninguém vivo e a run longe
+     de acabar. Era a tela mais vazia do produto e a que mais parece falha. */
+  merging() {
+    return {
+      ...BASE,
+      totals: { done: 5, total: 8, outputTokens: 31200 },
+      stages: STAGES(['done', '6 tasks'], ['running', '2 lanes'], ['pending', '0/3 tasks'], ['pending'], ['pending']),
+      alerts: [], crew: [],
+      queue: QUEUE.slice(1),
+      settled: [
+        ...SETTLED,
+        { tag: 'A · T1', title: 'Theme tokens in the design system', status: 'done', outputTokens: 9600, commits: 3 },
+        { tag: 'B · T2', title: 'Toggle in the header', status: 'done', outputTokens: 5200, commits: 2 },
+        { tag: 'A · T5', title: 'Persist the preference per user', status: 'done', outputTokens: 3900, commits: 1 },
+      ],
+      feed: [],
+    };
+  },
+
   integrating() {
-    const crew = [
+    const crew = lineage([
       agent({
         id: 'bar-t6', tag: 'Barrier · T6', title: 'App shell — the global switch lands',
         status: 'running', model: 'opus', barrier: true, startedAt: ago(3, 30), turns: 18, outputTokens: 5100,
@@ -2081,7 +2252,7 @@ const SCENARIOS = {
           }),
         ],
       }),
-    ];
+    ]);
     return {
       ...BASE,
       totals: { done: 5, total: 8, outputTokens: 31200 },
@@ -2101,6 +2272,11 @@ const SCENARIOS = {
   done() {
     return {
       ...BASE, endedAt: ago(2),
+      outcome: {
+        wallSeconds: 600, agentSeconds: 1600, commits: 13, specs: 212,
+        reviewOk: true,
+        review: 'Cross-lane review found no blocking issues. Two lanes had each written their own `resolveTheme` helper; the reviewer kept lane A\u2019s and pointed lane B\u2019s import at it.',
+      },
       totals: { done: 8, total: 8, outputTokens: 48700 },
       stages: STAGES(['done', '6 tasks'], ['done', '2 lanes'], ['done', '3 tasks'], ['done', '212 specs'], ['done', 'no blocking findings']),
       alerts: [], crew: [], queue: [],

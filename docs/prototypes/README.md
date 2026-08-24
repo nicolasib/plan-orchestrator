@@ -30,24 +30,29 @@ vez sabe o que uma barreira é, e `Barrier · T6` sozinho não ensina.
 
 ## Avatares
 
-Identidade (cor, olhos, ângulo do topo) sai do hash do id do agente: o mesmo
-agente é o mesmo rosto do começo ao fim da run. O **humor sai do status** —
-quem falhou não sorri. É a única feição que o id não escolhe.
+**A cor diz a lane; o rosto diz quem.** A pele vem da letra da lane, as feições
+(olhos, ângulo do topo) do hash do id, e o humor do status — quem falhou não
+sorri. Assim duas lanes nunca são a mesma cor, dois agentes da mesma lane nunca
+são o mesmo rosto, e nenhum dos dois pode ser confundido com um estado: nenhum
+matiz da paleta encosta em `--done`, `--fail`, `--warn`, `--run` ou `--accent`.
+O subagente herda a cor do pai, um passo atrás.
 
-Anel azul enquanto trabalha, check verde quando termina. O anel verde sozinho
-era a mesma forma numa cor diferente — a diferença que menos se nota de
-relance.
+Anel azul enquanto trabalha; ao parar, um glifo: check no `done`, × no `failed`,
+traço no `blocked`. **Forma antes de cor** — indigo/verde/vermelho é exatamente
+o eixo que a deuteranopia colapsa, e a régua de fases logo acima já fazia isso
+certo.
 
 ## Cenários
 
 A barra inferior troca entre os quatro. Também dá para linkar direto:
 
     #scn=blocked                 cenário travado
+    #scn=merging                 lanes encerradas, barreira ainda não começou
     #scn=integrating             barreira rodando depois do merge
     #open=a-t1,b-t2              abre o log desses agentes
     #panel=1                     abre o firehose
 
-`scn` aceita `running` (padrão), `blocked`, `integrating`, `done`.
+`scn` aceita `running` (padrão), `blocked`, `merging`, `integrating`, `done`.
 
 ## O contrato de dados
 
