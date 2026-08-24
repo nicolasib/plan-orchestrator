@@ -433,7 +433,9 @@
   /* --text-faint is for separators and empty glyphs; a timestamp is a fact
      the reader reads, so it takes the lowest token that still clears AA. */
   .feed .at { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .feed .who > span { overflow: hidden; text-overflow: ellipsis; }
+  .av.plain { display: inline-flex; flex: 0 0 auto; }
   .feed .who.barrier { color: var(--accent-ink); }
   .feed .ico { display: grid; place-items: center; width: 12px; }
   .feed .name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
@@ -1018,7 +1020,7 @@
   .ag-row {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center; gap: 12px;
-    width: 100%; padding: 11px 13px; border: 0; background: none;
+    width: 100%; padding: 11px var(--pad); border: 0; background: none;
     font: inherit; color: inherit; text-align: left; cursor: pointer;
   }
   .ag-row:hover { background: var(--hover); }
@@ -1097,13 +1099,17 @@
   /* ---------------------------------------------------------- subagentes */
 
   /* Recuo com fio guia: a hierarquia é do desenho, não de um caractere. */
+  /* O log renderiza entre o pai e os filhos, e os três dividiam
+     `--surface-2` com um fio entre eles: as linhas de subagente passavam a
+     ler como mais linhas de log. Tingido é do log; a tripulação fica na
+     superfície do card. */
   .kids { padding: 0 0 6px 30px; position: relative; }
-  .kids { background: var(--surface-2); border-top: 1px solid var(--line-soft); }
+  .kids { background: var(--surface); border-top: 1px solid var(--line-soft); }
   .kids::before { content: ''; position: absolute; left: 27px; top: 4px; bottom: 14px; width: 1px; background: var(--line); }
   .kid { position: relative; border: 0; border-radius: 0; background: none; box-shadow: none; }
   .kid + .kid { border-top: 1px solid var(--line-soft); }
   .kid::before { content: ''; position: absolute; left: -3px; top: 21px; width: 8px; height: 1px; background: var(--line); }
-  .kid .ag-row { padding: 7px 13px 7px 9px; gap: 9px; }
+  .kid .ag-row { padding: 7px var(--pad) 7px 9px; gap: 9px; }
   .kid .ag-name { font-weight: 400; font-size: 12.5px; color: var(--text-2); }
   .kid .ag-tag { font-size: 10px; padding: 2px 5px; }
   .kid .ag-doing { font-size: 11.5px; }
@@ -1122,7 +1128,7 @@
   .ag-log .feed .took, .ag-log .log-head { color: var(--text-2); }
   .ag-log .log-head {
     display: flex; align-items: center; gap: 8px;
-    padding: 6px 13px; border-bottom: 1px solid var(--line-soft);
+    padding: 6px var(--pad); border-bottom: 1px solid var(--line-soft);
     font-size: 11px; color: var(--text-2);
   }
   .ag-log .log-head b { font-weight: 500; color: var(--text-2); font-family: var(--mono); font-size: 10.5px; }
@@ -1132,14 +1138,14 @@
      medida de leitura, sem caixa — a caixa monoespaçada diria "isto é um
      literal", que é a única coisa que um relatório não é. */
   .ag-report { border-top: 1px solid var(--line-soft); background: var(--surface-2); padding: 2px 0 14px; }
-  .ag-report h3 { margin: 14px 13px 7px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
-  .ag-report .md { padding: 0 13px; max-width: 74ch; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
+  .ag-report h3 { margin: 14px var(--pad) 7px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+  .ag-report .md { padding: 0 var(--pad); max-width: 74ch; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
   .ag-report .md > :first-child { margin-top: 0; }
   .ag-report .md > :last-child { margin-bottom: 0; }
   .ag-report .md p { margin: 0 0 9px; }
   .ag-report .md strong { color: var(--text); font-weight: 600; }
   .ag-report .md code { font-size: 11.5px; }
-  .ag-report .acts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 13px 0; }
+  .ag-report .acts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px var(--pad) 0; }
 
   /* ------------------------------------------------------------- a fila */
 
@@ -1150,7 +1156,7 @@
   .queue { display: grid; }
   .qrow {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
-    align-items: center; gap: 10px; padding: 8px 13px;
+    align-items: center; gap: 10px; padding: 8px var(--pad);
     border-bottom: 1px solid var(--line-soft);
   }
   .qrow:last-child { border-bottom: 0; }
@@ -1173,7 +1179,7 @@
   .outcome .review { display: flex; align-items: flex-start; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text-2); }
 
   /* A faixa que fecha a página: o que já saiu do caminho, em uma linha. */
-  .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 11px var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
   .strip .grp { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .strip .lbl { font-size: 11.5px; color: var(--text-3); }
   .strip .lbl b { color: var(--text-2); font-weight: 500; }
@@ -1521,10 +1527,11 @@ function statusMark(status) {
   }
 }
 
-function avatarHtml(a, size = 28) {
+function avatarHtml(a, size = 28, { plain = false } = {}) {
   const sm = size <= 22 ? ' sm' : '';
+  if (plain) return `<span class="av plain">${avatarSvg(a.id, size, a.status, skinFor(a))}</span>`;
   const badge = a.model ? `<span class="badge" title="${esc(a.model)}">${esc(MODEL_TAG(a.model))}</span>` : '';
-  return `<span class="av ${esc(a.status)}${sm}" title="${esc(a.model || '')}">
+  return `<span class="av ${esc(a.status)}${sm}">
     ${avatarSvg(a.id, size, a.status, skinFor(a))}<span class="ring"></span>${statusMark(a.status)}${badge}</span>`;
 }
 
@@ -1853,7 +1860,7 @@ function agentHtml(a, kid = false) {
 
   const log = open
     ? `<div class="ag-log">
-         <div class="log-head">${avatarHtml(a, 16)}<b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}</div>
+         <div class="log-head"><b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}</div>
          <div class="feed">${(a.activity || []).slice().reverse().map((ev) => activityHtml(ev)).join('')
            || '<div class="empty">no events yet</div>'}</div>
        </div>`
@@ -1890,7 +1897,14 @@ function took(a) {
 
 function activityHtml(a, who = false) {
   const at = `<span class="at">${esc(clock(a.at))}</span>`;
-  const tag = who ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(a.tag || '')}">${esc(a.tag || '')}</span>` : '';
+  // Dois `implementer` sob rótulo idêntico, sem rosto e sem pai, na única
+  // superfície cujo trabalho inteiro é desambiguar. O rosto resolve porque a
+  // cor já diz a lane; o `title` carrega o caminho completo.
+  const tag = who
+    ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(a.by ? a.by.path : a.tag || '')}">`
+      + (a.by ? avatarHtml(a.by, 14, { plain: true }) : '')
+      + `<span>${esc(a.tag || '')}</span></span>`
+    : '';
   const open = `<div class="ln${a.ok === false ? ' bad' : ''}">${at}${tag}`;
   if (a.kind === 'text') return `${open}<span class="ico"></span><span class="say" title="${esc(a.text)}">${esc(a.text)}</span></div>`;
   const why = a.ok === false && a.preview ? `<span class="why"> ${esc(a.preview)}</span>` : '';
@@ -1986,7 +2000,10 @@ document.addEventListener('click', (e) => {
   }
   if (e.target.closest('#open-feed')) { openPanel(true); return; }
   if (e.target.closest('#d-close') || e.target.closest('#scrim')) { openPanel(false); return; }
-  if (document.body.dataset.panel === 'open' && !e.target.closest('#panel')) openPanel(false);
+  // Fechar em qualquer clique fora tornava impossível segurar uma linha do
+  // feed contra a linha do agente de onde ela veio — que é a razão de as duas
+  // superfícies existirem. Esc, o botão e o scrim (que só cobre a tela
+  // estreita) continuam fechando.
 });
 
 function openPanel(on) {
@@ -2146,9 +2163,12 @@ function crewRunning() {
 /** O feed global sai da tripulação, nunca de uma segunda fonte. */
 function buildFeed(crew) {
   const rows = [];
+  const by = (a, path) => ({ id: a.id, lane: a.lane, barrier: a.barrier, sub: a.sub, status: a.status, path });
   for (const a of crew) {
-    for (const ev of a.activity) rows.push({ ...ev, tag: a.tag, barrier: a.barrier });
-    for (const k of a.children || []) for (const ev of k.activity) rows.push({ ...ev, tag: k.tag, sub: true });
+    for (const ev of a.activity) rows.push({ ...ev, tag: a.tag, barrier: a.barrier, by: by(a, a.tag) });
+    for (const k of a.children || []) {
+      for (const ev of k.activity) rows.push({ ...ev, tag: k.tag, sub: true, by: by(k, `${a.tag} › ${k.tag}`) });
+    }
   }
   return rows.sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
 }
