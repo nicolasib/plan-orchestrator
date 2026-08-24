@@ -916,6 +916,16 @@
 
   .wrap { max-width: 1180px; margin-inline: auto; }
 
+  /*
+   * `main > * { border-top }` divide bandas: faixas de largura total, coladas
+   * uma na outra, onde a linha é a costura entre duas. Aqui as seções são
+   * cards com raio e margem, então a linha não fechava nada — corria de ponta
+   * a ponta no meio do vão, encostando em nada. O título da seção já separa.
+   */
+  main > * { border-top: 0; }
+  main > section + section { margin-top: 10px; }
+  main > section > h2 { padding: 4px var(--pad) 9px; }
+
   /* O que está rodando, antes de quanto já rodou. O nome do plano existia
      em 13.5px numa barra de ferramentas, disputando espaço com três
      contadores; aqui ele é a primeira coisa que a página diz. */
