@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>plo: start the plan, walk away</title>
+<meta name="description" content="plo runs a TDD implementation plan to the end without you. Each task gets its own process and a fresh context, in its own git worktree, checkpointed so a dead session resumes exactly where it stopped." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23dbfc03'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='%23141705'/%3E%3C/svg%3E" />
+
+<meta property="og:title" content="plo: start the plan, walk away" />
+<meta property="og:description" content="Each task runs as its own process with a fresh context. A dead session resumes exactly where it stopped." />
+<meta property="og:type" content="website" />
+
+<style>
+/* ---------------------------------------------------------------------------
+ * The tokens are the product's own. src/ui.html defines the surface scale, the
+ * text ramp and the mark; copying them here is what keeps the page and the
+ * thing it sells from looking like two products. The one rule the product
+ * states out loud is honoured: the mark does not share the interface accent.
+ * On this page the mark IS the accent, and indigo never appears outside a
+ * screenshot.
+ * ------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('fonts/Geist-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('fonts/GeistMono-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark light;
+
+  --bg: #08090a;
+  --surface: #0f1011;
+  --surface-2: #141518;
+  --line: #23242a;
+  --line-soft: #191a1e;
+  --hover: rgba(255, 255, 255, .045);
+  --code-bg: rgba(255, 255, 255, .055);
+
+  --text: #f7f8f8;
+  --text-2: #8a8f98;
+  --text-3: #787d87;
+  --text-faint: #5b606a;
+  --art-dim: #787d87;      /* 4.82:1 on --bg */
+
+  --brand: #dbfc03;
+  --on-brand: #141705;
+  /* The mark as small text. In dark it can be the mark itself (16.4:1 on
+     --surface); in light the same yellow runs at 1.2:1 on white, which is not
+     a colour you can read, so the ink darkens and the fill stays. */
+  --brand-ink: #dbfc03;
+  --brand-soft: rgba(219, 252, 3, .1);
+  --brand-line: rgba(219, 252, 3, .22);
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-frame: 14px;
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, .48), 0 2px 8px rgba(0, 0, 0, .32);
+
+  --ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --gut: clamp(20px, 5vw, 64px);
+  --maxw: 1240px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #eceef1;
+    --surface: #ffffff;
+    --surface-2: #f7f8fa;
+    --line: #e0e2e6;
+    --line-soft: #eaebee;
+    --hover: rgba(0, 0, 0, .035);
+    --code-bg: rgba(17, 24, 39, .05);
+
+    --text: #1c1d21;
+    --text-2: #5c616a;
+    --text-3: #6b6f76;
+    --text-faint: #8b9099;
+    --art-dim: #5c616a;    /* 5.43:1 on --bg */
+
+    --brand-ink: #5a6b00;   /* 5.87:1 on white. The yellow itself is 1.2:1. */
+    --brand-soft: rgba(219, 252, 3, .3);
+    --brand-line: rgba(120, 140, 0, .3);
+
+    --shadow-lg: 0 8px 32px rgba(15, 20, 30, .1), 0 2px 8px rgba(15, 20, 30, .06);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 560; letter-spacing: -.022em; line-height: 1.08; }
+p { margin: 0; }
+a { color: inherit; }
+
+code, .mono { font-family: var(--mono); font-variant-ligatures: none; }
+p code {
+  font-size: .88em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 1.5px 5px;
+  color: var(--text);
+}
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gut); }
+
+/* Focus is one ring everywhere, on the mark, so it is never mistaken for a
+   state the page owns. */
+:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* --- section rhythm ------------------------------------------------------ */
+section { padding-block: clamp(48px, 6vw, 92px); }
+.lede { color: var(--text-2); font-size: clamp(15px, 1.35vw, 17.5px); line-height: 1.62; max-width: 60ch; }
+.h2 { font-size: clamp(28px, 3.5vw, 46px); }
+.h3 { font-size: clamp(17px, 1.5vw, 19px); font-weight: 560; letter-spacing: -.012em; }
+
+/* --- nav ----------------------------------------------------------------- */
+.nav {
+  position: sticky; top: 0; z-index: 20;
+  height: 64px;
+  display: flex; align-items: center;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--line-soft);
+}
+.nav .wrap { display: flex; align-items: center; gap: 12px; width: 100%; }
+.brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 560; letter-spacing: -.01em; }
+.brand svg { display: block; border-radius: 5px; }
+.brand b { font-weight: 560; font-size: 15.5px; }
+.brand .v { font-family: var(--mono); font-size: 11px; color: var(--text-2); padding-top: 2px; }
+.navspace { flex: 1; }
+.navlinks { display: flex; align-items: center; gap: 22px; }
+.navlinks a:not(.btn) { text-decoration: none; color: var(--text-2); font-size: 14px; transition: color .18s ease; }
+.navlinks a:not(.btn):hover { color: var(--text); }
+.navlinks a.btn { text-decoration: none; }
+
+/* --- buttons ------------------------------------------------------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding-inline: 17px;
+  border-radius: 8px; border: 1px solid transparent;
+  font: inherit; font-size: 14.5px; font-weight: 500; white-space: nowrap;
+  text-decoration: none; cursor: pointer;
+  transition: transform .12s ease, background .18s ease, border-color .18s ease;
+}
+.btn-primary { background: var(--brand); color: var(--on-brand); }   /* 16:1 both themes */
+.btn-primary:hover { background: color-mix(in srgb, var(--brand) 88%, #fff); }
+.btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
+.btn-ghost:hover { background: var(--hover); border-color: var(--text-faint); }
+.btn:active { transform: translateY(1px); }
+.btn-sm { height: 34px; padding-inline: 13px; font-size: 13.5px; }
+@media (prefers-reduced-motion: reduce) { .btn { transition: background .18s ease; } .btn:active { transform: none; } }
+
+/* --- hero ---------------------------------------------------------------- */
+.hero { padding-top: clamp(28px, 3.6vw, 52px); padding-bottom: clamp(36px, 4.4vw, 58px); overflow: hidden; }
+.hero .wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 46fr) minmax(0, 54fr);
+  gap: clamp(32px, 5vw, 68px);
+  align-items: center;
+}
+.hero h1 {
+  font-size: clamp(38px, 5.4vw, 68px);
+  font-weight: 580;
+  letter-spacing: -.035em;
+  line-height: 1.02;
+}
+.hero .lede { margin-top: 22px; font-size: clamp(16px, 1.5vw, 18.5px); max-width: 46ch; }
+.hero .cta { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 32px; }
+
+/* The shot bleeds past the container's right edge: the dashboard is a wide
+   surface and cropping it to a column would make it look like a card. */
+.shotwrap { position: relative; }
+.shot {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-lg);
+  background: var(--surface);
+}
+.hero .shotwrap { width: calc(100% + var(--gut) + 9vw); }
+
+/* --- requirements strip -------------------------------------------------- */
+.reqs { border-block: 1px solid var(--line-soft); padding-block: 20px; }
+.reqs .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 32px; }
+.req { display: inline-flex; align-items: center; gap: 9px; color: var(--text-2); font-size: 13.5px; }
+.req > span { display: inline; }
+.req svg { width: 15px; height: 15px; flex: none; fill: currentColor; opacity: .75; }
+.req b { font-weight: 500; color: var(--text); }
+
+/* --- bento: four things -------------------------------------------------- */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: clamp(34px, 4vw, 54px);
+}
+.cell {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: clamp(20px, 2.2vw, 28px);
+  display: flex; flex-direction: column; gap: 14px;
+}
+/* Two of the four carry a real artefact rather than more prose: the command
+   that makes the claim true. A grid of four text cards is the thing this
+   section would otherwise be. */
+.cell.tinted { background: linear-gradient(160deg, var(--brand-soft), transparent 62%), var(--surface); border-color: var(--brand-line); }
+.cell p { color: var(--text-2); font-size: 14.5px; line-height: 1.6; }
+.cell .art {
+  margin-top: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.75;
+  color: var(--text-2);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.cell .art .dim { color: var(--art-dim); }
+.cell .art .hi { color: var(--brand-ink); }
+
+/* --- terminal ------------------------------------------------------------ */
+.term {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.term-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-2);
+}
+.term-bar b { color: var(--text); font-weight: 500; }
+.term pre {
+  margin: 0; padding: 18px 20px 22px;
+  font-family: var(--mono); font-size: 12.6px; line-height: 1.72;
+  color: var(--text-2);
+  overflow-x: auto;
+  tab-size: 2;
+}
+.term pre b { color: var(--text); font-weight: 500; }
+.term pre .cmd { color: var(--brand-ink); font-weight: 500; }
+.term pre .dim { color: var(--art-dim); }
+.term pre .rule { color: var(--line); }
+.term pre .tag { color: var(--text-3); }
+
+.copy {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text-2); font: inherit; font-family: var(--ui); font-size: 12px;
+  padding: 3px 9px; cursor: pointer;
+  transition: color .18s ease, border-color .18s ease;
+}
+.copy:hover { color: var(--text); border-color: var(--text-faint); }
+.copy[data-state="done"] { color: var(--brand-ink); border-color: var(--brand-line); }
+
+/* --- edge rules ---------------------------------------------------------- */
+.rules { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: 28px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
+.rule-i { background: var(--bg); padding: 18px 20px; }
+.rule-i dt { font-family: var(--mono); font-size: 12px; color: var(--brand-ink); margin-bottom: 7px; }
+.rule-i dd { margin: 0; font-size: 13.5px; color: var(--text-2); line-height: 1.55; }
+
+/* --- command flow -------------------------------------------------------- */
+.flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: clamp(30px, 4vw, 48px); border-top: 1px solid var(--line); }
+.step { padding: 24px 22px 26px 0; border-right: 1px solid var(--line-soft); }
+.step:last-child { border-right: 0; }
+.step .cmdname { font-family: var(--mono); font-size: 14px; color: var(--text-2); font-weight: 400; }
+.step .cmdname i { font-style: normal; color: var(--text); font-weight: 500; }
+.step p { margin-top: 9px; font-size: 13.5px; color: var(--text-2); line-height: 1.55; }
+.step.gate { position: relative; }
+.step.gate::before {
+  content: ""; position: absolute; top: -1px; left: 0; right: 1px; height: 2px;
+  background: var(--brand);
+}
+
+/* --- stacked bleed ------------------------------------------------------- */
+.bleed { max-width: 1560px; margin: clamp(36px, 5vw, 62px) auto 0; padding-inline: var(--gut); }
+
+/* --- honest limits ------------------------------------------------------- */
+.limits { border-top: 1px solid var(--line); margin-top: clamp(30px, 4vw, 46px); }
+.limit { display: grid; grid-template-columns: minmax(0, 30fr) minmax(0, 70fr); gap: clamp(16px, 3vw, 44px); padding-block: 26px; border-bottom: 1px solid var(--line-soft); }
+.limit h3 { color: var(--text); }
+.limit p { color: var(--text-2); font-size: 14.5px; line-height: 1.62; }
+
+/* --- install ------------------------------------------------------------- */
+.install { text-align: center; }
+.install .term { text-align: left; max-width: 620px; margin: clamp(28px, 3.5vw, 40px) auto 0; }
+.install .cta { display: flex; justify-content: center; flex-wrap: wrap; gap: 11px; margin-top: 26px; }
+.install .lede { margin-inline: auto; }
+
+/* --- footer -------------------------------------------------------------- */
+footer { border-top: 1px solid var(--line-soft); padding-block: 30px 42px; }
+footer .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
+footer a { color: var(--text-2); font-size: 13.5px; text-decoration: none; }
+footer a:hover { color: var(--text); }
+footer .sp { flex: 1; }
+footer .fine { color: var(--text-2); font-size: 13px; }
+
+/* --- motion --------------------------------------------------------------
+ * Two moves, both earning it. The hero stagger sets reading order on the one
+ * screen where nothing else does. The reveal marks a section as it becomes
+ * the thing you are reading. Everything else on this page holds still.
+ * ----------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { opacity: 0; transform: translateY(14px); }
+  .rise.in { opacity: 1; transform: none; transition: opacity .62s cubic-bezier(.16,1,.3,1), transform .62s cubic-bezier(.16,1,.3,1); }
+  .stagger > * { opacity: 0; transform: translateY(12px); animation: rise .7s cubic-bezier(.16,1,.3,1) forwards; }
+  .stagger > *:nth-child(1) { animation-delay: .05s; }
+  .stagger > *:nth-child(2) { animation-delay: .14s; }
+  .stagger > *:nth-child(3) { animation-delay: .23s; }
+  .heroshot { opacity: 0; animation: rise .8s cubic-bezier(.16,1,.3,1) .3s forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+}
+
+/* --- responsive ----------------------------------------------------------
+ * Every multi-column block collapses here, declared once. Above md the page
+ * is asymmetric; below it, it is a single column with nothing bleeding.
+ * ----------------------------------------------------------------------- */
+@media (max-width: 1000px) {
+  .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 0; }
+  .step { border-top: 1px solid var(--line-soft); border-right: 0; padding-right: 0; }
+  .step.gate::before { display: none; }
+}
+@media (max-width: 860px) {
+  .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .hero .shotwrap { width: 100%; }
+  .hero h1 { font-size: clamp(34px, 8.5vw, 46px); }
+  .bento { grid-template-columns: minmax(0, 1fr); }
+  .limit { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .navlinks .hide-sm { display: none; }
+}
+@media (max-width: 560px) {
+  .rules { grid-template-columns: minmax(0, 1fr); }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .term pre { font-size: 11.5px; padding: 14px 15px 18px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="plo, home">
+      <svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
+        <rect width="16" height="16" rx="4" fill="#dbfc03"/>
+        <path d="M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z" fill="#141705"/>
+      </svg>
+      <b>plo</b>
+      <span class="v">plan-orchestrator</span>
+    </a>
+    <span class="navspace"></span>
+    <div class="navlinks">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#limits">Limits</a>
+      <a href="https://github.com/nicolasib/plan-orchestrator">GitHub</a>
+      <a class="btn btn-primary btn-sm" href="#install">Install</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- HERO ---------------------------------------------------------------- -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="stagger">
+        <h1>Start the plan.<br>Walk away.</h1>
+        <p class="lede">Each task runs as its own process with a fresh context. A dead session resumes exactly where it stopped.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">Install</a>
+          <a class="btn btn-ghost" href="https://github.com/nicolasib/plan-orchestrator">View on GitHub</a>
+        </div>
+      </div>
+
+      <div class="shotwrap heroshot">
+        <picture>
+          <source srcset="shot-running-light.png" media="(prefers-color-scheme: light)" />
+          <img class="shot" src="shot-running-dark.png" width="1800" height="1075"
+               fetchpriority="high" decoding="async"
+               alt="The plo dashboard during a run: a pipeline across the top reading Run, Merge, Barriers, Full suite and Cross-lane review, then one row per agent with the task it holds, its model, how long it has been alive, its turn count and a sentence saying what it is doing." />
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <!-- REQUIREMENTS -------------------------------------------------------- -->
+  <div class="reqs">
+    <div class="wrap">
+      <span class="req">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.998,24c-0.321,0-0.641-0.084-0.922-0.247l-2.936-1.737c-0.438-0.245-0.224-0.332-0.08-0.383 c0.585-0.203,0.703-0.25,1.328-0.604c0.065-0.037,0.151-0.023,0.218,0.017l2.256,1.339c0.082,0.045,0.197,0.045,0.272,0l8.795-5.076 c0.082-0.047,0.134-0.141,0.134-0.238V6.921c0-0.099-0.053-0.192-0.137-0.242l-8.791-5.072c-0.081-0.047-0.189-0.047-0.271,0 L3.075,6.68C2.99,6.729,2.936,6.825,2.936,6.921v10.15c0,0.097,0.054,0.189,0.139,0.235l2.409,1.392 c1.307,0.654,2.108-0.116,2.108-0.89V7.787c0-0.142,0.114-0.253,0.256-0.253h1.115c0.139,0,0.255,0.112,0.255,0.253v10.021 c0,1.745-0.95,2.745-2.604,2.745c-0.508,0-0.909,0-2.026-0.551L2.28,18.675c-0.57-0.329-0.922-0.945-0.922-1.604V6.921 c0-0.659,0.353-1.275,0.922-1.603l8.795-5.082c0.557-0.315,1.296-0.315,1.848,0l8.794,5.082c0.57,0.329,0.924,0.944,0.924,1.603 v10.15c0,0.659-0.354,1.273-0.924,1.604l-8.794,5.078C12.643,23.916,12.324,24,11.998,24z M19.099,13.993 c0-1.9-1.284-2.406-3.987-2.763c-2.731-0.361-3.009-0.548-3.009-1.187c0-0.528,0.235-1.233,2.258-1.233 c1.807,0,2.473,0.389,2.747,1.607c0.024,0.115,0.129,0.199,0.247,0.199h1.141c0.071,0,0.138-0.031,0.186-0.081 c0.048-0.054,0.074-0.123,0.067-0.196c-0.177-2.098-1.571-3.076-4.388-3.076c-2.508,0-4.004,1.058-4.004,2.833 c0,1.925,1.488,2.457,3.895,2.695c2.88,0.282,3.103,0.703,3.103,1.269c0,0.983-0.789,1.402-2.642,1.402 c-2.327,0-2.839-0.584-3.011-1.742c-0.02-0.124-0.126-0.215-0.253-0.215h-1.137c-0.141,0-0.254,0.112-0.254,0.253 c0,1.482,0.806,3.248,4.655,3.248C17.501,17.007,19.099,15.91,19.099,13.993z"/></svg>
+        <span><b>Node 20</b> or newer</span>
+      </span>
+      <span class="req">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.09 23.549a1.54 1.54 0 0 1-2.18 0L.451 13.089a1.54 1.54 0 0 1 0-2.179l7.191-7.19 2.733 2.733a1.85 1.85 0 0 0 .964 2.326v6.66a1.849 1.849 0 1 0 1.54 0V8.957l2.508 2.508a1.85 1.85 0 1 0 1.09-1.09l-2.634-2.634a1.85 1.85 0 0 0-2.378-2.377L8.73 2.63 10.91.451a1.54 1.54 0 0 1 2.179 0l10.459 10.46a1.54 1.54 0 0 1 0 2.179z"/></svg>
+        <span>A repo with <b>git worktrees</b></span>
+      </span>
+      <span class="req">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>
+        <span><b>Claude Code</b>, or any headless agent CLI</span>
+      </span>
+      <span class="req"><span>Zero dependencies. No build step.</span></span>
+    </div>
+  </div>
+
+  <!-- FOUR THINGS ---------------------------------------------------------- -->
+  <section style="padding-top:clamp(48px,5.5vw,78px)">
+    <div class="wrap">
+      <h2 class="h2 rise">Four things you stop doing.</h2>
+      <p class="lede rise" style="margin-top:18px">Concurrency is the upgrade, not the point. Every line below is true at one lane.</p>
+
+      <div class="bento">
+        <article class="cell tinted rise">
+          <h3 class="h3">Clearing context between phases</h3>
+          <p>One OS process per task, each with its own session id. Every task starts on a fresh context, and nothing carries over except the commits.</p>
+          <div class="art">$ claude -p   <span class="dim">task 3 · lane A</span>
+$ claude -p   <span class="dim">task 5 · lane B</span>
+$ claude -p   <span class="dim">task 4 · lane A</span></div>
+        </article>
+
+        <article class="cell rise">
+          <h3 class="h3">Sitting through the run</h3>
+          <p>Nothing runs until you approve the lane plan. After that the plan goes to the end with nobody in the loop, and the CLI prints one line per task boundary.</p>
+          <div class="art"><span class="dim">lane A</span>  task 3  <span class="hi">done</span>   <span class="dim">4 commits</span>
+<span class="dim">lane B</span>  task 5  <span class="hi">done</span>   <span class="dim">2 commits</span>
+<span class="dim">lane A</span>  task 4  running</div>
+        </article>
+
+        <article class="cell rise">
+          <h3 class="h3">Paying for a dead session</h3>
+          <p>A checkpoint is written before a task starts and again the moment it exits. Usage limits and API errors stop being restarts. Resume never reads a transcript.</p>
+          <div class="art">$ <span class="hi">plo resume</span> --plan &lt;plan.md&gt;</div>
+        </article>
+
+        <article class="cell rise">
+          <h3 class="h3">Reviewing lane by lane</h3>
+          <p>One review at the end, over the combined diff. Orphaned references after deletions, helpers two lanes each wrote, drifted types. A per-lane review structurally cannot see those.</p>
+          <div class="art">$ <span class="hi">plo integrate</span> --plan &lt;plan.md&gt;</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE DAG -------------------------------------------------------------- -->
+  <section id="how">
+    <div class="wrap">
+      <h2 class="h2 rise">It does not guess.</h2>
+      <p class="lede rise" style="margin-top:18px">Everything the graph needs is already written in the plan: the files a task declares it will write, and the interfaces it consumes and produces. plo parses that literally, then prints the graph and stops. Nothing touches disk until you approve it.</p>
+
+      <div class="term rise" style="margin-top:clamp(28px,3.5vw,44px)">
+        <div class="term-bar"><b>plo analyze</b><span>excerpt of the real output</span></div>
+<pre><span class="cmd">$ plo analyze --plan docs/plans/takz-mcp.md --max-lanes 3</span>
+
+<span class="rule">──</span> <b>LANES (3)</b> <span class="rule">─────────────────────────────────────────</span>
+  <b>Lane A</b>  <span class="dim">[weight 203]</span>  T1
+      T1  MCP config in ConfigStore
+  <b>Lane B</b>  <span class="dim">[weight 66]</span>  T2
+      T2  Move the fuzzy name matcher to shared
+  <b>Lane C</b>  <span class="dim">[weight 884]</span>  T3 → T4 → T5
+      T3  Tool plumbing + list_files + read_file
+      T4  search, list_tasks, get_backlinks, get_properties
+      T5  Write tools + the tool registry
+
+<span class="rule">──</span> <b>HARD EDGES (11)</b> <span class="rule">───────────────────────────────────</span>
+  T1 → T7   <span class="tag">[write-write]</span>  both write `src/shared/types.ts`
+  T3 → T4   <span class="tag">[write-write]</span>  both write `src/main/mcp/read-tools.ts`
+  T2 → T4   <span class="tag">[interface]</span>  Task 4 Consumes: names Task 2
+  T5 → T6   <span class="tag">[interface]</span>  Task 5 Produces: names Task 6
+  T7 → T8   <span class="tag">[interface]</span>  Task 8 Consumes: names Task 7
+  <span class="dim">…</span>
+</pre>
+      </div>
+
+      <dl class="rules rise">
+        <div class="rule-i">
+          <dt>write-write</dt>
+          <dd>Two tasks declare the same path. They serialize into one lane. Hard.</dd>
+        </div>
+        <div class="rule-i">
+          <dt>interface</dt>
+          <dd>A Consumes or Produces block names another task by number. Hard.</dd>
+        </div>
+        <div class="rule-i">
+          <dt>semantic</dt>
+          <dd>Docs-only and no-writes heuristics. Soft, printed with its evidence.</dd>
+        </div>
+        <div class="rule-i">
+          <dt>override</dt>
+          <dd>A JSON file beside the plan, committed with the reason. Wins over everything.</dd>
+        </div>
+      </dl>
+
+      <p class="lede rise" style="margin-top:26px">Two details that matter in practice. A negation in the plan is honoured, so <code>(new, do not touch b.test.js)</code> records one write and not two. And reads are never conflicts: two tasks importing the same helper stay parallel.</p>
+    </div>
+  </section>
+
+  <!-- COMMAND FLOW ---------------------------------------------------------- -->
+  <section style="padding-top:0">
+    <div class="wrap">
+      <h2 class="h2 rise">The whole tool is five commands.</h2>
+      <div class="flow">
+        <div class="step gate rise">
+          <div class="cmdname">plo <i>analyze</i></div>
+          <p>Prints the lanes, the edges and the evidence for each one. Read-only. This is the gate, and it is the cheap place to correct a wrong graph.</p>
+        </div>
+        <div class="step rise">
+          <div class="cmdname">plo <i>init</i></div>
+          <p>Writes the checkpoint from the lane plan you approved.</p>
+        </div>
+        <div class="step rise">
+          <div class="cmdname">plo <i>run</i></div>
+          <p>Creates the lane worktrees and executes. A lane that hits a limit dies alone.</p>
+        </div>
+        <div class="step rise">
+          <div class="cmdname">plo <i>integrate</i></div>
+          <p>Merge, then barrier tasks, then the full suite, then one cross-lane review. That order is not negotiable.</p>
+        </div>
+        <div class="step rise">
+          <div class="cmdname">plo <i>clean</i></div>
+          <p>Removes the worktrees. Refuses while a lane still has unmerged commits.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESUME ---------------------------------------------------------------- -->
+  <section style="padding-top:0">
+    <div class="wrap">
+      <h2 class="h2 rise">When a lane dies, git outranks the state file.</h2>
+      <p class="lede rise" style="margin-top:18px">On resume, a task left running becomes interrupted, and a task with commits on its lane branch that the checkpoint calls unfinished is promoted to done. The other lanes never noticed. What stopped, and the report it wrote on the way out, sits on the dashboard next to the command that restarts it.</p>
+    </div>
+    <div class="bleed rise">
+      <picture>
+        <source srcset="shot-blocked-light.png" media="(prefers-color-scheme: light)" />
+        <img class="shot" src="shot-blocked-dark.png" width="1400" height="637" loading="lazy" decoding="async"
+             alt="The dashboard with a stopped lane: a banner reads that lane B stopped because task 2 is blocked on an interface task 1 has not produced, with a button to copy the resume command, while the other lane keeps working below it." />
+      </picture>
+    </div>
+  </section>
+
+  <!-- LIMITS ---------------------------------------------------------------- -->
+  <section id="limits" style="padding-top:0">
+    <div class="wrap">
+      <h2 class="h2 rise">Where it is the wrong tool.</h2>
+      <div class="limits">
+        <div class="limit rise">
+          <h3 class="h3">Parallelism buys wall clock, not budget</h3>
+          <p>Three lanes spend tokens about three times as fast. If the goal is surviving a usage limit, the win is the checkpoint and the process isolation, and one lane already gives you both.</p>
+        </div>
+        <div class="limit rise">
+          <h3 class="h3">Under about six remaining tasks, skip it</h3>
+          <p>Worktree and process setup costs more than the parallelism returns. Plain subagent-driven development is the better tool at that size.</p>
+        </div>
+        <div class="limit rise">
+          <h3 class="h3">The semantic layer is a heuristic</h3>
+          <p>It is deliberately soft. It prints its reasoning, and a JSON file beside the plan overrides it. A missing edge is the expensive error, which is exactly why the gate exists.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL ---------------------------------------------------------------- -->
+  <section id="install" class="install">
+    <div class="wrap">
+      <h2 class="h2 rise">Two commands and it is on your PATH.</h2>
+      <p class="lede rise" style="margin-top:18px">Node and git are the whole dependency list. There is nothing to build.</p>
+
+      <div class="term rise">
+        <div class="term-bar">
+          <b>bash</b>
+          <button class="copy" type="button" data-copy="git clone https://github.com/nicolasib/plan-orchestrator&#10;cd plan-orchestrator &amp;&amp; npm link">
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+<pre><span class="cmd">$ git clone https://github.com/nicolasib/plan-orchestrator</span>
+<span class="cmd">$ cd plan-orchestrator &amp;&amp; npm link</span>
+
+<span class="cmd">$ plo analyze --plan &lt;plan.md&gt; --max-lanes 3</span>
+<span class="dim">  read the graph, correct it, then: plo init &amp;&amp; plo run</span>
+</pre>
+      </div>
+
+      <div class="cta rise">
+        <a class="btn btn-primary" href="https://github.com/nicolasib/plan-orchestrator">View on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/nicolasib/plan-orchestrator#readme">Read the README</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="plo, back to top" style="gap:8px">
+      <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
+        <rect width="16" height="16" rx="4" fill="#dbfc03"/>
+        <path d="M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z" fill="#141705"/>
+      </svg>
+      <b style="font-size:14px">plo</b>
+    </a>
+    <span class="sp"></span>
+    <a href="https://github.com/nicolasib/plan-orchestrator">GitHub</a>
+    <a href="https://github.com/nicolasib/plan-orchestrator#readme">README</a>
+    <a href="https://github.com/nicolasib/plan-orchestrator/blob/main/LICENSE">MIT</a>
+    <span class="fine">Built for superpowers-style plans.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* Reveal on entry. IntersectionObserver, never a scroll listener: this fires
+     a handful of times over the page's life instead of once per frame. */
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var targets = document.querySelectorAll('.rise');
+
+  if (reduce.matches || !('IntersectionObserver' in window)) {
+    for (var i = 0; i < targets.length; i++) targets[i].classList.add('in');
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0, rootMargin: '0px 0px 12% 0px' });
+
+    targets.forEach(function (el, i) {
+      /* Siblings inside one block arrive in reading order rather than all at
+         once. The delay is capped so a long block never feels queued. */
+      el.style.transitionDelay = Math.min(i % 4, 3) * 55 + 'ms';
+      io.observe(el);
+    });
+  }
+
+  /* Copy, with the three states a copy button actually has. */
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    var label = btn.querySelector('.copy-label');
+    var idle = label.textContent;
+    var timer;
+
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      clearTimeout(timer);
+
+      var settle = function (msg, state) {
+        label.textContent = msg;
+        btn.setAttribute('data-state', state);
+        timer = setTimeout(function () {
+          label.textContent = idle;
+          btn.removeAttribute('data-state');
+        }, 1800);
+      };
+
+      if (!navigator.clipboard) { settle('Press Cmd C', 'fail'); return; }
+      navigator.clipboard.writeText(text).then(
+        function () { settle('Copied', 'done'); },
+        function () { settle('Press Cmd C', 'fail'); }
+      );
+    });
+  });
+})();
+</script>
+</body>
+</html>
