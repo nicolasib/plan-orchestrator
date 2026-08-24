@@ -42,6 +42,23 @@ traço no `blocked`. **Forma antes de cor** — indigo/verde/vermelho é exatame
 o eixo que a deuteranopia colapsa, e a régua de fases logo acima já fazia isso
 certo.
 
+## O orb
+
+O indicador de atividade é uma esfera de partículas em rotação 3D — a
+linguagem dos *thinking orbs* de [orbs.jakubantalik.com](https://orbs.jakubantalik.com/),
+reimplementada aqui em CSS puro. As partículas são posicionadas uma vez, em
+espiral de Fibonacci, e quem gira é o contêiner: nenhum frame custa
+JavaScript, e vinte orbs na tela não pesam mais que um.
+
+**O estado escolhe o movimento, não só a cor.** Trabalhando: gira redondo, no
+acento. Vivo mas tropeçado numa chamada que falhou: mais devagar e fora de
+eixo, em `--warn`. Parado: a esfera colapsa e o movimento cessa, em `--fail` —
+imobilidade é o sinal.
+
+Ele substitui três pontos de 3px que o comentário do próprio código chamava de
+"a razão pela qual dá pra ver de longe que a run está viva", e que a três
+passos de um segundo monitor não se resolviam.
+
 ## Cenários
 
 A barra inferior troca entre os quatro. Também dá para linkar direto:
