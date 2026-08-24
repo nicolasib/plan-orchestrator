@@ -915,6 +915,21 @@
   .live { height: 26px; margin-left: 6px; }
 
   .wrap { max-width: 1180px; margin-inline: auto; }
+
+  /* O que está rodando, antes de quanto já rodou. O nome do plano existia
+     em 13.5px numa barra de ferramentas, disputando espaço com três
+     contadores; aqui ele é a primeira coisa que a página diz. */
+  .plan-name {
+    margin: 0 0 1px; font-size: 22px; font-weight: 600; letter-spacing: -.028em;
+    line-height: 1.2; color: var(--text);
+  }
+  .summary { padding-top: 20px; gap: 6px; }
+  /* Abaixo do título, o veredito deixa de ser a manchete e vira o subtítulo
+     que ele sempre foi — mesmo peso, um degrau de tamanho abaixo. */
+  .verdict { font-size: 14px; }
+  /* Na barra, o caminho do arquivo: informação que a página ainda não deu,
+     em vez do título repetido duas vezes na mesma tela. */
+  .topbar h1 { font: 400 11.5px var(--mono); color: var(--text-2); letter-spacing: 0; }
   main > section > h2 { display: flex; align-items: center; gap: 8px; }
   h2 .tally { font-weight: 400; color: var(--text-3); }
 
@@ -933,11 +948,14 @@
   .av.done .ring { border-color: var(--done); }
   .av.failed .ring, .av.blocked .ring { border-color: var(--fail); }
   .av.pending { opacity: .5; }
-  .av.running svg { animation: avbob 3.2s ease-in-out infinite; }
+  /* O bob vai no conjunto, não no rosto: animar só o <svg> deixava o anel
+     parado enquanto a cara subia 1.5px — que é o descentramento que se via,
+     e que nenhuma medição de caixa pega, porque as caixas estão certas. */
+  .av.running { animation: avbob 3.2s ease-in-out infinite; }
   @keyframes avspin { to { transform: rotate(360deg); } }
   @keyframes avbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
   @media (prefers-reduced-motion: reduce) {
-    .av.running .ring, .av.running svg { animation: none; }
+    .av.running, .av.running .ring { animation: none; }
   }
   /* O modelo mora no avatar: é a etiqueta de crachá de quem está trabalhando. */
   .av .badge {
@@ -1125,6 +1143,7 @@
   <div class="scroller">
   <div class="wrap">
     <div class="summary">
+      <h2 class="plan-name" id="plan-name">…</h2>
       <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
       <div class="subline" id="plan-sub"></div>
     </div>
@@ -1409,7 +1428,8 @@ let feedQuery = '', feedKind = '';
 
 function render(s) {
   snap = s;
-  $('plan-title').textContent = s.title;
+  $('plan-title').textContent = s.plan;
+  $('plan-name').textContent = s.title;
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
   $('m-cost').textContent = tokens(s.totals.outputTokens);
   $('live').className = `live ${s.endedAt ? 'off' : 'on'}`;
@@ -1786,6 +1806,7 @@ const BASE = {
   title: 'Dark Mode — Implementation Plan',
   base: { branch: 'feat/dark-mode', commit: 'a1b2c3d' },
   testCommand: 'npm test',
+  plan: 'docs/plans/2026-08-20-dark-mode.md',
   lanes: 2, maxLanes: 2, startedAt: ago(12), endedAt: null,
 };
 

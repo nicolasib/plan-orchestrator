@@ -17,6 +17,7 @@ vazia não é notícia; um agente parado há vinte minutos é.
 | Timeline (gantt) | fora: responde "valeu paralelizar", não "o que está acontecendo" |
 | `Settled lanes` + `Barriers` + rodapé por lane | uma faixa: `Out of the way` |
 | Modelo da task | no crachá do avatar, visível sem abrir nada |
+| Nome do plano em 13.5px na barra | vira o título da página; a barra passa a mostrar o caminho do arquivo |
 
 Cada linha responde de uma vez: lane, task, modelo, tempo vivo, turns, e **uma
 frase** do que o agente está fazendo — não um log.
