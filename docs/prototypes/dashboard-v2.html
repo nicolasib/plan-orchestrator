@@ -1121,7 +1121,7 @@
   .ag-log .orb::after { background: radial-gradient(circle at 50% 50%, transparent 58%, var(--surface-2) 104%); }
 
   @keyframes orbspin { to { transform: rotateY(360deg); } }
-  @keyframes orbwobble {
+  @keyframes orbdrift {
     0%   { transform: rotateY(0deg) rotateX(9deg); }
     50%  { transform: rotateY(180deg) rotateX(-9deg); }
     100% { transform: rotateY(360deg) rotateX(9deg); }
@@ -1129,7 +1129,7 @@
 
   /* Tropeçou numa chamada, mas está vivo: mais devagar e fora de eixo. */
   .orb.warn { color: var(--warn); }
-  .orb.warn .ball { animation: orbwobble 6.4s ease-in-out infinite; }
+  .orb.warn .ball { animation: orbdrift 6.4s ease-in-out infinite; }
   /* Parou: a esfera colapsa e o movimento cessa. Imobilidade é o sinal. */
   .orb.stopped { color: var(--fail); }
   .orb.stopped .ball { animation: none; transform: rotateY(24deg) scale(.68); }
