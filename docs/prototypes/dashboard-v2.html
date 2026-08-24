@@ -1049,6 +1049,15 @@
     font: 400 11.5px var(--mono); color: var(--text-3);
   }
   .ag-doing.bad .verb { color: var(--fail); }
+  /* Uma chamada que voltou com erro num agente que segue vivo não é uma
+     parada: era vermelho no cenário saudável, e vermelho que aparece quando
+     está tudo bem deixa de significar pare. */
+  .ag-doing.warn .verb { color: var(--warn); }
+  /* A linha colapsada não é mais o único lugar onde o motivo existe. */
+  .ag-doing .more {
+    flex: 0 0 auto; font-size: 11px; color: var(--accent-ink);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent);
+  }
   .ag-doing .err { color: var(--text-on-fail); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Três pontinhos: a única coisa na tela que se move quando nada muda, e a
@@ -1064,7 +1073,11 @@
   .ag-meta .clock { color: var(--text-2); }
   @media (max-width: 719px) { .ag-meta .drop { display: none; } }
 
-  .chev { flex: 0 0 auto; color: var(--text-faint); transition: transform .14s ease; }
+  /* --text-faint é o token que o sistema reserva para separadores e glifos
+     vazios: 2.64:1 no tema claro. Era a tinta da única afordância que diz
+     que a linha abre. */
+  .chev { flex: 0 0 auto; color: var(--text-3); transition: transform .14s ease; }
+  .ag-row:hover .chev { color: var(--text); }
   .ag.open > .ag-row .chev { transform: rotate(90deg); }
   @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 
@@ -1089,13 +1102,31 @@
   .ag-log { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
   .ag-log:last-child { border-bottom: 0; }
   .ag-log .feed { margin: 0; border: 0; border-radius: 0; background: transparent; max-height: 320px; }
+  /* O tingido do painel custa contraste: --text-3 é calibrado contra
+     --surface e cai a 4.42:1 aqui. Um degrau acima devolve AA sem mudar a
+     hierarquia — a coluna continua sendo a mais quieta da linha. */
+  .ag-log .feed .at, .ag-log .feed .arg, .ag-log .feed .say,
+  .ag-log .feed .took, .ag-log .log-head { color: var(--text-2); }
   .ag-log .log-head {
     display: flex; align-items: center; gap: 8px;
     padding: 6px 13px; border-bottom: 1px solid var(--line-soft);
-    font-size: 11px; color: var(--text-3);
+    font-size: 11px; color: var(--text-2);
   }
   .ag-log .log-head b { font-weight: 500; color: var(--text-2); font-family: var(--mono); font-size: 10.5px; }
   .kid .ag-log { margin-left: 0; }
+
+  /* A conta que o agente prestou ao parar. Prosa é prosa: a face de texto,
+     medida de leitura, sem caixa — a caixa monoespaçada diria "isto é um
+     literal", que é a única coisa que um relatório não é. */
+  .ag-report { border-top: 1px solid var(--line-soft); background: var(--surface-2); padding: 2px 0 14px; }
+  .ag-report h3 { margin: 14px 13px 7px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+  .ag-report .md { padding: 0 13px; max-width: 74ch; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
+  .ag-report .md > :first-child { margin-top: 0; }
+  .ag-report .md > :last-child { margin-bottom: 0; }
+  .ag-report .md p { margin: 0 0 9px; }
+  .ag-report .md strong { color: var(--text); font-weight: 600; }
+  .ag-report .md code { font-size: 11.5px; }
+  .ag-report .acts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 13px 0; }
 
   /* ------------------------------------------------------------- a fila */
 
@@ -1436,6 +1467,149 @@ function humanize(a) {
   }
 }
 
+
+// ---- herdado do ui.html sem alteração: o CSS de `.md` e `.cp` já veio junto,
+// e eram as duas superfícies que o protótipo tinha jogado fora ----
+
+const copyIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <rect x="3.7" y="3.7" width="6.8" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path d="M8.3 1.6 H3.2 A1.6 1.6 0 0 0 1.6 3.2 V8.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>`;
+
+const okIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M2.4 6.3 L4.7 8.6 L9.6 3.5" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
+
+const MD_FENCE = '\u0000';
+const MD_CODE = '\u0001';
+
+/** Runs on already-escaped text. Code spans are held out first: a backtick
+ *  span is literal, and `a**b` must not come back bold. */
+function mdInline(t) {
+  const held = [];
+  let out = String(t).replace(/`([^`]+)`/g, (_, c) => { held.push(c); return `${MD_CODE}${held.length - 1}${MD_CODE}`; });
+  out = out
+    // Only http(s). The scheme survives escaping intact, so this test is on
+    // the real thing, and anything else stays the text it already was.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noreferrer noopener">${label}</a>`)
+    .replace(/\*\*(\S[^*]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/~~(\S[^~]*?)~~/g, '<del>$1</del>')
+    // A lone marker needs a non-word neighbour on both sides, or `snake_case`
+    // and `a * b` become emphasis in the middle of a path or an expression.
+    .replace(/(^|[^*\w])\*(\S[^*]*?)\*(?![*\w])/g, '$1<em>$2</em>')
+    .replace(/(^|[^_\w])_(\S[^_]*?)_(?![_\w])/g, '$1<em>$2</em>');
+  return out.replace(new RegExp(MD_CODE + '(\\d+)' + MD_CODE, 'g'), (_, i) => `<code>${held[+i]}</code>`);
+}
+
+function md(src) {
+  const raw = String(src == null ? '' : src).replace(/\r\n?/g, '\n').trim();
+  if (!raw) return '';
+  const fenced = [];
+  const lines = esc(raw)
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, (_, body) => { fenced.push(body.replace(/\n+$/, '')); return `${MD_FENCE}${fenced.length - 1}${MD_FENCE}`; })
+    .split('\n');
+
+  const out = [];
+  let para = [];
+  let list = null;
+  let quote = [];
+  let table = null;
+  const closePara = () => { if (para.length) { out.push(`<p>${mdInline(para.join('\n')).replace(/\n/g, '<br>')}</p>`); para = []; } };
+  const closeList = () => {
+    if (!list) return;
+    out.push(`<${list.tag}${list.tick ? ' class="tick"' : ''}>` + list.items.map((i) => (i.box == null
+      ? `<li>${mdInline(i.text)}</li>`
+      : `<li class="${i.box ? 'on' : ''}">${checkbox(i.box)}<span>${mdInline(i.text)}</span></li>`)).join('') + `</${list.tag}>`);
+    list = null;
+  };
+  const closeQuote = () => { if (quote.length) { out.push(`<blockquote>${mdInline(quote.join(' '))}</blockquote>`); quote = []; } };
+  const RULE = /^\|[\s:|-]+\|$/;
+  const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => mdInline(c.trim()));
+  const closeTable = () => {
+    if (!table) return;
+    const rows = table.slice();
+    // A run of pipes is only a table if the second line is the rule. Without
+    // it this is prose that happens to contain a pipe, and a `<table>` around
+    // it would be a worse lie than the run-on paragraph it replaces.
+    const head = rows.length > 1 && RULE.test(rows[1].trim()) ? (rows.splice(1, 1), rows.shift()) : null;
+    const body = rows.filter((r) => !RULE.test(r.trim()));
+    out.push('<div class="md-table"><table>'
+      + (head ? `<thead><tr>${cells(head).map((c) => `<th>${c}</th>`).join('')}</tr></thead>` : '')
+      + `<tbody>${body.map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    table = null;
+  };
+  const close = () => { closePara(); closeList(); closeQuote(); closeTable(); };
+  const item = (tag, text) => {
+    closePara(); closeQuote(); closeTable();
+    if (!list || list.tag !== tag) closeList(), list = { tag, items: [], tick: false };
+    const box = text.match(/^\[([ xX])\]\s+(.*)$/);
+    if (box) { list.tick = true; list.items.push({ box: box[1] !== ' ', text: box[2] }); }
+    else list.items.push({ box: null, text });
+  };
+
+  for (const line of lines) {
+    const fence = line.match(new RegExp('^' + MD_FENCE + '(\\d+)' + MD_FENCE + '$'));
+    if (fence) { close(); out.push(`<pre><code>${fenced[+fence[1]]}</code></pre>`); continue; }
+    if (!line.trim()) { close(); continue; }
+    let m;
+    // A panel column is not a document: an agent's `#` is a run of prose, not
+    // a page title, so every level lands on one of two sizes.
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { close(); out.push(`<h${m[1].length <= 2 ? 4 : 5}>${mdInline(m[2])}</h${m[1].length <= 2 ? 4 : 5}>`); continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { close(); out.push('<hr>'); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) { closePara(); closeList(); closeQuote(); (table || (table = [])).push(line.trim()); continue; }
+    if ((m = line.match(/^\s*&gt;\s?(.*)$/))) { closePara(); closeList(); closeTable(); quote.push(m[1]); continue; }
+    if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { item('ul', m[1]); continue; }
+    if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { item('ol', m[1]); continue; }
+    closeList(); closeQuote(); closeTable(); para.push(line);
+  }
+  close();
+  return out.join('');
+}
+
+function copyBtnHtml(text, what, { label = '', cls = 'cp', title = '' } = {}) {
+  const wide = cls === 'cp' && label ? ' wide' : '';
+  return `<button class="${cls}${wide}" data-copy="${esc(text)}" data-what="${esc(what)}" data-label="${esc(label)}"`
+    + ` aria-label="Copy ${esc(what)}" title="${esc(title || `Copy ${what}`)}">`
+    + copyIcon() + (label ? `<span>${esc(label)}</span>` : '') + '</button>';
+}
+
+/**
+ * `navigator.clipboard` needs a secure context. Loopback is one; the address
+ * `--host` hands another machine is not — and that is exactly the reader who
+ * cannot retype a session id by hand. The textarea is the fallback for them.
+ */
+async function copyText(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+/** `done` is null at rest, true after a copy, false after a refusal. */
+function paintCopyBtn(btn, done) {
+  btn.classList.toggle('ok', done === true);
+  btn.classList.toggle('bad', done === false);
+  const label = btn.dataset.label;
+  const word = done === true ? 'Copied' : done === false ? 'Copy failed' : label;
+  btn.innerHTML = (done === true ? okIcon() : copyIcon()) + (label ? `<span>${esc(word)}</span>` : '');
+  btn.setAttribute('aria-label', done === true ? `${btn.dataset.what} copied` : `Copy ${btn.dataset.what}`);
+}
+
+async function handleCopy(btn) {
+  const ok = await copyText(btn.dataset.copy || '');
+  paintCopyBtn(btn, ok);
+  clearTimeout(btn.restore);
+  btn.restore = setTimeout(() => paintCopyBtn(btn, null), 1400);
+}
+
 // ------------------------------------------------------------- render
 
 let snap = null;
@@ -1504,7 +1678,9 @@ function renderStages(s) {
 
 function renderAlerts(s) {
   paint($('alerts'), (s.alerts || []).map((al) => `<div class="alert ${al.bad ? 'bad' : ''}">
-      ${alertIcon(al.bad)}<div><b>${esc(al.title)}</b> ${esc(al.text)}</div></div>`).join(''));
+      ${alertIcon(al.bad)}<div><b>${esc(al.title)}</b> ${esc(al.text)}</div>
+      ${al.copy ? `<div class="acts">${copyBtnHtml(al.copy, 'the resume command', { label: 'Copy resume' })}</div>` : ''}
+    </div>`).join(''));
 }
 
 // ---------------------------------------------------------- a tripulação
@@ -1536,9 +1712,9 @@ function agentHtml(a, kid = false) {
   const bad = a.status === 'failed' || a.status === 'blocked';
 
   const line = bad && a.error
-    ? `<div class="ag-doing bad"><span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err" title="${esc(a.error)}">${esc(dedupeStatus(a.status, gist(a.error, 130)))}</span></div>`
+    ? `<div class="ag-doing bad"><span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
     : doing
-      ? `<div class="ag-doing${doing.ok === false ? ' bad' : ''}">
+      ? `<div class="ag-doing${doing.ok === false ? ' warn' : ''}">
            ${live ? '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}
            <span class="verb">${esc(doing.verb)}</span>
            <span class="obj" title="${esc(doing.obj)}">${esc(doing.obj)}</span>
@@ -1555,6 +1731,17 @@ function agentHtml(a, kid = false) {
     ? `<div class="kids">${a.children.map((k) => `<div class="kid ag ${esc(k.status)}${openIds.has(k.id) ? ' open' : ''}">${agentHtml(k, true)}</div>`).join('')}</div>`
     : '';
 
+  // O relatório de quem parou vem antes do log: é a resposta à pergunta que
+  // fez o leitor clicar. Cortado em 130 caracteres no cabeçalho, ele existia
+  // só num `title` nativo — que ninguém lê num segundo monitor.
+  const report = bad && a.error
+    ? `<div class="ag-report"><h3>${esc(a.status === 'blocked' ? 'Why it stopped' : 'Error')}</h3>
+         <div class="md">${md(a.error)}</div>
+         ${a.resume ? `<div class="acts">${copyBtnHtml(a.resume, 'the resume command', { label: 'Copy resume' })}
+           ${a.branch ? copyBtnHtml(a.branch, 'the lane branch', { label: a.branch, cls: 'cp' }) : ''}</div>` : ''}
+       </div>`
+    : '';
+
   const log = open
     ? `<div class="ag-log">
          <div class="log-head">${avatarHtml(a, 16)}<b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}</div>
@@ -1562,6 +1749,7 @@ function agentHtml(a, kid = false) {
            || '<div class="empty">no events yet</div>'}</div>
        </div>`
     : '';
+  const drawer = open ? report + log : '';
 
   const row = `<button class="ag-row" data-agent="${esc(a.id)}" aria-expanded="${open}">
       ${avatarHtml(a, kid ? 22 : 28)}
@@ -1577,7 +1765,7 @@ function agentHtml(a, kid = false) {
     </button>`;
 
   // Um subagente já vem embrulhado pelo pai; a tarefa embrulha a si mesma.
-  return kid ? row + log : `<div class="ag ${esc(a.status)}${open ? ' open' : ''}" data-card="${esc(a.id)}">${row}${log}${kids}</div>`;
+  return kid ? row + drawer : `<div class="ag ${esc(a.status)}${open ? ' open' : ''}" data-card="${esc(a.id)}">${row}${drawer}${kids}</div>`;
 }
 
 /** Tira do relato a palavra que a etiqueta ao lado já carrega. */
@@ -1656,6 +1844,9 @@ function renderFeed(s) {
 // ---------------------------------------------------------- interação
 
 document.addEventListener('click', (e) => {
+  const cp = e.target.closest('[data-copy]');
+  if (cp) { handleCopy(cp); return; }
+
   const row = e.target.closest('.ag-row');
   if (row) {
     const id = row.dataset.agent;
@@ -1854,13 +2045,15 @@ const SCENARIOS = {
     crew[1] = agent({
       id: 'b-t2', tag: 'B · T2', title: 'Toggle in the header',
       status: 'blocked', model: 'opus', startedAt: ago(4, 20), endedAt: ago(0, 50), turns: 12, outputTokens: 1900,
-      error: '**Blocked.** The toggle needs `useTheme` from Task 1, which has not committed the hook yet. Waiting would deadlock the lane, so I stopped instead of guessing at the interface.',
+      error: '**Blocked.** The toggle needs `useTheme` from Task 1, which has not committed the hook yet.\n\nWaiting would deadlock the lane, so I stopped instead of guessing at the interface. Task 1 declares `Produces: useTheme()` and is still running its own reviewer, so the hook should land on its next commit.\n\n**To carry on:** let T1 settle, then resume — this lane picks up T2 from its own worktree, no rebase needed.',
+      resume: 'plo resume --plan docs/plans/2026-08-20-dark-mode.md',
+      branch: 'feat/dark-mode-lane-b',
       activity: own(T2_LOG),
       children: [
         agent({
           id: 'b-t2-s1', tag: 'implementer', title: 'red test for the toggle component',
           status: 'failed', model: 'sonnet', startedAt: ago(2, 30), endedAt: ago(1, 20), turns: 6, outputTokens: 800,
-          error: 'ThemeToggle is not exported from src/components',
+          error: '**Failed.** `ThemeToggle` is not exported from `src/components` — the red test cannot even import the component it is meant to fail against.',
           activity: subLog(T2_LOG, 3, 5),
         }),
       ],
@@ -1869,7 +2062,7 @@ const SCENARIOS = {
       ...BASE,
       totals: { done: 2, total: 8, outputTokens: 18400 },
       stages: STAGES(['running', '2 of 6 tasks'], ['pending', '2 lanes'], ['pending', '0/3 tasks'], ['pending'], ['pending']),
-      alerts: [{ bad: true, title: 'Lane B stopped.', text: 'T2 is blocked on an interface Task 1 has not produced. The lane will not pick up T5 until it settles.' }],
+      alerts: [{ bad: true, title: 'Lane B stopped.', text: 'T2 is blocked on an interface Task 1 has not produced. The lane will not pick up T5 until it settles.', copy: 'plo resume --plan docs/plans/2026-08-20-dark-mode.md' }],
       crew, queue: QUEUE, settled: SETTLED, feed: buildFeed(crew),
     };
   },
