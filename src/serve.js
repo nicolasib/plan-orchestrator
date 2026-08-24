@@ -49,7 +49,15 @@ function safeSnapshot(planPath, opts) {
   }
 }
 
-function createServer({ planPath, activityLimit = 8, pollMs = POLL_MS } = {}) {
+/**
+ * `activityLimit` was 8 because a card showed eight rows and nothing on the
+ * page wanted more. It is now an agent's log drawer, opened on purpose by a
+ * reader who wants to see what it has been doing — eight calls is about a
+ * minute of work, which is not enough to answer that. It is per task and only
+ * for tasks that are running or stopped, so the cost is bounded by how many
+ * agents are alive, not by how long the plan is.
+ */
+function createServer({ planPath, activityLimit = 16, pollMs = POLL_MS } = {}) {
   const clients = new Set();
   let timer = null;
   let lastPayload = null;

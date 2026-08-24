@@ -102,6 +102,13 @@ function toolTarget(name, input) {
   }
 }
 
+/** The `Task` call's `subagent_type`, and nothing for any other tool. */
+function subagentType(name, input) {
+  if (name !== 'Task' && name !== 'Agent') return null;
+  if (!input || typeof input !== 'object') return null;
+  return typeof input.subagent_type === 'string' && input.subagent_type ? input.subagent_type : null;
+}
+
 /** tool_result content arrives as a string or as content blocks. */
 function resultPreview(content) {
   if (typeof content === 'string') return oneLine(content, 140);
@@ -129,6 +136,10 @@ function emptyDigest() {
     lastText: null,
     lastActivityAt: null,
     activity: [],
+    /** Per-subagent totals, keyed by the `Task` call that started it. The
+     *  counters above deliberately skip subagent messages; this is where
+     *  those messages land instead of being dropped on the floor. */
+    subs: {},
     truncated: false,
   };
 }
@@ -179,7 +190,12 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
     if (!ev || typeof ev !== 'object') continue;
 
     const at = typeof ev.timestamp === 'string' ? ev.timestamp : null;
-    const sub = Boolean(ev.parent_tool_use_id);
+    // The parent id, not merely its presence. Reduced to a boolean it can
+    // say "a subagent did this" and never which one — and which one is the
+    // whole tree.
+    const parentId = typeof ev.parent_tool_use_id === 'string' && ev.parent_tool_use_id
+      ? ev.parent_tool_use_id : null;
+    const sub = Boolean(parentId);
 
     if (ev.type === 'system' && ev.subtype === 'init') {
       d.sessionId = ev.session_id || d.sessionId;
@@ -193,24 +209,38 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
     }
 
     if (ev.type === 'assistant' && ev.message) {
-      if (!sub) d.turns += 1;
       const usage = ev.message.usage || {};
-      if (typeof usage.output_tokens === 'number') d.outputTokens += usage.output_tokens;
-      d.model = ev.message.model || d.model;
+      if (sub) {
+        // A subagent runs on its own model and spends its own turns. Folded
+        // into the task's they report one agent doing the work of three, and
+        // the task's model flips to whatever the last subagent used.
+        const acc = d.subs[parentId] || (d.subs[parentId] = { turns: 0, outputTokens: 0, model: null });
+        acc.turns += 1;
+        if (typeof usage.output_tokens === 'number') acc.outputTokens += usage.output_tokens;
+        acc.model = ev.message.model || acc.model;
+      } else {
+        d.turns += 1;
+        if (typeof usage.output_tokens === 'number') d.outputTokens += usage.output_tokens;
+        d.model = ev.message.model || d.model;
+      }
       for (const block of ev.message.content || []) {
         if (!block || typeof block !== 'object') continue;
         if (block.type === 'tool_use') {
           d.toolCount += 1;
+          const agentType = subagentType(block.name, block.input);
           const entry = push({
-            kind: 'tool', at, sub, id: block.id || null,
+            kind: 'tool', at, sub, parentId, id: block.id || null,
             name: block.name || 'tool', target: toolTarget(block.name, block.input),
+            // The description says what the subagent was asked to do; this
+            // says who it is. A tree needs both.
+            ...(agentType ? { agentType } : {}),
             ok: null, preview: null,
           });
           if (block.id) pending.set(block.id, entry);
         } else if (block.type === 'text' && block.text && block.text.trim()) {
           const text2 = oneLine(block.text, TEXT_MAX);
           if (!sub) d.lastText = text2;
-          push({ kind: 'text', at, sub, text: text2 });
+          push({ kind: 'text', at, sub, parentId, text: text2 });
         }
       }
       stamp(at);
@@ -230,7 +260,7 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
           entry.doneAt = at;
           pending.delete(block.tool_use_id);
         } else {
-          push({ kind: 'tool', at, sub, name: 'result', target: '', ok: !block.is_error, preview });
+          push({ kind: 'tool', at, sub, parentId, name: 'result', target: '', ok: !block.is_error, preview });
         }
       }
       stamp(at);
@@ -289,7 +319,74 @@ function readTaskLog(logFile, opts = {}) {
   return digest;
 }
 
+/**
+ * The subagents a task dispatched, as nodes rather than as a prefix.
+ *
+ * A `Task` call is a subagent's whole life: the call is its birth, the
+ * matching `tool_result` its death, and every event carrying its
+ * `parent_tool_use_id` is what it did in between. All three were already in
+ * the log and two of them were being thrown away — the parent id collapsed to
+ * a boolean, and the tree to a `↳` in front of a tool name.
+ *
+ * A dispatch whose call has already scrolled out of the tail still gets a
+ * node, built from its events alone. Dropping it would hide a subagent that
+ * is running right now for the sole reason that it started a while ago.
+ */
+function buildChildren(activity, subs = {}, { activityLimit = 0 } = {}) {
+  const byId = new Map();
+  const order = [];
+  const node = (id) => {
+    let n = byId.get(id);
+    if (!n) {
+      n = {
+        id, agentType: null, title: '', status: state.STATUS.RUNNING,
+        startedAt: null, endedAt: null, model: null, turns: 0, outputTokens: null,
+        activity: [],
+      };
+      byId.set(id, n);
+      order.push(n);
+    }
+    return n;
+  };
+
+  for (const a of activity) {
+    if (a.kind !== 'tool' || !a.id) continue;
+    if (a.name !== 'Task' && a.name !== 'Agent') continue;
+    const n = node(a.id);
+    n.agentType = a.agentType || null;
+    n.title = a.target || '';
+    n.startedAt = a.at || null;
+    n.endedAt = a.doneAt || null;
+    // A dispatch with no result yet is a subagent still working. `ok` is only
+    // set when the `tool_result` lands, which is exactly when it stops.
+    n.status = a.ok == null ? state.STATUS.RUNNING
+      : a.ok ? state.STATUS.DONE : state.STATUS.FAILED;
+  }
+
+  for (const a of activity) {
+    if (!a.parentId) continue;
+    // `sub` is stripped: inside its own row every call a subagent made is its
+    // own, and the arrow would be pointing at nothing.
+    node(a.parentId).activity.push({ ...a, sub: false });
+  }
+
+  for (const n of order) {
+    const acc = subs[n.id];
+    if (acc) {
+      n.turns = acc.turns || 0;
+      n.outputTokens = typeof acc.outputTokens === 'number' && acc.outputTokens > 0 ? acc.outputTokens : null;
+      n.model = acc.model || null;
+    }
+    if (!n.startedAt && n.activity.length) n.startedAt = n.activity[0].at || null;
+    if (activityLimit) n.activity = n.activity.slice(-activityLimit);
+  }
+  return order;
+}
+
 const laneLabel = (id) => String(id).toUpperCase();
+
+/** Stopped, but not settled the way `done` is: the run needs a human. */
+const STOPPED = new Set([state.STATUS.FAILED, state.STATUS.BLOCKED, state.STATUS.INTERRUPTED]);
 
 function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true } = {}) {
   const rec = st.tasks[String(n)] || {};
@@ -305,6 +402,11 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
   // what is happening inside a task that is still running.
   const live = rec.status === state.STATUS.RUNNING ? digest : null;
   const lastTool = live && [...live.activity].reverse().find((a) => a.kind === 'tool');
+  // What it was doing outlives it. A task that failed eleven minutes ago is
+  // the one row on the page anybody is going to open, and its last calls are
+  // the answer to why — the same reason its report is kept. A task that is
+  // simply `done` keeps nothing: it collapses to a chip and nobody opens it.
+  const shown = live || (STOPPED.has(rec.status) ? digest : null);
 
   const view = {
     n: Number(n),
@@ -334,12 +436,18 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     sessionId: rec.sessionId || null,
     logFile: rec.logFile || null,
     lastActivityAt: digest ? digest.lastActivityAt : null,
+    // Which model is doing the work, in the list and not only in the record.
+    // It came off the `init` event all along and stopped at `taskDetail`.
+    model: digest ? digest.model : null,
     lastTool: lastTool ? { name: lastTool.name, target: lastTool.target, ok: lastTool.ok } : null,
     lastText: live ? live.lastText : null,
     // Not gated on `live`: the run this most needs to report is the one that
     // already died of a usage limit, and a dead task is by definition not live.
     rateLimit: digest ? digest.rateLimit : null,
-    activity: live ? live.activity.slice(-activityLimit) : [],
+    // The task's own calls. What a subagent did belongs to the subagent, and
+    // hangs off `children` instead of being flattened into its parent's tail.
+    activity: shown ? shown.activity.filter((a) => !a.sub).slice(-activityLimit) : [],
+    children: shown ? buildChildren(shown.activity, shown.subs, { activityLimit }) : [],
   };
 
   // Scaffolding for the run feed, not payload: `snapshot` merges these and
@@ -645,4 +753,4 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, buildFeed, buildStages, buildTimeline, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, buildChildren, buildStages, buildTimeline, digestLog, readTaskLog, tailFile, toolTarget, shortPath };

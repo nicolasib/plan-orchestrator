@@ -182,6 +182,82 @@ test('digestLog attributes subagent events without inflating the turn count', ()
   assert.equal(sub[0].name, 'Grep');
 });
 
+/** A task that dispatches one subagent, which works and comes back. */
+const DISPATCH_LOG = [
+  '\n=== 2026-08-19T12:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+  ev({ type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude-opus-5' }),
+  assistantTool('Task', { description: 'review the token diff', subagent_type: 'code-reviewer' }, 'tu_task', '2026-08-19T12:00:05.000Z'),
+  ev({
+    type: 'assistant',
+    parent_tool_use_id: 'tu_task',
+    timestamp: '2026-08-19T12:00:08.000Z',
+    message: { model: 'claude-sonnet-5', role: 'assistant', content: [{ type: 'tool_use', id: 'tu_k1', name: 'Grep', input: { pattern: 'useTheme' } }], usage: { output_tokens: 40 } },
+  }),
+  toolResult('tu_k1', 'three hits', false, '2026-08-19T12:00:09.000Z'),
+  toolResult('tu_task', 'looks clean', false, '2026-08-19T12:00:30.000Z'),
+].join('');
+
+test('a Task call and everything under it becomes one subagent node', () => {
+  const d = monitor.digestLog(DISPATCH_LOG);
+  const kids = monitor.buildChildren(d.activity, d.subs);
+  assert.equal(kids.length, 1);
+  const [k] = kids;
+  assert.equal(k.id, 'tu_task');
+  assert.equal(k.agentType, 'code-reviewer', 'the description says what it was asked; this says who it is');
+  assert.equal(k.title, 'review the token diff');
+  assert.equal(k.status, state.STATUS.DONE, 'the tool_result is when a subagent stops');
+  assert.equal(k.endedAt, '2026-08-19T12:00:30.000Z');
+  assert.equal(k.model, 'claude-sonnet-5', 'a subagent runs on its own model');
+  assert.equal(k.turns, 1);
+  assert.equal(k.outputTokens, 40);
+  assert.equal(k.activity.length, 1);
+  assert.equal(k.activity[0].name, 'Grep');
+  assert.equal(k.activity[0].sub, false, 'inside its own row, its calls are its own — the arrow points at nothing');
+  assert.equal(d.model, 'claude-opus-5', "and the task keeps the model it started on, not its subagent's");
+});
+
+test('a subagent with no result yet is one that is still working', () => {
+  const open = DISPATCH_LOG.replace(toolResult('tu_task', 'looks clean', false, '2026-08-19T12:00:30.000Z'), '');
+  const d = monitor.digestLog(open);
+  const [k] = monitor.buildChildren(d.activity, d.subs);
+  assert.equal(k.status, state.STATUS.RUNNING);
+  assert.equal(k.endedAt, null);
+});
+
+test('a dispatch that scrolled out of the tail still gets its node', () => {
+  const d = monitor.digestLog(DISPATCH_LOG);
+  // Only the subagent's own events survive the window; the `Task` call that
+  // named it does not. Dropping the node would hide a live subagent for the
+  // sole reason that it started a while ago.
+  const orphaned = d.activity.filter((a) => a.parentId);
+  const [k] = monitor.buildChildren(orphaned, {});
+  assert.equal(k.id, 'tu_task');
+  assert.equal(k.agentType, null);
+  assert.equal(k.startedAt, '2026-08-19T12:00:08.000Z', 'it starts at the first thing it is known to have done');
+  assert.equal(k.activity.length, 1);
+});
+
+test('the task keeps its own calls and hands the rest to its children', () => {
+  const dir = tmpdir();
+  const planPath = path.join(dir, 'auth-refactor.md');
+  fs.writeFileSync(planPath, PLAN);
+  const st = state.create({
+    planPath, planContents: PLAN, repoRoot: dir, baseBranch: 'feature/auth', baseCommit: 'abc1234',
+    maxLanes: 1, lanes: [{ id: 'A', tasks: [1, 2], weight: 4 }], barriers: [3], testCommand: 'npm test',
+  });
+  const logFile = path.join(dir, '.plo-logs', 'task-2.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, DISPATCH_LOG);
+  st.tasks['2'] = { ...st.tasks['2'], status: state.STATUS.RUNNING, startedAt: '2026-08-19T12:00:00.000Z', logFile };
+  state.save(planPath, st);
+
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.model, 'claude-opus-5', 'the list says which model is doing the work, not only the record');
+  assert.equal(t2.children.length, 1);
+  assert.equal(t2.activity.some((a) => a.sub), false, "a subagent's calls hang off the subagent");
+  assert.equal(t2.activity.some((a) => a.name === 'Task'), true, 'the dispatch itself is the task\u2019s own doing');
+});
+
 test('toolTarget names the thing each tool points at', () => {
   assert.equal(monitor.toolTarget('Read', { file_path: 'a/b/c/d.js' }), '…/c/d.js');
   assert.equal(monitor.toolTarget('Bash', { command: 'npm  test\n--watch' }), 'npm test --watch');
@@ -270,7 +346,25 @@ test('a rate limit on a task that already died is still reported', () => {
 
   const snap = monitor.snapshot(planPath);
   assert.equal(snap.rateLimit.status, 'rejected', 'the limit that killed a lane is exactly the one worth showing');
-  assert.deepEqual(snap.lanes[0].tasks[1].activity, [], 'a settled task still shows no live feed');
+  assert.ok(
+    snap.lanes[0].tasks[1].activity.length > 0,
+    'what a task was doing when it died is the answer to why it died, so it outlives it',
+  );
+});
+
+test('a task that finished cleanly carries no tail, and one that stopped does', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  state.save(planPath, st);
+  assert.deepEqual(
+    monitor.snapshot(planPath).lanes[0].tasks[1].activity, [],
+    'a done task collapses to a chip nobody opens — sending its tail is weight for no reader',
+  );
+
+  st.tasks['2'].status = state.STATUS.BLOCKED;
+  state.save(planPath, st);
+  assert.ok(monitor.snapshot(planPath).lanes[0].tasks[1].activity.length > 0);
 });
 
 test('snapshot hoists a non-allowed rate limit to the top level', () => {

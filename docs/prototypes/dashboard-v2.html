@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>plo — run monitor</title>
+<title>plo — dashboard v2 (protótipo)</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23dbfc03'/%3E%3Cpath d='M8 2.7 L13.1 14.5 L8 11.4 L2.9 14.5 Z' fill='%23141705'/%3E%3C/svg%3E" />
 <style>
   /*
@@ -321,6 +321,49 @@
      of ARIA a screen reader is entitled to ignore. */
   .alert .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; align-self: center; flex: 0 0 auto; }
 
+
+  /* --------------------------------------------------------------- board */
+  .board {
+    /* 1fr, not a 460px cap: during integration a single card is the only
+       thing alive on the page, and it should own the width instead of
+       floating in half a screen of nothing. A wide card is a wide feed. */
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+    gap: 0; align-items: stretch;
+  }
+  .board:empty { display: none; }
+  /* Lanes running side by side are columns of one board, divided the way a
+     board divides columns. `align-items: stretch` is load-bearing: on `start`
+     the shorter lane's rule stopped where its feed did, and two cards of
+     different heights read as one card and one orphan.
+
+     The rules are shadows, not borders, because the board changes axis: three
+     lanes are columns at 1728 and a stack at 900, and `+ .card { border-left }`
+     draws nothing when they stack. Every card carries a rule above it and one
+     to its left; the left one on a card that begins a row lands one pixel
+     outside the band, where the frame clips it. One declaration, both axes,
+     and no spurious rule on the first card of a wrapped row. */
+  .card {
+    min-width: 0; background: var(--surface); overflow: hidden;
+    box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line);
+  }
+  /* The row of shadows above the first row of cards is the band's own rule. */
+  .board { border-top: 0; }
+  .card > .head { display: flex; align-items: center; gap: 8px; padding: 11px var(--pad); border-bottom: 1px solid var(--line-soft); }
+  .card .kind { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+  .card .kind.barrier { color: var(--accent-ink); }
+  .card .branch {
+    font-family: var(--mono); font-size: 11px; color: var(--text-3);
+    background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px;
+    padding: 1px 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* A branch name is a string you retype into a terminal, so it copies. It
+     already looked like a chip; what changes is the cursor and the hover. */
+  button.branch { margin: 0; text-align: left; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  button.branch:hover { background: var(--hover); color: var(--text); border-color: var(--line); }
+  button.branch svg { flex: 0 0 auto; opacity: .7; }
+  button.branch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px var(--pad) 2px; }
   .chip {
     all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
     min-height: 24px; padding: 2px 8px 2px 6px; border-radius: var(--radius-sm);
@@ -330,7 +373,18 @@
   }
   /* The 6px left inset seats a glyph. Without one the number sat off-centre
      in its own chip. */
+  .chip.done { padding-left: 8px; }
   .chip:hover { background: var(--hover); color: var(--text); border-color: var(--text-faint); }
+  .chip.running { color: var(--text); border-color: color-mix(in srgb, var(--run) 42%, var(--line)); background: var(--run-soft); }
+  .chip.failed, .chip.blocked { color: var(--text); border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); background: var(--fail-soft); }
+
+  .now { padding: 10px var(--pad) 12px; display: grid; gap: 6px; min-width: 0; }
+  .now .title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; }
+  .now .title .tno { color: var(--text-2); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .now .title .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .now .meta { display: flex; gap: 10px; flex-wrap: wrap; min-width: 0; font-size: 11.5px; color: var(--text-3); }
+  .now .meta .clock { font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .now .meta .tool { font-family: var(--mono); font-size: 11px; }
 
   /* time · [who] · result · tool · target · duration.
      A log viewer's columns, for the same reason: the slow call is a glance
@@ -379,7 +433,9 @@
   /* --text-faint is for separators and empty glyphs; a timestamp is a fact
      the reader reads, so it takes the lowest token that still clears AA. */
   .feed .at { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+  .feed .who { font-size: 10.5px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .feed .who > span { overflow: hidden; text-overflow: ellipsis; }
+  .av.plain { display: inline-flex; flex: 0 0 auto; }
   .feed .who.barrier { color: var(--accent-ink); }
   .feed .ico { display: grid; place-items: center; width: 12px; }
   .feed .name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
@@ -417,6 +473,12 @@
   .feed.wrap .name, .feed.wrap .arg, .feed.wrap .say { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
   .feed.wrap .at, .feed.wrap .who, .feed.wrap .ico, .feed.wrap .took { padding-top: 1px; }
 
+  .card > .foot {
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 9px var(--pad);
+    border-top: 1px solid var(--line-soft); background: var(--surface-2);
+    font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+
   /* ------------------------------------------------------------ sections */
   section { min-width: 0; }
   h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -.01em; }
@@ -429,19 +491,70 @@
   /* Columns, not two clumps pinned to the far edges. Comparing $7.87 against
      $4.44 used to mean sweeping 750px of empty row; in a column it is one
      glance down. --num keeps the three numeric tracks the same width. */
+  .row, .list.table .grid {
+    --num: 76px;
+    --lane-cols: minmax(0, auto) minmax(0, auto) minmax(0, 1fr) var(--num) var(--num) var(--num);
+  }
+  .row {
+    display: grid; align-items: center; gap: 12px; min-height: 36px; padding: 5px var(--pad);
+    border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
+    transition: background .12s ease;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row > * { min-width: 0; }
+  .row.task { grid-template-columns: 15px 30px minmax(0, 1fr) minmax(0, auto); }
+  .row.lane { grid-template-columns: var(--lane-cols); }
+  .row.head {
+    min-height: 27px; border-bottom-color: var(--line); background: var(--surface-2);
+    font-size: 10.5px; font-weight: 600; letter-spacing: .045em; text-transform: uppercase; color: var(--text-2);
+  }
+  .row[data-task] { cursor: pointer; }
+  .row[data-task]:hover { background: var(--hover); }
+  .row .ic, .row .cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .row .tag { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .name, .row .mono, .row .err, .row .right {
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .mono { color: var(--text-3); }
+  .row .err { color: var(--fail); flex: 0 1 auto; }
+  .row .num {
+    text-align: right; white-space: nowrap; color: var(--text-3);
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+  }
+  .row .num b { font-weight: 500; color: var(--text-2); }
+  .row .right { justify-self: end; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .row .chips { padding: 0; }
   /* The number that only existed in the topbar now closes the column that
      composes it. It sums the rows above it — never the whole run, which would
      be a total that does not add up to the table it sits under. */
+  .row.lane.foot { border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface-2); }
+  .row.foot .tag { color: var(--text-2); font-weight: 600; }
+  .row.foot .num b { color: var(--text); font-weight: 600; }
+  .row.foot .mono { color: var(--text-2); }
   /* The same control as the card's branch chip, without the chip: inside a
      table row a bordered box would read as a second table. */
+  .cp-row {
+    all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    flex-direction: row-reverse; justify-content: flex-end;
+    min-width: 0; max-width: 100%; padding: 2px 6px; margin-left: -6px; border-radius: 5px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-3);
+  }
+  .cp-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-row:hover { background: var(--hover); color: var(--text); }
+  .cp-row.ok { color: var(--done); }
+  .cp-row.bad { color: var(--fail); }
+  .cp-row svg { flex: 0 0 auto; opacity: .6; }
   /* An `auto` track only agrees with itself: every row being its own grid is
      why the header sat 30px off its own column. One grid for the table, rows
      borrowing its tracks via subgrid — and the row still draws its own box,
      which `display: contents` would have thrown away along with the hover. */
+  .list.table { overflow: auto; }
+  .list.table .grid { display: grid; grid-template-columns: var(--lane-cols); column-gap: 12px; padding: 0 var(--pad); min-width: 600px; }
   @supports (grid-template-columns: subgrid) {
     /* The row keeps its own padding so its background and rule still reach the
        card edges — but a subgrid's padding eats the tracks it inherits (a 15px
        icon column became 1px). The negative margin gives the padding back. */
+    .list.table .row.lane { grid-column: 1 / -1; grid-template-columns: subgrid; margin-inline: calc(-1 * var(--pad)); }
   }
 
   /* The record only ever renders inside the rail, so it takes the rail's
@@ -459,10 +572,104 @@
   .pill.bad { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 38%, var(--line)); background: var(--fail-soft); }
   .pill.live { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: var(--accent-soft); }
 
+
   .empty-state { padding: 56px 0; text-align: center; color: var(--text-2); font-size: 13px; }
+
+  /* ---------------------------------------------------------- timeline */
+  /* One band per lane on a shared clock.
+     `Lane plan` drew `T1 → T2 → T3`: the order the scheduler chose. It could
+     not say that A and B overlapped for eleven minutes, that four minutes
+     passed between the last lane and the barrier with nothing running, or
+     that the serial barrier cost more than the parallel part saved. Those
+     answers are positions on a time axis, and an arrow has no axis. */
+  .tl {
+    --tl-cols: max-content minmax(0, 1fr) max-content;
+    display: grid; grid-template-columns: var(--tl-cols); align-content: start;
+    column-gap: 10px; padding: 2px var(--pad) 14px;
+    background: transparent;
+  }
+  /* Same reason the lane table and the feed use it: an `auto` track only ever
+     agrees with itself, so per-row grids would put every lane letter in a
+     different place. */
+  .tl-row {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: var(--tl-cols); column-gap: 10px; align-items: center;
+    min-height: 26px;
+  }
+  @supports (grid-template-columns: subgrid) { .tl-row { grid-template-columns: subgrid; } }
+  .tl-lane {
+    font-size: 11.5px; font-weight: 600; color: var(--text-2); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .tl-lane.barrier { font-weight: 500; color: var(--accent-ink); }
+  .tl-scale { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .tl-scale b { font-weight: 500; }
+  .tl-total { color: var(--text-3); }
+  .tl-total b { color: var(--text-2); font-weight: 500; }
+  .tl-top { min-height: 20px; }
+  .tl-top .tl-q { font-size: 10.5px; color: var(--text-3); }
+
+  /* Quarter marks, drawn by the background so they rescale with the axis
+     instead of needing a write per second while the run is still growing. */
+  .tl-track {
+    position: relative; height: 20px; border-radius: 4px;
+    background: repeating-linear-gradient(to right, var(--line-soft) 0 1px, transparent 1px 25%);
+  }
+  /* "not started" is a fact the reader reads, not a separator: --text-faint
+     is for glyphs nobody has to make out. */
+  .tl-none { position: absolute; inset: 0; display: flex; align-items: center; font-size: 10.5px; color: var(--text-3); }
+  /* The block's geometry is two numbers and a division: `--s` and `--e` are
+     seconds from the run's origin, `--span` is the axis. While a task runs it
+     has no right edge — it is pinned to the end of the axis, so the second
+     that grows the run grows the bar with one property write. */
+  .tl-b {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    position: absolute; top: 2px; bottom: 2px;
+    left: calc(var(--s) / var(--span) * 100%);
+    width: max(3px, calc((var(--e) - var(--s)) / var(--span) * 100%));
+    display: flex; align-items: center; overflow: hidden;
+    padding: 0 5px; border: 1px solid transparent; border-radius: 3px;
+    font-size: 10.5px; font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tl-b.open { right: 0; width: auto; }
+  /* Half a glyph is worse than no glyph: under ~24px the bar carries no label
+     and says what it is through its accessible name and its tooltip. */
+  .tl-b.bare { padding: 0; }
+  .tl-b.bare .tl-t { display: none; }
+  .tl-b:hover { border-color: currentColor; }
+  .tl-b.done { background: var(--accent-soft); color: var(--accent-ink); }
+  .tl-b.running { background: var(--run-soft); color: var(--run); }
+  /* 10% and not 16%: in the light theme a warn tint darkens the ground under
+     its own label, and at 16% the pair measured 4.09:1. */
+  .tl-b.interrupted { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+  /* The one state that must not depend on hue: a failed bar is hatched. */
+  .tl-b.failed, .tl-b.blocked {
+    color: var(--fail);
+    background:
+      repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--fail) 20%, transparent) 4px 7px),
+      var(--fail-soft);
+  }
+  .tl-q { display: flex; align-items: center; gap: 4px; }
+  /* A task with no start time has no place on a time axis, and drawing it a
+     bar would be a lie in the one language this chart speaks. It waits beside
+     the axis — which is also where it is in the run. */
+  .tl-qb {
+    all: unset; box-sizing: border-box; cursor: pointer;
+    display: inline-flex; align-items: center; min-height: 18px; padding: 0 7px;
+    border: 1px dashed var(--line); border-radius: 999px;
+    font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+  .tl-qb:hover { border-style: solid; color: var(--text); background: var(--hover); }
+  /* On a phone the axis is under 120px wide; the run's total is already in
+     the topbar, and here it only pushed the two clock labels apart. */
+  @media (max-width: 639px) { .tl-total { display: none; } }
+  .tl-more { font-size: 10.5px; color: var(--text-3); }
 
   /* --------------------------------------------------------------- panel */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .14s ease; z-index: 4; }
+  .scrim.open { opacity: 1; pointer-events: auto; }
   aside {
     position: fixed; top: 0; right: 0; height: 100%; width: min(540px, 100vw);
     background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
@@ -474,7 +681,8 @@
     transition: transform .16s cubic-bezier(.32, .72, 0, 1), visibility 0s .16s;
     display: flex; flex-direction: column; z-index: 5;
   }
-  @media (prefers-reduced-motion: reduce) { aside, .scrim, .chip { transition: none } }
+  aside.open { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
+  @media (prefers-reduced-motion: reduce) { aside, .scrim, .row, .chip { transition: none } }
 
   /* Above 900px the panel stops covering the board and becomes the column
      beside it. The dialog semantics leave with the scrim: a panel you can
@@ -528,42 +736,37 @@
      path list and wrong the moment it became the agent's report — a box around
      running text says "this is a literal", which is the one thing it is not.
      A fenced block inside it keeps its box, because that part *is* literal. */
-  /* Prose rules, not panel rules: the same `md()` renders an agent's report
-     in the drawer of its own row and in the record beside it, and a heading
-     that only knows how to be a heading inside an `<aside>` is a heading in
-     one of the two places it appears. Only the gutter stays the panel's. */
-  .md { font-size: 12.5px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
-  aside .md { padding: 0 var(--rail-pad); }
-  .md > :first-child { margin-top: 0; }
-  .md > :last-child { margin-bottom: 0; }
-  .md p { margin: 0 0 9px; }
-  .md strong { color: var(--text); font-weight: 600; }
-  .md em { font-style: italic; }
-  .md del { text-decoration: line-through; color: var(--text-3); }
-  .md h4, .md h5 { margin: 15px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
-  .md h5 { color: var(--text-2); }
-  .md ul, .md ol { margin: 0 0 9px; padding-left: 17px; }
-  .md li { margin: 2px 0; }
-  .md ul.tick, .md ol.tick { padding-left: 0; margin-bottom: 9px; }
-  .md blockquote { margin: 0 0 9px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--text-3); }
-  .md hr { border: 0; border-top: 1px solid var(--line-soft); margin: 13px 0; }
-  .md a { color: var(--accent-ink); }
-  .md pre { margin: 0 0 9px; }
+  aside .md { padding: 0 var(--rail-pad); font-size: 12.5px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+  aside .md > :first-child { margin-top: 0; }
+  aside .md > :last-child { margin-bottom: 0; }
+  aside .md p { margin: 0 0 9px; }
+  aside .md strong { color: var(--text); font-weight: 600; }
+  aside .md em { font-style: italic; }
+  aside .md del { text-decoration: line-through; color: var(--text-3); }
+  aside .md h4, aside .md h5 { margin: 15px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  aside .md h5 { color: var(--text-2); }
+  aside .md ul, aside .md ol { margin: 0 0 9px; padding-left: 17px; }
+  aside .md li { margin: 2px 0; }
+  aside .md ul.tick, aside .md ol.tick { padding-left: 0; margin-bottom: 9px; }
+  aside .md blockquote { margin: 0 0 9px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--text-3); }
+  aside .md hr { border: 0; border-top: 1px solid var(--line-soft); margin: 13px 0; }
+  aside .md a { color: var(--accent-ink); }
+  aside .md pre { margin: 0 0 9px; }
   /* A table in a 320px column scrolls inside its own box rather than dragging
      the page sideways — the same trade the stage strip and the lane table
      already make. */
-  .md-table { margin: 0 0 10px; overflow-x: auto; }
-  .md table { border-collapse: collapse; font-size: 11.5px; }
+  aside .md-table { margin: 0 0 10px; overflow-x: auto; }
+  aside .md table { border-collapse: collapse; font-size: 11.5px; }
   /* `overflow-wrap: anywhere` is right for a paragraph carrying a 90-character
      path and wrong inside a cell: a column narrow enough will break a word in
      half rather than admit it needs more room. Here the cell asks for the room
      and the box scrolls if the panel cannot give it. */
-  .md th, .md td { padding: 5px 10px 5px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-soft); overflow-wrap: normal; word-break: normal; }
-  .md th { font-weight: 600; color: var(--text-2); white-space: nowrap; }
-  .md tbody tr:last-child td { border-bottom: 0; }
+  aside .md th, aside .md td { padding: 5px 10px 5px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-soft); overflow-wrap: normal; word-break: normal; }
+  aside .md th { font-weight: 600; color: var(--text-2); white-space: nowrap; }
+  aside .md tbody tr:last-child td { border-bottom: 0; }
   /* Inside a block that is already monospace on its own ground, the inline
      chip would be a second box saying the same thing. */
-  .md pre code { padding: 0; background: none; font-size: inherit; color: inherit; }
+  aside .md pre code { padding: 0; background: none; font-size: inherit; color: inherit; }
   /* `all: unset` re-inherits `white-space`, so "← Activity" broke over two
      lines the moment the title beside it got long and made the whole head
      47px → 71px. It is a control, not prose: it does not wrap and it does not
@@ -648,6 +851,14 @@
   .steps svg, .md .tick svg { margin-top: 2px; }
   .steps strong, .md .tick strong { font-weight: 500; color: inherit; }
 
+  /* --text-3 is calibrated against --surface, where it reads 4.63:1, and it
+     lands at 4.42 on --surface-2 — the tinted grounds: the branch chip, a
+     card's foot, a table's head and its total row. Phase 3 found this exact
+     pair and fixed the two places it had then; these are the rest of them.
+     In the light theme --text-2 and --text-3 are the same value, so stepping
+     up costs nothing there and buys the whole dark column. */
+  .card .branch, .card > .foot, .row.head .num, .row.foot .num { color: var(--text-2); }
+
   /* ------------------------------------------------------------- focus */
   /* Last on purpose, and it has to stay last.
      Every control on this page that resets itself with `all: unset` — the
@@ -661,26 +872,25 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
   /* ======================================================================
-   * The crew, not the lanes.
+   * dashboard v2 — a tripulação, não as lanes
    *
-   * Everything above is the design system this page already had, inherited
-   * without a change. What follows is only what the new screen needs and the
-   * old one did not have.
+   * Tudo acima é o design system do `plo serve`, herdado sem uma alteração.
+   * O que vem abaixo é só o que a tela nova precisa e a antiga não tinha.
    * ==================================================================== */
 
-  /* The rail stops being a column. The firehose still exists — behind a
-     button, which is where a firehose belongs. */
+  /* O rail deixa de ser coluna. O firehose continua existindo — atrás de um
+     botão, que é onde um firehose deve morar. */
   @media (min-width: 900px) {
     .frame-body { display: flex; }
     .scroller { flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
   }
 
   /*
-   * The panel is a sibling of the frame, not a child: as a drawer it belongs
-   * to the document, and stacking it inside a `.frame` that is
-   * `position: fixed` put the scrim (z-index 4, the frame's sibling) on top
-   * of the drawer itself — a dark screen with nothing clickable. The state
-   * lives on `<body>`, so there are never two classes that can disagree.
+   * O painel é irmão do frame, não filho: como gaveta ele é do documento, e
+   * empilhá-lo dentro de um `.frame` que é `position: fixed` deixava o scrim
+   * (z-index 4, irmão do frame) por cima da própria gaveta — tela escura,
+   * nada clicável. Estado no `<body>`, para não haver duas classes que
+   * possam divergir.
    */
   #scrim { z-index: 50; display: block; }
   #panel {
@@ -694,10 +904,9 @@
   body[data-panel="open"] #scrim { opacity: 1; pointer-events: auto; }
   @media (prefers-reduced-motion: reduce) { #panel { transition: none; } }
 
-  /* A button that is an exact copy of the badge beside it does not announce
-     itself as clickable. A live corner, the accent's ink and the same height
-     as its neighbours — the three things that separated it from `live` were
-     none of them. */
+  /* Um botão que é a cópia exata do badge ao lado dele não se anuncia como
+     clicável. Canto vivo, tinta do acento e a mesma altura dos vizinhos —
+     as três coisas que o separavam de `live` eram nenhuma. */
   .railbtn {
     display: inline-flex; height: 28px; min-height: 0; padding: 0 13px; margin: 0;
     border-radius: var(--radius-sm); font-weight: 500;
@@ -710,43 +919,41 @@
   .wrap { max-width: 1180px; margin-inline: auto; }
 
   /*
-   * `main > * { border-top }` divides bands: full-width strips stacked
-   * against each other, where the line is the seam between two of them. Here
-   * the sections are cards with a radius and a margin, so the line closed
-   * nothing — it ran end to end through the gap, touching neither. The
-   * section heading already separates them.
+   * `main > * { border-top }` divide bandas: faixas de largura total, coladas
+   * uma na outra, onde a linha é a costura entre duas. Aqui as seções são
+   * cards com raio e margem, então a linha não fechava nada — corria de ponta
+   * a ponta no meio do vão, encostando em nada. O título da seção já separa.
    */
   main > * { border-top: 0; }
   main > section + section { margin-top: 10px; }
   main > section > h2 { padding: 4px var(--pad) 9px; }
 
-  /* What is running, before how much has run. The plan's name existed at
-     13.5px in a toolbar, competing for room with three counters; here it is
-     the first thing the page says. */
+  /* O que está rodando, antes de quanto já rodou. O nome do plano existia
+     em 13.5px numa barra de ferramentas, disputando espaço com três
+     contadores; aqui ele é a primeira coisa que a página diz. */
   .plan-name {
     margin: 0 0 1px; font-size: 22px; font-weight: 600; letter-spacing: -.028em;
     line-height: 1.2; color: var(--text);
   }
-  /* The button moves here: to the right of the summary sat an empty strip
-     three buttons wide, and it was squeezed between the counters in the bar,
-     where it looked like one more of them. */
+  /* O botão passa a morar aqui: à direita do sumário havia uma faixa vazia do
+     tamanho de três botões, e ele estava espremido entre os contadores da
+     barra, onde parecia mais um deles. */
   .summary { padding-top: 20px; gap: 6px 16px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .sum-main { display: grid; gap: 6px; min-width: 0; }
-  /* Under the title the verdict stops being the headline and becomes the
-     subtitle it always was — same weight, one step down in size. */
+  /* Abaixo do título, o veredito deixa de ser a manchete e vira o subtítulo
+     que ele sempre foi — mesmo peso, um degrau de tamanho abaixo. */
   .verdict { font-size: 14px; }
-  /* In the bar, the file's path: a fact the page had not given yet, instead
-     of the title printed twice on one screen. */
+  /* Na barra, o caminho do arquivo: informação que a página ainda não deu,
+     em vez do título repetido duas vezes na mesma tela. */
   .topbar h1 { font: 400 11.5px var(--mono); color: var(--text-2); letter-spacing: 0; }
   main > section > h2 { display: flex; align-items: center; gap: 8px; }
   h2 .tally { font-weight: 400; color: var(--text-3); }
 
-  /* ------------------------------------------------------------- avatars */
+  /* ------------------------------------------------------------ avatares */
 
-  /* An agent is somebody working, so it has a face. The identity (colour,
-     eyes, the angle of the cap) comes from the lane and the id — the same
-     agent is the same face for the whole run. The mood comes from the
-     status: whoever failed is not smiling. */
+  /* Um agente é alguém trabalhando, então tem cara. A identidade (cor, olhos,
+     inclinação) sai do id — o mesmo agente é o mesmo rosto em toda a run. O
+     humor sai do status: quem falhou não sorri. */
   .av { position: relative; flex: 0 0 auto; display: inline-flex; line-height: 0; }
   .av svg { display: block; border-radius: 50%; }
   .av .ring {
@@ -757,17 +964,16 @@
   .av.done .ring { border-color: var(--done); }
   .av.failed .ring, .av.blocked .ring { border-color: var(--fail); }
   .av.pending { opacity: .5; }
-  /* The bob goes on the whole thing, not on the face: animating only the
-     `<svg>` left the ring still while the face rose 1.5px — which is the
-     off-centring that was visible, and that no box measurement catches,
-     because the boxes are correct. */
+  /* O bob vai no conjunto, não no rosto: animar só o <svg> deixava o anel
+     parado enquanto a cara subia 1.5px — que é o descentramento que se via,
+     e que nenhuma medição de caixa pega, porque as caixas estão certas. */
   .av.running { animation: avbob 3.2s ease-in-out infinite; }
   @keyframes avspin { to { transform: rotate(360deg); } }
   @keyframes avbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
   @media (prefers-reduced-motion: reduce) {
     .av.running, .av.running .ring { animation: none; }
   }
-  /* The model lives on the avatar: it is the name badge of whoever is at work. */
+  /* O modelo mora no avatar: é a etiqueta de crachá de quem está trabalhando. */
   .av .badge {
     position: absolute; right: -4px; bottom: -4px;
     min-width: 15px; height: 15px; padding: 0 2.5px; border-radius: 8px;
@@ -776,9 +982,8 @@
     letter-spacing: .02em; text-transform: uppercase;
   }
   .av.sm .badge { min-width: 12.5px; height: 12.5px; line-height: 11px; font-size: 8px; border-radius: 7px; right: -3px; bottom: -3px; }
-  /* The check closes the matter. A green ring on its own is the same shape as
-     the blue one in a different colour — the difference that is hardest to
-     notice at a glance. */
+  /* O check fecha o assunto. O anel verde sozinho é a mesma forma do anel
+     azul numa cor diferente — a diferença que menos se nota de relance. */
   .av .tick {
     position: absolute; right: -4px; top: -4px; width: 14px; height: 14px;
     border-radius: 50%; display: grid; place-items: center;
@@ -789,12 +994,12 @@
   .av .tick.warn { background: var(--warn); }
   .av.sm .tick { width: 12px; height: 12px; right: -3px; top: -3px; }
 
-  /* ---------------------------------------------------------- the crew */
+  /* --------------------------------------------------------- a tripulação */
 
   .crew { display: grid; gap: 8px; }
-  /* "nobody working" said twice in 150px, neither time saying why, while the
-     stage strip right above has the answer. The first read of a screen like
-     that is "is it stuck?". */
+  /* "nobody working" dito duas vezes em 150px, nenhuma delas dizendo por quê,
+     enquanto a régua de fases logo acima tem a resposta. A primeira leitura
+     de uma tela assim é "travou?". */
   .crew-empty {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     padding: 20px; border: 1px dashed var(--line); border-radius: var(--radius);
@@ -810,8 +1015,8 @@
   .ag > .ag-row:only-child { border-radius: inherit; }
   .ag.failed, .ag.blocked { border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); }
 
-  /* The whole row is the button. A 12px chevron as the only click target is a
-     bullseye, not a control. */
+  /* A linha inteira é o botão. Um chevron de 12px como único alvo de clique é
+     uma mira, não um controle. */
   .ag-row {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center; gap: 12px;
@@ -825,15 +1030,15 @@
     flex: 0 0 auto; font: 500 10.5px/1 var(--mono); letter-spacing: .02em;
     color: var(--text-2); background: var(--code-bg); padding: 3px 6px; border-radius: 5px;
   }
-  /* 17px tall on a focusable target: under the 24px WCAG 2.5.8 asks for. The
-     vertical padding is there for the finger and the focus ring, not for the
-     text. */
+  /* 17px de altura num alvo focável: abaixo dos 24px que a WCAG 2.5.8 pede.
+     O padding vertical existe para o dedo e para o anel de foco, não para o
+     texto. */
   .ag-tag.barrier { color: var(--accent-ink); background: var(--accent-soft); display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding-block: 0; }
   .ag-tag.barrier svg { flex: 0 0 auto; }
 
-  /* An explanation that only appears when it is asked for. The native
-     `title` arrives too late and leaves too early for a term the reader is
-     seeing for the first time. */
+  /* Uma explicação que só aparece quando pedida. O `title` nativo chega tarde
+     demais e some cedo demais para um termo que o leitor está vendo pela
+     primeira vez. */
   .tip { position: relative; }
   .tip::after {
     content: attr(data-tip);
@@ -845,13 +1050,13 @@
     opacity: 0; pointer-events: none; transition: opacity .12s ease .18s; z-index: 20;
   }
   .tip:hover::after, .tip:focus-visible::after { opacity: 1; }
-  /* Near the bottom it opens upward: a tooltip that explains itself off the
-     screen explains nothing. */
+  /* Perto do rodapé ele abre para cima: um tooltip que se explica fora da
+     tela não explica nada. */
   .tip.up::after { top: auto; bottom: calc(100% + 7px); }
   @media (prefers-reduced-motion: reduce) { .tip::after { transition: none; } }
   .ag-name { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* One sentence, not a log. It is the line that answers "what is it doing". */
+  /* Uma frase, não um log. É a linha que responde "o que ele está fazendo". */
   .ag-doing { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; color: var(--text-2); }
   .ag-doing .verb { flex: 0 0 auto; color: var(--text-2); }
   .ag-doing .obj {
@@ -859,11 +1064,11 @@
     font: 400 11.5px var(--mono); color: var(--text-3);
   }
   .ag-doing.bad .verb { color: var(--fail); }
-  /* A call that came back with an error inside an agent that is still alive
-     is not a stop: it was red on the healthy screen, and red that shows up
-     when everything is fine stops meaning stop. */
+  /* Uma chamada que voltou com erro num agente que segue vivo não é uma
+     parada: era vermelho no cenário saudável, e vermelho que aparece quando
+     está tudo bem deixa de significar pare. */
   .ag-doing.warn .verb { color: var(--warn); }
-  /* The collapsed line is no longer the only place the reason exists. */
+  /* A linha colapsada não é mais o único lugar onde o motivo existe. */
   .ag-doing .more {
     flex: 0 0 auto; font-size: 11px; color: var(--accent-ink);
     border-bottom: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent);
@@ -871,25 +1076,23 @@
   .ag-doing .err { color: var(--text-on-fail); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /*
-   * The orb.
+   * O orb.
    *
-   * It replaces three 3px dots that were, by the comment that used to sit
-   * here, "the reason you can tell from across the room that the run is
-   * alive" — and that three steps from a second monitor did not resolve.
-   * This one is 20px and has an axis: a sphere of particles turning, in the
-   * language of the thinking orbs at orbs.jakubantalik.com, reimplemented
-   * here in pure CSS 3D.
+   * Substitui três pontos de 3px que eram, pelo próprio comentário que estava
+   * aqui, "a razão pela qual dá pra ver de longe que a run está viva" — e que
+   * a três passos de um segundo monitor não se resolviam. Este tem 20px e um
+   * eixo: uma esfera de partículas girando, na linguagem dos thinking orbs
+   * (orbs.jakubantalik.com), reimplementada aqui em CSS 3D puro.
    *
-   * The particles are placed once, on a Fibonacci spiral, and what turns is
-   * the container: no frame costs any JavaScript, and twenty orbs on screen
-   * weigh no more than one. The `::after` vignette gives back the volume that
-   * the absence of z-sorting takes away.
+   * As partículas são posicionadas uma vez, em espiral de Fibonacci, e quem
+   * gira é o contêiner: nenhum frame custa JavaScript, e vinte orbs na tela
+   * não pesam mais que um. A vinheta do `::after` devolve o volume que a
+   * ausência de z-sorting tira.
    *
-   * The state chooses the movement, not only the colour: whoever is working
-   * turns round, whoever tripped on a call turns slowly and off axis, whoever
-   * stopped has a collapsed, motionless sphere. From a distance the movement
-   * reads before the colour — the same discipline as the ring and the stage
-   * strip.
+   * O estado escolhe o movimento, não só a cor: quem trabalha gira redondo,
+   * quem tropeçou numa chamada gira devagar e fora de eixo, quem parou tem a
+   * esfera colapsada e imóvel. De longe se lê o movimento antes da cor — que
+   * é a mesma disciplina do anel e da régua de fases.
    */
   .orb {
     --orb: 20px; --dot: 1.2px;
@@ -903,9 +1106,8 @@
     transform-style: preserve-3d;
     animation: orbspin 3.4s linear infinite;
   }
-  /* One movement per family, in the same order the body changes in: sweeping
-     is regular, churning is irregular, thinking is slow, dispatching is an
-     orbit. */
+  /* Um movimento por família, na mesma ordem em que o corpo muda: varrer é
+     regular, remexer é irregular, pensar é lento, despachar é uma órbita. */
   .orb.scan .ball  { animation: orbspin 3.4s linear infinite; }
   .orb.churn .ball { animation: orbchurn 2.4s ease-in-out infinite; }
   .orb.think .ball { animation: orbspin 7.5s linear infinite; }
@@ -916,8 +1118,8 @@
     border-radius: 50%; background: currentColor;
     transform: translate3d(calc(var(--x) * var(--r)), calc(var(--y) * var(--r)), calc(var(--z) * var(--r)));
   }
-  /* With no z-sorting every point carries the same weight and the sphere goes
-     flat. The vignette darkens the rim and the volume comes back. */
+  /* Sem z-sorting, todo ponto tem o mesmo peso e a esfera achata. A vinheta
+     escurece a borda e o volume volta. */
   .orb::after {
     content: ''; position: absolute; inset: -1px; border-radius: 50%; pointer-events: none;
     background: radial-gradient(circle at 50% 50%, transparent 58%, var(--surface) 104%);
@@ -932,29 +1134,29 @@
     75%  { transform: rotateY(270deg) rotateX(15deg); }
     100% { transform: rotateY(360deg) rotateX(-16deg); }
   }
-  /* The ring needs the tilt to be a ring: on the XZ plane, seen head on, it
-     is a line. */
+  /* O anel precisa da inclinação para ser um anel: no plano XZ, visto de
+     frente, ele é uma linha. */
   @keyframes orbring {
     from { transform: rotateX(62deg) rotateY(0deg); }
     to   { transform: rotateX(62deg) rotateY(360deg); }
   }
 
-  /* The state does not swap the shape: it changes the colour and the rhythm,
-     and the family stays legible underneath. Only the duration is overridden
-     — the variant's keyframe stays its own. */
+  /* O estado não troca a forma: ele muda a cor e o ritmo, e a família
+     continua legível por baixo. Só a duração é sobrescrita — o keyframe da
+     variante segue sendo o dela. */
   .orb.warn { color: var(--warn); }
   .orb.warn .ball { animation-duration: 6.4s; }
-  /* Stopped: the sphere collapses and the movement ceases. Stillness is the
-     signal. */
+  /* Parou: a esfera colapsa e o movimento cessa. Imobilidade é o sinal. */
   .orb.stopped { color: var(--fail); }
   .orb.stopped .ball { animation: none; transform: rotateY(24deg) scale(.68); }
   .orb.stopped.orbit .ball { transform: rotateX(62deg) scale(.68); }
   .orb.stopped i { opacity: .8; }
 
-  /* `.orb.warn .ball` has one class more than `.orb .ball` and would win the
-     tiebreak: the suppression has to reach every variant by name, or it
-     silences the one that matters least and lets through the one that moves
-     the most. */
+  /* `.orb.warn .ball` tem uma classe a mais que `.orb .ball` e ganharia o
+     desempate: a supressão precisa cobrir cada variante por nome, ou ela
+     silencia a que menos importa e deixa passar a que se mexe mais. */
+  /* A supressão precisa alcançar cada variante pelo mesmo número de classes
+     que a define, ou a mais específica sobrevive à media query. */
   @media (prefers-reduced-motion: reduce) {
     .orb.scan .ball, .orb.churn .ball, .orb.think .ball, .orb.orbit .ball,
     .orb.warn .ball, .orb.stopped .ball { animation: none; transform: rotateY(24deg); }
@@ -967,21 +1169,21 @@
   .ag-meta .clock { color: var(--text-2); }
   @media (max-width: 719px) { .ag-meta .drop { display: none; } }
 
-  /* `--text-faint` is the token the system reserves for separators and empty
-     glyphs: 2.64:1 in the light theme. It was the ink of the one affordance
-     that says the row opens. */
+  /* --text-faint é o token que o sistema reserva para separadores e glifos
+     vazios: 2.64:1 no tema claro. Era a tinta da única afordância que diz
+     que a linha abre. */
   .chev { flex: 0 0 auto; color: var(--text-3); transition: transform .14s ease; }
   .ag-row:hover .chev { color: var(--text); }
   .ag.open > .ag-row .chev { transform: rotate(90deg); }
   @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 
-  /* ---------------------------------------------------------- subagents */
+  /* ---------------------------------------------------------- subagentes */
 
-  /* Indented with a guide line: the hierarchy is drawn, not spelled with a
-     character. The log renders between the parent and the children, and all
-     three shared `--surface-2` with a rule between them: the subagent rows
-     started reading as more log lines. Tinted belongs to the log; the crew
-     stays on the card's own surface. */
+  /* Recuo com fio guia: a hierarquia é do desenho, não de um caractere. */
+  /* O log renderiza entre o pai e os filhos, e os três dividiam
+     `--surface-2` com um fio entre eles: as linhas de subagente passavam a
+     ler como mais linhas de log. Tingido é do log; a tripulação fica na
+     superfície do card. */
   .kids { padding: 0 0 6px 30px; position: relative; }
   .kids { background: var(--surface); border-top: 1px solid var(--line-soft); }
   .kids::before { content: ''; position: absolute; left: 27px; top: 4px; bottom: 14px; width: 1px; background: var(--line); }
@@ -995,23 +1197,17 @@
   .kid .orb { --orb: 17px; --dot: 1.2px; }
   .kid.open > .ag-row .chev { transform: rotate(90deg); }
 
-  /* --------------------------------------------------------------- the log */
+  /* --------------------------------------------------------------- o log */
 
-  /* It only exists after the click. It used to be half the screen; now it is
-     a drawer. */
+  /* Só existe depois do clique. Era metade da tela; agora é uma gaveta. */
   .ag-log { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
   .ag-log:last-child { border-bottom: 0; }
   .ag-log .feed { margin: 0; border: 0; border-radius: 0; background: transparent; max-height: 320px; }
-  /* The panel's tint costs contrast: `--text-3` is calibrated against
-     `--surface` and falls to 4.42:1 here. One step up gives AA back without
-     changing the hierarchy — the column stays the quietest in the row. */
+  /* O tingido do painel custa contraste: --text-3 é calibrado contra
+     --surface e cai a 4.42:1 aqui. Um degrau acima devolve AA sem mudar a
+     hierarquia — a coluna continua sendo a mais quieta da linha. */
   .ag-log .feed .at, .ag-log .feed .arg, .ag-log .feed .say,
   .ag-log .feed .took, .ag-log .log-head { color: var(--text-2); }
-  /* `--fail` over `--fail-soft` over `--surface-2` measures 4.42:1 — it clears
-     AA on the card and misses it by a hair inside the drawer. This is the one
-     run of text on a red row that says *why* the row is red, so it gets the
-     step back rather than the tint getting removed. */
-  .ag-log .feed .arg .why { color: color-mix(in srgb, var(--fail) 78%, var(--text)); }
   .ag-log .log-head {
     display: flex; align-items: center; gap: 8px;
     padding: 6px var(--pad); border-bottom: 1px solid var(--line-soft);
@@ -1020,9 +1216,9 @@
   .ag-log .log-head b { font-weight: 500; color: var(--text-2); font-family: var(--mono); font-size: 10.5px; }
   .kid .ag-log { margin-left: 0; }
 
-  /* The account an agent gave when it stopped. Prose is prose: the text face,
-     a reading measure, no box — the monospaced box would say "this is a
-     literal", which is the one thing a report is not. */
+  /* A conta que o agente prestou ao parar. Prosa é prosa: a face de texto,
+     medida de leitura, sem caixa — a caixa monoespaçada diria "isto é um
+     literal", que é a única coisa que um relatório não é. */
   .ag-report { border-top: 1px solid var(--line-soft); background: var(--surface-2); padding: 2px 0 14px; }
   .ag-report h3 { margin: 14px var(--pad) 7px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
   .ag-report .md { padding: 0 var(--pad); max-width: 74ch; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
@@ -1033,12 +1229,13 @@
   .ag-report .md code { font-size: 11.5px; }
   .ag-report .acts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px var(--pad) 0; }
 
-  /* -------------------------------------------------------------- the queue */
+  /* ------------------------------------------------------------- a fila */
 
-  /* `.list` clips so the radius cuts its corners; here there is no corner to
-     cut and the clip ate the whole tooltip on the last row of the queue —
-     which is exactly where the barrier chips pile up. */
+  /* `.list` recorta para que o raio corte os cantos; aqui não há canto a
+     cortar e o recorte comia o tooltip inteiro na última linha da fila —
+     que é exatamente onde os chips de barreira se acumulam. */
   #queue { overflow: visible; }
+  .queue { display: grid; }
   .qrow {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
     align-items: center; gap: 10px; padding: 8px var(--pad);
@@ -1050,10 +1247,10 @@
   .qrow .after b { font-weight: 500; color: var(--text-2); }
 
   /*
-   * The question that pays for the tool — was it worth parallelising — was
-   * answered by the timeline this redesign cut, and then by nothing at all:
-   * the run ended in 600px of empty panel. Here it is a two-line sum, which
-   * is what it always was.
+   * A pergunta que paga a ferramenta — valeu a pena paralelizar — era
+   * respondida pela timeline que este redesenho cortou, e passou a não ser
+   * respondida por nada: a run terminava em 600px de painel vazio. Aqui ela
+   * é uma conta de duas linhas, que é o que ela sempre foi.
    */
   .outcome { display: grid; gap: 14px; padding: 15px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
   .outcome .headline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; font-size: 15px; color: var(--text-2); }
@@ -1063,41 +1260,37 @@
   .outcome .facts b { font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .outcome .review { display: flex; align-items: flex-start; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text-2); }
 
-  /* The band that closes the page: what is already out of the way, in one line. */
+  /* A faixa que fecha a página: o que já saiu do caminho, em uma linha. */
   .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 11px var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
   .strip .grp { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .strip .lbl { font-size: 11.5px; color: var(--text-3); }
   .strip .lbl b { color: var(--text-2); font-weight: 500; }
 
-  /* A fenced block inside a report is still a literal, and the `aside pre`
-     that gave it a box belonged to the panel. Here the box is the same one,
-     a step above the tint the agent's drawer already sits on. */
-  .ag-report .md pre {
-    margin: 0 0 9px; padding: 10px 12px;
-    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px;
-    white-space: pre-wrap; word-break: break-word;
-    color: var(--text-2); font: 400 11.5px/1.6 var(--mono);
-  }
+  /* ------------------------------------------------- controle do mock */
 
-  /* The way back to the task record — session, log, declared writes, plan
-     steps. The drawer answers "what is it doing"; the record answers "what is
-     this task", and both still exist. */
-  .ag-log .log-head .chip { min-height: 22px; padding: 0 8px; font-size: 10.5px; }
+  /* Não faz parte da tela: é o seletor de cenário do protótipo. */
+  .mockbar {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 9;
+    padding: 5px; border-radius: 999px;
+    background: var(--surface-2); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  }
+  .mockbar .tag { padding: 0 8px 0 6px; font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+  .mockbar button {
+    border: 0; background: none; color: var(--text-2); cursor: pointer;
+    font: 500 11.5px var(--ui); padding: 5px 11px; border-radius: 999px;
+  }
+  .mockbar button:hover { background: var(--hover); color: var(--text); }
+  .mockbar button.on { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 
-<!-- One frame, and everything the page has is inside it. The window chrome
-     is the topbar and the frame's own edge; the only thing that scrolls is
-     `.scroller`, so the border never leaves the screen. Below 900px the
-     frame dissolves back into the document — see the CSS. -->
 <div class="frame">
 
 <header class="topbar">
   <div class="crumbs">
     <span class="badge-app" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" focusable="false"><path d="M6 1.15 L10.2 10.85 L6 8.35 L1.8 10.85 Z" fill="var(--on-brand)" /></svg></span>
-    <!-- The path, not the title: the title is the page's own heading now, and
-         printing it twice on one screen taught the reader nothing. -->
     <h1 id="plan-title">…</h1>
   </div>
   <div class="grow"></div>
@@ -1105,7 +1298,7 @@
     <span class="stat"><b id="m-progress">–</b> done</span>
     <span class="stat"><b id="m-cost">–</b> tokens</span>
     <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
-    <span class="live off" id="live"><i class="pip"></i><span id="live-text">connecting…</span></span>
+    <span class="live on" id="live"><i class="pip"></i><span id="live-text">live</span></span>
   </div>
 </header>
 
@@ -1153,94 +1346,395 @@
 
 </div>
 
-<!-- The firehose and the task record share one drawer, and it is a drawer at
-     every width: the column it used to be beside the board was 40% of the
-     screen spent on the events nobody reads twice. It is a sibling of the
-     frame, not a child, because a `position: fixed` ancestor would put the
-     scrim on top of the panel the scrim exists to sit behind. -->
 <div class="scrim" id="scrim"></div>
-<aside id="panel" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true" inert>
-  <div class="head">
-    <button class="close" id="p-back" hidden>&larr; Activity</button>
-    <h2 id="d-title">Run activity</h2>
-    <div class="grow"></div>
-    <span class="count" id="p-count"></span>
-    <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
-  </div>
-  <div class="tools" id="p-tools">
-    <input type="search" class="q" id="p-q" placeholder="Filter events" aria-label="Filter run activity" autocomplete="off" spellcheck="false" />
-    <select class="sel" id="p-kind" aria-label="Kind of event">
-      <option value="">All</option>
-      <option value="err">Errors</option>
-      <option value="bash">Bash</option>
-      <option value="edit">Edits</option>
-    </select>
-    <button class="tgl" id="p-wrap" aria-pressed="false" aria-controls="p-feed" title="Show each line in full instead of clipping it">Wrap</button>
-  </div>
-  <div class="feed run" id="p-feed"></div>
-  <div class="body" id="d-body" hidden></div>
-</aside>
+<aside id="panel" aria-labelledby="d-title">
+    <div class="head">
+      <h2 id="d-title">Run activity</h2>
+      <div class="grow"></div>
+      <span class="count" id="p-count"></span>
+      <button class="close" id="d-close" aria-label="Close panel"><kbd>Esc</kbd> Close</button>
+    </div>
+    <div class="tools" id="p-tools">
+      <input type="search" class="q" id="p-q" placeholder="Filter events" aria-label="Filter run activity" autocomplete="off" spellcheck="false" />
+      <select class="sel" id="p-kind" aria-label="Kind of event">
+        <option value="">All</option>
+        <option value="err">Errors</option>
+        <option value="bash">Bash</option>
+        <option value="edit">Edits</option>
+      </select>
+    </div>
+    <div class="feed run" id="p-feed"></div>
+  </aside>
 
+
+<div class="mockbar" role="group" aria-label="Prototype scenario">
+  <span class="tag">mock</span>
+  <button data-scn="running" class="on">running</button>
+  <button data-scn="blocked">blocked</button>
+  <button data-scn="merging">merging</button>
+  <button data-scn="integrating">integrating</button>
+  <button data-scn="done">done</button>
+</div>
 <script>
-'use strict';
-
 /*
- * The dashboard, whose unit is the agent.
+ * Protótipo do dashboard v2 — dados mockados, sem servidor.
  *
- * It answers three questions in this order: where the plan stands, who is
- * working right now and on what, and what comes next. Every agent's log still
- * exists — behind a click, which is where a firehose belongs. It used to be
- * half the width of the screen, and it is the thing nobody reads twice.
+ * A tela responde três perguntas, nessa ordem: em que pé está o plano, quem
+ * está trabalhando agora e no quê, e o que vem depois. O log de cada agente
+ * existe, mas atrás de um clique — era metade da largura da tela e é a
+ * informação que menos se olha.
  *
- * A lane does not work. What works is the agent running the task and the
- * subagents it dispatched, and that is the unit this page counts.
+ * O shape do mock (`SCENARIOS`) é deliberadamente o que `monitor.js` já
+ * consegue derivar do `stream-json`: nada aqui depende de um campo que o log
+ * do agente não entrega. Ver `docs/prototypes/README.md`.
  */
 
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const paint = (el, html) => { if (el.innerHTML !== html) el.innerHTML = html; };
 
-let raw = null;        // the snapshot as the server sent it
-let view = null;       // the same run, shaped as a crew
-let skew = 0;          // serverNow - clientNow, so timers agree with the run
-let panelOpen = false;
-let openTask = null;   // task number shown in the panel, or null for the feed
-let openedFrom = null; // element that opened it, to hand focus back on close
-let feedQuery = '';
-let feedKind = '';
-/** Which agents the reader has expanded. Survives every repaint. */
-const openIds = new Set();
+function dur(ms) {
+  if (ms == null || !isFinite(ms) || ms < 0) return '–';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = (v) => String(v).padStart(2, '0');
+  return h ? `${h}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
+}
+const since = (iso) => (iso ? dur(Date.now() - Date.parse(iso)) : '–');
+const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date.parse(t.startedAt)) : t.startedAt ? since(t.startedAt) : '–');
+const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', { hour12: false }) : ''; };
 
-/**
- * Rewriting innerHTML that did not change is not just wasted work: it destroys
- * whatever the reader had focused inside it. With a snapshot arriving every
- * second, tabbing to a row was a race the reader could not win.
- */
-function paint(el, html) {
-  if (el.dataset.sig === html) return false;
-  el.dataset.sig = html;
-  el.innerHTML = html;
-  return true;
+const tokens = (v) => {
+  if (typeof v !== 'number' || v <= 0) return '—';
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
+};
+
+function gist(text, max = 150) {
+  const line = String(text || '').split('\n')
+    .map((l) => l.replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').replace(/`/g, '').trim())
+    .find((l) => l.length > 2) || '';
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const short = (sha) => String(sha || '').slice(0, 7);
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const STATUS_WORD = {
+  done: 'Done', running: 'In progress', pending: 'Todo',
+  failed: 'Failed', blocked: 'Blocked', interrupted: 'Interrupted',
+};
+
+// Ícones herdados do ui.html sem alteração: o mesmo vocabulário de formas.
+function statusIcon(status, size = 15) {
+  const s = size, c = s / 2;
+  const open = `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true" focusable="false">`;
+  const ring = (stroke, dash = '') => `<circle cx="${c}" cy="${c}" r="${c - 1.25}" fill="none" stroke="${stroke}" stroke-width="1.5"${dash} />`;
+  switch (status) {
+    case 'done':
+      return `${open}<path d="M${(s * 0.22).toFixed(2)} ${(s * 0.52).toFixed(2)} L${(s * 0.42).toFixed(2)} ${(s * 0.72).toFixed(2)} L${(s * 0.78).toFixed(2)} ${(s * 0.30).toFixed(2)}"
+        fill="none" stroke="var(--done)" stroke-width="${(s / 9.5).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+    case 'running': {
+      const r = (c - 1.25) / 2, circ = 2 * Math.PI * r;
+      return `${open}${ring('var(--run)')}
+        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--run)" stroke-width="${(r * 2).toFixed(2)}"
+          stroke-dasharray="${(circ * 0.5).toFixed(2)} ${circ.toFixed(2)}" transform="rotate(-90 ${c} ${c})" /></svg>`;
+    }
+    case 'failed':
+      return `${open}${ring('var(--fail)')}<path d="M${c - 2.3} ${c - 2.3} l4.6 4.6 M${c + 2.3} ${c - 2.3} l-4.6 4.6" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
+    case 'blocked':
+      return `${open}${ring('var(--fail)')}<path d="M${c - 2.6} ${c} h5.2" stroke="var(--fail)" stroke-width="1.6" stroke-linecap="round" /></svg>`;
+    case 'interrupted':
+      return `${open}${ring('var(--warn)', ' stroke-dasharray="2.6 2.2"')}<circle cx="${c}" cy="${c}" r="1.6" fill="var(--warn)" /></svg>`;
+    default:
+      return `${open}${ring('var(--idle)')}</svg>`;
+  }
+}
+
+function resultIcon(ok) {
+  if (ok === null || ok === undefined) return `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="2" fill="var(--text-faint)" /></svg>`;
+  return ok
+    ? `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.2 5.6 L4.3 7.7 L8.8 3.2" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+    : `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.8 2.8 l5.4 5.4 M8.2 2.8 l-5.4 5.4" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
+}
+
+const alertIcon = (bad) => {
+  const c = bad ? 'var(--fail)' : 'var(--warn)';
+  return `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+    <circle cx="7" cy="7" r="6.25" fill="none" stroke="${c}" stroke-width="1.5" />
+    <path d="M7 3.6 v3.9" stroke="${c}" stroke-width="1.5" stroke-linecap="round" />
+    <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
+};
+
+const BARRIER_TIP = 'Barrier task: it runs after every lane has merged, on the combined tree — so it can touch files that the lanes were kept apart to avoid.';
+
+/*
+ * Duas trilhas chegando numa parede.
+ *
+ * O `mergeIcon` do ui.html — dois branches dobrando num só — é bonito a 13px
+ * e ilegível a 11: as curvas viram um traço com um ponto. Aqui a forma é
+ * feita para o tamanho em que ela é usada, e diz o que a barreira faz: as
+ * lanes param nela.
+ */
+const barrierIcon = (s = 11) => `<svg width="${s}" height="${s}" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M1.7 3.6 H6.3 M1.7 8.4 H6.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+  <path d="M9.1 1.7 V10.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>`;
+
+/*
+ * Espiral de Fibonacci: o jeito de espalhar N pontos numa esfera sem que
+ * eles se acumulem nos polos, que é o que qualquer distribuição ingênua por
+ * latitude/longitude faz. Calculado uma vez para todos os orbs da página.
+ */
+function orbDots(n, { jitter = 0, spread = 1, ring = false } = {}) {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const noise = (k, i) => ((hash(`${k}:${i}`) % 1000) / 1000) - 0.5;
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    let x, y, z;
+    if (ring) {
+      const th = (i / n) * Math.PI * 2;
+      x = Math.cos(th); z = Math.sin(th); y = noise('ring', i) * 0.22;
+    } else {
+      y = 1 - (i / (n - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = i * golden;
+      x = Math.cos(th) * r; z = Math.sin(th) * r;
+    }
+    if (jitter) { x += noise('x', i) * jitter; y += noise('y', i) * jitter; z += noise('z', i) * jitter; }
+    const s = spread === 1 ? 1 : 1 + Math.abs(noise('s', i)) * 2 * (spread - 1);
+    out.push([(x * s).toFixed(3), (y * s).toFixed(3), (z * s).toFixed(3)]);
+  }
+  return out;
+}
+
+/*
+ * Quatro corpos, um por família de trabalho.
+ *
+ * A esfera uniforme responde "há trabalho acontecendo" e para por aí. Mas o
+ * `humanize()` logo abaixo já sabe *que tipo* de trabalho é — ele precisa
+ * saber, para escolher o verbo — e essa classificação estava sendo jogada
+ * fora na hora de desenhar. Aqui ela vira forma:
+ *
+ *   scan    esfera densa e regular, varrendo — ler, procurar, olhar o git
+ *   churn   esfera desarranjada, de contorno quebrado — editar, testar
+ *   think   esfera fechada e lenta — pensar, planejar
+ *   orbit   um anel em perspectiva — despachar para outro agente
+ *
+ * A distribuição de Fibonacci é o que dá o espaçamento uniforme do `scan`; o
+ * `churn` é a mesma distribuição desarranjada de propósito, porque
+ * irregularidade lida como esforço.
+ *
+ * O desarranjo é medido em 20px, não ampliado: com jitter alto a silhueta
+ * esférica se perde e o orb lê como sujeira, não como trabalho. O que
+ * distingue `churn` de `scan` é o contorno quebrado, não a dispersão.
+ */
+const ORB_BODY = {
+  scan: orbDots(26),
+  churn: orbDots(23, { jitter: 0.2, spread: 1.1 }),
+  think: orbDots(30, { spread: 0.82 }),
+  orbit: orbDots(16, { ring: true }),
+};
+
+const ORB_BALL = Object.fromEntries(Object.entries(ORB_BODY).map(([k, dots]) => [k,
+  `<span class="ball">${dots.map(([x, y, z]) => `<i style="--x:${x};--y:${y};--z:${z}"></i>`).join('')}</span>`]));
+
+/**
+ * O orb de um agente. Duas coisas independentes: `kind` é a família do
+ * trabalho e escolhe o corpo; `mode` é o estado e escolhe a cor e o ritmo —
+ * `''` em curso, `warn` vivo depois de uma chamada que falhou, `stopped`
+ * parado. Um agente que edita e um que lê nunca têm a mesma forma, e a
+ * mesma forma nunca tem duas cores ao mesmo tempo.
+ */
+const orbHtml = (kind, mode, r = 8.5) =>
+  `<span class="orb ${kind || 'scan'} ${mode}" style="--r:${r}px" aria-hidden="true">${ORB_BALL[kind] || ORB_BALL.scan}</span>`;
+
+const chevIcon = () => `<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.4 2.6 L8 6 L4.4 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
+// ------------------------------------------------------------- avatares
+
+/*
+ * Um agente é alguém trabalhando, e alguém tem cara.
+ *
+ * A identidade sai do id — cor, olhos, o ângulo do topo: o mesmo agente é o
+ * mesmo rosto do começo ao fim da run, e dois agentes lado a lado nunca são
+ * a mesma pessoa. O humor sai do status, não do id: quem falhou não sorri.
+ * Isso dá à tela a única coisa que uma lista de linhas não tem — alguém
+ * reconhecível a quem atribuir o trabalho.
+ */
+/*
+ * A cor diz a lane; o rosto diz quem.
+ *
+ * Antes a pele saía de `hash(id) % 8`, o que produzia duas coisas ruins ao
+ * mesmo tempo: a cor que se lê de longe não se correlacionava com nada que o
+ * leitor precise saber, e duas das oito peles *eram* os tokens de status
+ * (`#4cb782` é `--done`), então a paleta decorativa colidia com a semântica
+ * dentro de um círculo de 28px.
+ *
+ * Agora a cor é a lane — o único eixo que o leitor realmente rastreia — e a
+ * identidade individual passou para as feições, que continuam saindo do id.
+ * Duas lanes nunca são a mesma cor, dois agentes da mesma lane nunca são o
+ * mesmo rosto, e nenhum deles pode ser confundido com um estado.
+ *
+ * Nenhum matiz aqui encosta em `--done`, `--fail`, `--warn`, `--run` ou
+ * `--accent`, que são os cinco que a tela usa para dizer o que aconteceu.
+ */
+const LANE_SKIN = [
+  { bg: '#3b9fe0', ink: '#f0fbff' },  // A
+  { bg: '#a78bfa', ink: '#f7f3ff' },  // B
+  { bg: '#e06cb0', ink: '#fff2f9' },  // C
+  { bg: '#2dbfae', ink: '#f0fffd' },  // D
+  { bg: '#7d8cc4', ink: '#f4f6ff' },  // E
+  { bg: '#c98bd9', ink: '#fdf4ff' },  // F
+];
+/** A barreira não pertence a lane nenhuma: ela é a costura entre todas. */
+const BARRIER_SKIN = { bg: '#5a5f7a', ink: '#f4f5fb' };
+
+/** O subagente é da lane do pai, um passo atrás dele. */
+function fadeSkin(skin) {
+  const mix = (hex, t) => {
+    const n = parseInt(hex.slice(1), 16);
+    const to = [0x6a, 0x6e, 0x78];
+    const out = [16, 8, 0].map((sh, i) => Math.round((((n >> sh) & 255) * (1 - t)) + (to[i] * t)));
+    return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  return { bg: mix(skin.bg, 0.42), ink: skin.ink };
+}
+
+function skinFor(a) {
+  if (a.barrier) return a.sub ? fadeSkin(BARRIER_SKIN) : BARRIER_SKIN;
+  const i = a.lane ? (a.lane.toUpperCase().charCodeAt(0) - 65) % LANE_SKIN.length : 0;
+  const skin = LANE_SKIN[i] || LANE_SKIN[0];
+  return a.sub ? fadeSkin(skin) : skin;
+}
+
+function hash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < String(str).length; i += 1) {
+    h ^= String(str).charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+/** Uma boca por humor. É a única feição que o id não escolhe. */
+function mouthPath(status) {
+  switch (status) {
+    case 'done': return 'M8.1 14.4 q3.9 4 7.8 0';
+    case 'running': return 'M8.6 15 q3.4 2.2 6.8 0';
+    case 'failed': case 'blocked': return 'M8.4 16.2 q3.6 -3 7.2 0';
+    case 'interrupted': return 'M9.2 15.4 q2.8 1.6 4.6 -.6';
+    default: return 'M9.4 15.3 h5.2';
+  }
+}
+
+function avatarSvg(seed, size, status, skin) {
+  const h = hash(seed);
+  const cap = [0, 35, 70, 145, 215, 250, 290, 325][(h >> 3) % 8];
+  const eyeY = 10.2 + ((h >> 6) % 3) * 0.6;
+  const eyeR = 1.25 + ((h >> 9) % 2) * 0.35;
+  const gap = 3.4 + ((h >> 11) % 3) * 0.35;
+  const closed = status === 'pending';
+  const eye = (cx) => (closed
+    ? `<path d="M${(cx - 1.5).toFixed(1)} ${eyeY} h3" stroke="${skin.ink}" stroke-width="1.2" stroke-linecap="round" opacity=".75" />`
+    : `<circle cx="${cx.toFixed(1)}" cy="${eyeY}" r="${eyeR}" fill="${skin.ink}" />`);
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="12" fill="${skin.bg}" />
+    <path d="M0 12 A12 12 0 0 1 24 12 Z" fill="rgba(0,0,0,.17)" transform="rotate(${cap} 12 12)" />
+    ${eye(12 - gap)}${eye(12 + gap)}
+    <path d="${mouthPath(status)}" fill="none" stroke="${skin.ink}" stroke-width="1.35" stroke-linecap="round" opacity=".92" />
+  </svg>`;
+}
+
+/** O modelo mora no crachá: quem está trabalhando e com o quê, num objeto só. */
+const MODEL_TAG = (m) => {
+  const s = String(m || '').toLowerCase();
+  if (s.includes('opus')) return 'O';
+  if (s.includes('sonnet')) return 'S';
+  if (s.includes('haiku')) return 'H';
+  return s ? s.slice(0, 1).toUpperCase() : '?';
+};
+
+/*
+ * O anel separava running de done de failed só por matiz — indigo, verde,
+ * vermelho: exatamente o eixo que a deuteranopia colapsa. A régua de fases,
+ * dois centímetros acima, já fazia isso certo com forma. Aqui o anel toma
+ * emprestada a disciplina da própria página: cada estado encerrado ganha um
+ * glifo, e a forma decide antes da cor.
+ */
+function statusMark(status) {
+  const wrap = (cls, body) => `<span class="tick ${cls}"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">${body}</svg></span>`;
+  switch (status) {
+    case 'done':
+      return wrap('ok', '<path d="M1.8 4.6 L3.6 6.4 L7.2 2.6" fill="none" stroke="var(--on-brand)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />');
+    case 'failed':
+      return wrap('bad', '<path d="M2.6 2.6 l3.8 3.8 M6.4 2.6 l-3.8 3.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />');
+    case 'blocked':
+      return wrap('bad', '<path d="M2.4 4.5 h4.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />');
+    case 'interrupted':
+      return wrap('warn', '<path d="M3.4 2.8 v3.4 M5.6 2.8 v3.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />');
+    default:
+      return '';
+  }
+}
+
+function avatarHtml(a, size = 28, { plain = false } = {}) {
+  const sm = size <= 22 ? ' sm' : '';
+  if (plain) return `<span class="av plain">${avatarSvg(a.id, size, a.status, skinFor(a))}</span>`;
+  const badge = a.model ? `<span class="badge" title="${esc(a.model)}">${esc(MODEL_TAG(a.model))}</span>` : '';
+  return `<span class="av ${esc(a.status)}${sm}">
+    ${avatarSvg(a.id, size, a.status, skinFor(a))}<span class="ring"></span>${statusMark(a.status)}${badge}</span>`;
+}
+
+// ------------------------------------------------------- o que ele faz
+
+/*
+ * A última chamada de tool, dita como frase.
+ *
+ * `Bash · npx vitest run tests/theme-toggle.test.tsx` obriga o leitor a ler o
+ * comando para descobrir que são os testes rodando. O verbo carrega o sentido
+ * e o argumento vira evidência — que é a ordem em que se lê de relance.
+ */
+function humanize(a) {
+  if (!a) return null;
+  const say = (verb, obj, kind) => ({ verb, obj, kind, ok: a.ok });
+  if (a.kind === 'text') return { verb: 'thinking', obj: gist(a.text, 110), ok: true, quiet: true, kind: 'think' };
+  const t = a.target || '';
+  switch (a.name) {
+    case 'Bash': {
+      if (/\b(vitest|jest|pytest|go test|npm test|pnpm test|yarn test)\b/.test(t)) return say('running the tests', t, 'churn');
+      if (/^git commit/.test(t)) return say('committing', t, 'churn');
+      if (/^git (status|log|diff|show|rev-parse)/.test(t)) return say('checking git', t, 'scan');
+      if (/^git (checkout|stash|reset|merge|rebase)/.test(t)) return say('moving the tree', t, 'churn');
+      if (/^(npm|pnpm|yarn) (run )?(build|typecheck|lint)/.test(t)) return say('building', t, 'churn');
+      return say('running', t, 'churn');
+    }
+    case 'Edit': case 'MultiEdit': case 'Update': return say('editing', t, 'churn');
+    case 'Write': case 'NotebookEdit': return say('writing', t, 'churn');
+    case 'Read': return say('reading', t, 'scan');
+    case 'Grep': case 'Glob': return say('searching', t, 'scan');
+    case 'Task': case 'Agent': return say('delegating', t, 'orbit');
+    case 'Skill': return say('using the skill', t, 'orbit');
+    case 'TodoWrite': return say('planning', t, 'think');
+    case 'WebFetch': case 'WebSearch': return say('looking it up', t, 'scan');
+    case 'result': return say(a.ok === false ? 'failed' : 'finished', a.text || '', 'scan');
+    default: return say(String(a.name || 'working').toLowerCase(), t, 'scan');
+  }
+}
+
+
+// ---- herdado do ui.html sem alteração: o CSS de `.md` e `.cp` já veio junto,
+// e eram as duas superfícies que o protótipo tinha jogado fora ----
+
+const copyIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <rect x="3.7" y="3.7" width="6.8" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path d="M8.3 1.6 H3.2 A1.6 1.6 0 0 0 1.6 3.2 V8.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>`;
+
+const okIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M2.4 6.3 L4.7 8.6 L9.6 3.5" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
 
 const MD_FENCE = '\u0000';
 const MD_CODE = '\u0001';
-
-/**
- * The smallest Markdown that covers what an agent actually writes back.
- *
- * An agent's final report is Markdown — it is written to be read as Markdown
- * and there is no mode where it is not. Printing it raw put `**marcada**` and
- * `` `lib/day-close.ts` `` on screen as literal punctuation, which is the one
- * rendering guaranteed to be wrong.
- *
- * No dependency, because this CLI has none and a monitor that needs an
- * install to watch a run is a monitor nobody starts. Safety comes from order:
- * the source is escaped **first**, so by the time any rule runs there is no
- * `<` left in the string and nothing the content can do produces a tag.
- */
 
 /** Runs on already-escaped text. Code spans are held out first: a backtick
  *  span is literal, and `a**b` must not come back bold. */
@@ -1261,10 +1755,10 @@ function mdInline(t) {
 }
 
 function md(src) {
-  const source = String(src == null ? '' : src).replace(/\r\n?/g, '\n').trim();
-  if (!source) return '';
+  const raw = String(src == null ? '' : src).replace(/\r\n?/g, '\n').trim();
+  if (!raw) return '';
   const fenced = [];
-  const lines = esc(source)
+  const lines = esc(raw)
     .replace(/```[^\n]*\n([\s\S]*?)```/g, (_, body) => { fenced.push(body.replace(/\n+$/, '')); return `${MD_FENCE}${fenced.length - 1}${MD_FENCE}`; })
     .split('\n');
 
@@ -1311,8 +1805,8 @@ function md(src) {
     if (fence) { close(); out.push(`<pre><code>${fenced[+fence[1]]}</code></pre>`); continue; }
     if (!line.trim()) { close(); continue; }
     let m;
-    // A drawer is not a document: an agent's `#` is a run of prose, not a
-    // page title, so every level lands on one of two sizes.
+    // A panel column is not a document: an agent's `#` is a run of prose, not
+    // a page title, so every level lands on one of two sizes.
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { close(); out.push(`<h${m[1].length <= 2 ? 4 : 5}>${mdInline(m[2])}</h${m[1].length <= 2 ? 4 : 5}>`); continue; }
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { close(); out.push('<hr>'); continue; }
     if (/^\s*\|.*\|\s*$/.test(line)) { closePara(); closeList(); closeQuote(); (table || (table = [])).push(line.trim()); continue; }
@@ -1325,388 +1819,6 @@ function md(src) {
   return out.join('');
 }
 
-/**
- * An agent that blocks writes a report, not a sentence — headings, bold, the
- * whole account. A row takes its first real line; the rest is one click away
- * in its own drawer, where there is room for it.
- */
-function gist(text, max = 150) {
-  const line = String(text || '')
-    .split('\n')
-    .map((l) => l.replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').replace(/`/g, '').trim())
-    .find((l) => l.length > 2) || '';
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
-}
-
-function dur(ms) {
-  if (ms == null || !isFinite(ms) || ms < 0) return '–';
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
-  const p = (v) => String(v).padStart(2, '0');
-  return h ? `${h}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
-}
-const since = (iso) => (iso ? dur(Date.now() + skew - Date.parse(iso)) : '–');
-/** A settled agent gets the time it took, not a clock that keeps running. */
-const span = (t) => (t.startedAt && t.endedAt ? dur(Date.parse(t.endedAt) - Date.parse(t.startedAt)) : t.startedAt ? since(t.startedAt) : '–');
-const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleTimeString('en-GB', { hour12: false }) : ''; };
-
-/**
- * Output tokens, not dollars.
- *
- * The agent reports `total_cost_usd` and it is an API price. Nobody running
- * this off a subscription pays it, so on this page it was a number with no
- * referent — precise to the cent and about someone else's bill. Tokens are
- * what the run actually spends, and what a usage limit is counted in.
- *
- * A task that has not reported did not spend nothing, so nothing is `—`.
- */
-const tokens = (v) => {
-  if (typeof v !== 'number' || v <= 0) return '—';
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e4) return `${Math.round(v / 1000)}k`;
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-  return String(v);
-};
-
-const STATUS_WORD = {
-  done: 'Done', running: 'In progress', pending: 'Todo',
-  failed: 'Failed', blocked: 'Blocked', interrupted: 'Interrupted',
-};
-/** Stopped, but not finished: the run needs a human before it moves again. */
-const STOPPED = new Set(['failed', 'blocked', 'interrupted']);
-
-// --------------------------------------------------------------- glyphs
-
-/**
- * Status reads as a shape first and a colour second — the same reason Linear
- * draws a ring that fills rather than a coloured dot. Colour alone excludes
- * anyone who cannot separate the hues, and these six states matter.
- */
-function statusIcon(status, size = 15) {
-  const s = size, c = s / 2;
-  const open = `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true" focusable="false">`;
-  const ring = (stroke, dash = '') => `<circle cx="${c}" cy="${c}" r="${c - 1.25}" fill="none" stroke="${stroke}" stroke-width="1.5"${dash} />`;
-  switch (status) {
-    case 'done':
-      // No disc, and not the accent. A filled accent disc for `done` put the
-      // loudest mark on the page on its least urgent state.
-      return `${open}<path d="M${(s * 0.22).toFixed(2)} ${(s * 0.52).toFixed(2)} L${(s * 0.42).toFixed(2)} ${(s * 0.72).toFixed(2)} L${(s * 0.78).toFixed(2)} ${(s * 0.30).toFixed(2)}"
-        fill="none" stroke="var(--done)" stroke-width="${(s / 9.5).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
-    case 'running': {
-      // Half-filled ring: a pie drawn as one fat dashed stroke, Linear-style.
-      const r = (c - 1.25) / 2, circ = 2 * Math.PI * r;
-      return `${open}${ring('var(--run)')}
-        <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--run)" stroke-width="${(r * 2).toFixed(2)}"
-          stroke-dasharray="${(circ * 0.5).toFixed(2)} ${circ.toFixed(2)}" transform="rotate(-90 ${c} ${c})" /></svg>`;
-    }
-    case 'failed':
-      return `${open}${ring('var(--fail)')}<path d="M${c - 2.3} ${c - 2.3} l4.6 4.6 M${c + 2.3} ${c - 2.3} l-4.6 4.6" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
-    case 'blocked':
-      return `${open}${ring('var(--fail)')}<path d="M${c - 2.6} ${c} h5.2" stroke="var(--fail)" stroke-width="1.6" stroke-linecap="round" /></svg>`;
-    case 'interrupted':
-      return `${open}${ring('var(--warn)', ' stroke-dasharray="2.6 2.2"')}<circle cx="${c}" cy="${c}" r="1.6" fill="var(--warn)" /></svg>`;
-    default:
-      return `${open}${ring('var(--idle)')}</svg>`;
-  }
-}
-
-function resultIcon(ok) {
-  if (ok === null || ok === undefined) return `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="2" fill="var(--text-faint)" /></svg>`;
-  return ok
-    ? `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.2 5.6 L4.3 7.7 L8.8 3.2" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
-    : `<svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true"><path d="M2.8 2.8 l5.4 5.4 M8.2 2.8 l-5.4 5.4" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
-}
-
-const alertIcon = (bad) => {
-  const c = bad ? 'var(--fail)' : 'var(--warn)';
-  return `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-    <circle cx="7" cy="7" r="6.25" fill="none" stroke="${c}" stroke-width="1.5" />
-    <path d="M7 3.6 v3.9" stroke="${c}" stroke-width="1.5" stroke-linecap="round" />
-    <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
-};
-
-const copyIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-  <rect x="3.7" y="3.7" width="6.8" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
-  <path d="M8.3 1.6 H3.2 A1.6 1.6 0 0 0 1.6 3.2 V8.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>`;
-
-const okIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-  <path d="M2.4 6.3 L4.7 8.6 L9.6 3.5" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
-
-const chevIcon = () => `<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.4 2.6 L8 6 L4.4 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
-
-/** A drawn box, not `☐` — the glyph is a font's opinion and it lands at a
- *  different size and baseline in every one of them. */
-const checkbox = (on) => (on
-  ? `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
-      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="var(--done-soft)" stroke="var(--done)" stroke-width="1.15" />
-      <path d="M3.5 6.6 L5.5 8.6 L9.5 4.5" fill="none" stroke="var(--done)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`
-  : `<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" focusable="false">
-      <rect x=".8" y=".8" width="11.4" height="11.4" rx="3.2" fill="none" stroke="var(--idle)" stroke-width="1.15" /></svg>`);
-
-const BARRIER_TIP = 'Barrier task: it runs after every lane has merged, on the combined tree — so it can touch files that the lanes were kept apart to avoid.';
-
-/*
- * Two tracks arriving at a wall.
- *
- * The two-branches-folding-into-one mark is handsome at 13px and illegible at
- * 11: the curves become a stroke with a dot on it. This shape is made for the
- * size it is used at, and it says what a barrier does — the lanes stop here.
- */
-const barrierIcon = (s = 11) => `<svg width="${s}" height="${s}" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-  <path d="M1.7 3.6 H6.3 M1.7 8.4 H6.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-  <path d="M9.1 1.7 V10.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>`;
-
-/**
- * One glyph per row of the record, in `currentColor` so they stay the label's
- * tone. Ten different marks appearing once each is a legend; it is the
- * opposite of the same mark repeated twelve times.
- */
-const kvSvg = (body) => `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
-const KV_ICON = {
-  Status: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><circle cx="6.5" cy="6.5" r="1.9" fill="currentColor" stroke="none" />'),
-  Lane: kvSvg('<path d="M1.6 3.3 h9.8 M1.6 6.5 h6.4 M1.6 9.7 h8.2" />'),
-  Duration: kvSvg('<circle cx="6.5" cy="6.5" r="5.1" /><path d="M6.5 3.6 V6.7 L8.6 8.1" />'),
-  Turns: kvSvg('<path d="M11 6.5a4.5 4.5 0 1 1-1.6-3.4" /><path d="M11.2 1.9 V4.1 H9" />'),
-  Attempts: kvSvg('<path d="M2 6.5a4.5 4.5 0 1 0 1.6-3.4" /><path d="M1.8 1.9 V4.1 H4" />'),
-  'Output tokens': kvSvg('<path d="M2.4 10.6 V7.4 M6.5 10.6 V4.6 M10.6 10.6 V2.4" stroke-width="1.45" />'),
-  Model: kvSvg('<rect x="3.4" y="3.4" width="6.2" height="6.2" rx="1.4" /><path d="M5.2 1.5v1.9 M7.8 1.5v1.9 M5.2 9.6v1.9 M7.8 9.6v1.9 M1.5 5.2h1.9 M1.5 7.8h1.9 M9.6 5.2h1.9 M9.6 7.8h1.9" />'),
-  Session: kvSvg('<path d="M7.6 2.1 H10a.9.9 0 0 1 .9.9v7a.9.9 0 0 1-.9.9H7.6" /><path d="M5.4 2.1H3a.9.9 0 0 0-.9.9v7a.9.9 0 0 0 .9.9h2.4" /><path d="M4.5 6.5h4" />'),
-  Commits: kvSvg('<circle cx="6.5" cy="6.5" r="2.4" /><path d="M1.4 6.5h2.7 M8.9 6.5h2.7" />'),
-  Log: kvSvg('<path d="M3.1 1.7h4.3l2.5 2.5v7.1H3.1z" /><path d="M7.2 1.8v2.6h2.6 M4.7 7.1h3.6 M4.7 9.2h2.6" />'),
-};
-
-// ------------------------------------------------------------------ orbs
-
-/*
- * Fibonacci spiral: the way to spread N points over a sphere without piling
- * them at the poles, which is what any naive latitude/longitude distribution
- * does. Computed once for every orb on the page.
- */
-function orbDots(n, { jitter = 0, spread = 1, ring = false } = {}) {
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const noise = (k, i) => ((hash(`${k}:${i}`) % 1000) / 1000) - 0.5;
-  const out = [];
-  for (let i = 0; i < n; i += 1) {
-    let x, y, z;
-    if (ring) {
-      const th = (i / n) * Math.PI * 2;
-      x = Math.cos(th); z = Math.sin(th); y = noise('ring', i) * 0.22;
-    } else {
-      y = 1 - (i / (n - 1)) * 2;
-      const r = Math.sqrt(Math.max(0, 1 - y * y));
-      const th = i * golden;
-      x = Math.cos(th) * r; z = Math.sin(th) * r;
-    }
-    if (jitter) { x += noise('x', i) * jitter; y += noise('y', i) * jitter; z += noise('z', i) * jitter; }
-    const s = spread === 1 ? 1 : 1 + Math.abs(noise('s', i)) * 2 * (spread - 1);
-    out.push([(x * s).toFixed(3), (y * s).toFixed(3), (z * s).toFixed(3)]);
-  }
-  return out;
-}
-
-/*
- * Four bodies, one per family of work.
- *
- * A uniform sphere answers "there is work happening" and stops there. But
- * `humanize()` below already knows *what kind* of work it is — it has to, to
- * pick the verb — and that classification was being thrown away at drawing
- * time. Here it becomes shape:
- *
- *   scan    a dense, regular sphere, sweeping — reading, searching, git
- *   churn   a broken-contoured sphere — editing, testing, committing
- *   think   a closed, slow sphere — thinking, planning
- *   orbit   a ring in perspective — dispatching to another agent
- *
- * The disorder is judged at 20px, not magnified: with high jitter the
- * spherical silhouette is lost and the orb reads as dirt rather than work.
- * What separates `churn` from `scan` is the broken contour, not the spread.
- */
-const ORB_BODY = {
-  scan: orbDots(26),
-  churn: orbDots(23, { jitter: 0.2, spread: 1.1 }),
-  think: orbDots(30, { spread: 0.82 }),
-  orbit: orbDots(16, { ring: true }),
-};
-
-const ORB_BALL = Object.fromEntries(Object.entries(ORB_BODY).map(([k, dots]) => [k,
-  `<span class="ball">${dots.map(([x, y, z]) => `<i style="--x:${x};--y:${y};--z:${z}"></i>`).join('')}</span>`]));
-
-/**
- * An agent's orb. Two independent things: `kind` is the family of work and
- * chooses the body; `mode` is the state and chooses the colour and the
- * rhythm — `''` under way, `warn` alive after a call that failed, `stopped`
- * for one that is not moving. An agent that edits and one that reads never
- * have the same shape, and the same shape never has two colours at once.
- */
-const orbHtml = (kind, mode, r = 8.5) =>
-  `<span class="orb ${kind || 'scan'} ${mode}" style="--r:${r}px" aria-hidden="true">${ORB_BALL[kind] || ORB_BALL.scan}</span>`;
-
-// --------------------------------------------------------------- avatars
-
-/*
- * An agent is somebody working, and somebody has a face.
- *
- * The colour says the lane; the face says who. The skin comes from the lane's
- * letter, the features (eyes, the angle of the cap) from a hash of the id,
- * and the mood from the status: whoever failed is not smiling. So two lanes
- * are never the same colour, two agents in one lane are never the same face,
- * and neither can be mistaken for a state — no hue here comes near `--done`,
- * `--fail`, `--warn`, `--run` or `--accent`, which are the five the page uses
- * to say what happened.
- */
-const LANE_SKIN = [
-  { bg: '#3b9fe0', ink: '#f0fbff' },  // A
-  { bg: '#a78bfa', ink: '#f7f3ff' },  // B
-  { bg: '#e06cb0', ink: '#fff2f9' },  // C
-  { bg: '#2dbfae', ink: '#f0fffd' },  // D
-  { bg: '#7d8cc4', ink: '#f4f6ff' },  // E
-  { bg: '#c98bd9', ink: '#fdf4ff' },  // F
-];
-/** A barrier belongs to no lane: it is the seam between all of them. */
-const BARRIER_SKIN = { bg: '#5a5f7a', ink: '#f4f5fb' };
-
-/** A subagent is of its parent's lane, one step behind it. */
-function fadeSkin(skin) {
-  const mix = (hex, t) => {
-    const n = parseInt(hex.slice(1), 16);
-    const to = [0x6a, 0x6e, 0x78];
-    const out = [16, 8, 0].map((sh, i) => Math.round((((n >> sh) & 255) * (1 - t)) + (to[i] * t)));
-    return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-  };
-  return { bg: mix(skin.bg, 0.42), ink: skin.ink };
-}
-
-function skinFor(a) {
-  if (a.barrier) return a.sub ? fadeSkin(BARRIER_SKIN) : BARRIER_SKIN;
-  const i = a.lane ? (String(a.lane).toUpperCase().charCodeAt(0) - 65) % LANE_SKIN.length : 0;
-  const skin = LANE_SKIN[i] || LANE_SKIN[0];
-  return a.sub ? fadeSkin(skin) : skin;
-}
-
-function hash(str) {
-  let h = 2166136261;
-  for (let i = 0; i < String(str).length; i += 1) {
-    h ^= String(str).charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-/** One mouth per mood. It is the only feature the id does not choose. */
-function mouthPath(status) {
-  switch (status) {
-    case 'done': return 'M8.1 14.4 q3.9 4 7.8 0';
-    case 'running': return 'M8.6 15 q3.4 2.2 6.8 0';
-    case 'failed': case 'blocked': return 'M8.4 16.2 q3.6 -3 7.2 0';
-    case 'interrupted': return 'M9.2 15.4 q2.8 1.6 4.6 -.6';
-    default: return 'M9.4 15.3 h5.2';
-  }
-}
-
-function avatarSvg(seed, size, status, skin) {
-  const h = hash(seed);
-  const cap = [0, 35, 70, 145, 215, 250, 290, 325][(h >> 3) % 8];
-  const eyeY = 10.2 + ((h >> 6) % 3) * 0.6;
-  const eyeR = 1.25 + ((h >> 9) % 2) * 0.35;
-  const gap = 3.4 + ((h >> 11) % 3) * 0.35;
-  const closed = status === 'pending';
-  const eye = (cx) => (closed
-    ? `<path d="M${(cx - 1.5).toFixed(1)} ${eyeY} h3" stroke="${skin.ink}" stroke-width="1.2" stroke-linecap="round" opacity=".75" />`
-    : `<circle cx="${cx.toFixed(1)}" cy="${eyeY}" r="${eyeR}" fill="${skin.ink}" />`);
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    <circle cx="12" cy="12" r="12" fill="${skin.bg}" />
-    <path d="M0 12 A12 12 0 0 1 24 12 Z" fill="rgba(0,0,0,.17)" transform="rotate(${cap} 12 12)" />
-    ${eye(12 - gap)}${eye(12 + gap)}
-    <path d="${mouthPath(status)}" fill="none" stroke="${skin.ink}" stroke-width="1.35" stroke-linecap="round" opacity=".92" />
-  </svg>`;
-}
-
-/** The model lives on the badge: who is working and with what, in one object. */
-const MODEL_TAG = (m) => {
-  const s = String(m || '').toLowerCase();
-  if (s.includes('opus')) return 'O';
-  if (s.includes('sonnet')) return 'S';
-  if (s.includes('haiku')) return 'H';
-  return s ? s.slice(0, 1).toUpperCase() : '?';
-};
-
-/*
- * The ring separated running from done from failed by hue alone — indigo,
- * green, red: exactly the axis deuteranopia collapses. The stage strip two
- * centimetres above already does this right, with shape. So every settled
- * state gets a glyph, and the shape decides before the colour does.
- */
-function statusMark(status) {
-  const wrap = (cls, body) => `<span class="tick ${cls}"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">${body}</svg></span>`;
-  switch (status) {
-    case 'done':
-      return wrap('ok', '<path d="M1.8 4.6 L3.6 6.4 L7.2 2.6" fill="none" stroke="var(--on-brand)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />');
-    case 'failed':
-      return wrap('bad', '<path d="M2.6 2.6 l3.8 3.8 M6.4 2.6 l-3.8 3.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />');
-    case 'blocked':
-      return wrap('bad', '<path d="M2.4 4.5 h4.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />');
-    case 'interrupted':
-      return wrap('warn', '<path d="M3.4 2.8 v3.4 M5.6 2.8 v3.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />');
-    default:
-      return '';
-  }
-}
-
-function avatarHtml(a, size = 28, { plain = false } = {}) {
-  const sm = size <= 22 ? ' sm' : '';
-  if (plain) return `<span class="av plain">${avatarSvg(a.id, size, a.status, skinFor(a))}</span>`;
-  const badge = a.model ? `<span class="badge" title="${esc(a.model)}">${esc(MODEL_TAG(a.model))}</span>` : '';
-  return `<span class="av ${esc(a.status)}${sm}">
-    ${avatarSvg(a.id, size, a.status, skinFor(a))}<span class="ring"></span>${statusMark(a.status)}${badge}</span>`;
-}
-
-// --------------------------------------------------------- what it is doing
-
-/*
- * The last tool call, said as a sentence.
- *
- * `Bash · npx vitest run tests/theme-toggle.test.tsx` makes the reader parse a
- * command to discover that the tests are running. The verb carries the
- * meaning and the argument becomes evidence — which is the order it is read
- * in at a glance.
- */
-function humanize(a) {
-  if (!a) return null;
-  const say = (verb, obj, kind) => ({ verb, obj, kind, ok: a.ok });
-  if (a.kind === 'text') return { verb: 'thinking', obj: gist(a.text, 110), ok: true, quiet: true, kind: 'think' };
-  // Neither of these is a tool call, and both reach a row: `run` opens an
-  // attempt, `result` closes the spawn.
-  if (a.kind === 'run') return { verb: a.label === 'started' ? 'starting up' : String(a.label || 'starting over'), obj: '', ok: true, kind: 'think' };
-  if (a.kind === 'result') return { verb: a.ok === false ? 'failed' : 'finished', obj: a.text || '', ok: a.ok, kind: 'scan' };
-  const t = a.target || '';
-  switch (a.name) {
-    case 'Bash': {
-      if (/\b(vitest|jest|pytest|go test|npm test|pnpm test|yarn test)\b/.test(t)) return say('running the tests', t, 'churn');
-      if (/^git commit/.test(t)) return say('committing', t, 'churn');
-      if (/^git (status|log|diff|show|rev-parse)/.test(t)) return say('checking git', t, 'scan');
-      if (/^git (checkout|stash|reset|merge|rebase)/.test(t)) return say('moving the tree', t, 'churn');
-      if (/^(npm|pnpm|yarn) (run )?(build|typecheck|lint)/.test(t)) return say('building', t, 'churn');
-      return say('running', t, 'churn');
-    }
-    case 'Edit': case 'MultiEdit': case 'Update': return say('editing', t, 'churn');
-    case 'Write': case 'NotebookEdit': return say('writing', t, 'churn');
-    case 'Read': return say('reading', t, 'scan');
-    case 'Grep': case 'Glob': return say('searching', t, 'scan');
-    case 'Task': case 'Agent': return say('delegating', t, 'orbit');
-    case 'Skill': return say('using the skill', t, 'orbit');
-    case 'TodoWrite': return say('planning', t, 'think');
-    case 'WebFetch': case 'WebSearch': return say('looking it up', t, 'scan');
-    case 'result': return say(a.ok === false ? 'failed' : 'finished', a.text || '', 'scan');
-    default: return say(String(a.name || 'working').toLowerCase(), t, 'scan');
-  }
-}
-
-// ------------------------------------------------------------------- copy
-
-/**
- * One copy control, four places: the resume command, a session id, a log path,
- * a lane branch — every string on this page that otherwise gets retyped.
- */
 function copyBtnHtml(text, what, { label = '', cls = 'cp', title = '' } = {}) {
   const wide = cls === 'cp' && label ? ' wide' : '';
   return `<button class="${cls}${wide}" data-copy="${esc(text)}" data-what="${esc(what)}" data-label="${esc(label)}"`
@@ -1752,235 +1864,44 @@ async function handleCopy(btn) {
   btn.restore = setTimeout(() => paintCopyBtn(btn, null), 1400);
 }
 
-/**
- * The command the reader is about to retype, in the form they would type it:
- * from the repo root, with the plan relative to it.
- */
-function relPlan(s) {
-  const root = s.repoRoot ? `${s.repoRoot}/` : '';
-  return root && s.plan && s.plan.startsWith(root) ? s.plan.slice(root.length) : (s.plan || '');
-}
-const cmd = (s, verb) => `plo ${verb} --plan ${relPlan(s)}`;
+// ------------------------------------------------------------- render
 
-// ------------------------------------------------------------------ shape
-
-/*
- * The run, as a crew.
- *
- * The server sends lanes holding tasks, because that is how `plo` schedules.
- * Nobody watches a lane work. What this turns it into is a list of agents:
- * one per task that is doing something or has stopped doing it, each carrying
- * the subagents it dispatched.
- */
-const tagOf = (t) => (t.lane ? `${String(t.lane).toUpperCase()} · T${t.n}` : `Barrier · T${t.n}`);
-
-function agentOf(t, s, branchOf) {
-  const activity = t.activity || [];
-  return {
-    id: `T${t.n}`,
-    n: t.n,
-    tag: tagOf(t),
-    lane: t.lane,
-    barrier: t.barrier,
-    sub: false,
-    title: t.title,
-    status: t.status,
-    model: t.model,
-    startedAt: t.startedAt,
-    endedAt: t.endedAt,
-    turns: t.turns,
-    outputTokens: t.outputTokens,
-    attempts: t.attempts,
-    error: t.error,
-    resume: cmd(s, 'resume'),
-    branch: t.lane ? branchOf[t.lane] || null : null,
-    activity,
-    // What it did last, whether that was a call or a thought. Not `lastTool`:
-    // an agent that has been reasoning for two minutes is not still running
-    // the command it ran before it started.
-    doing: activity[activity.length - 1] || null,
-    children: (t.children || []).map((k) => kidOf(k, t)),
-  };
-}
-
-/** A subagent, of its parent's lane and nature — that is what the colour
- *  reads. Its label is who it is; its title is what it was asked to do. */
-function kidOf(k, t) {
-  const activity = k.activity || [];
-  return {
-    id: k.id,
-    tag: k.agentType || 'subagent',
-    title: k.title || '',
-    lane: t.lane,
-    barrier: t.barrier,
-    sub: true,
-    status: k.status,
-    model: k.model,
-    startedAt: k.startedAt,
-    endedAt: k.endedAt,
-    turns: k.turns,
-    outputTokens: k.outputTokens,
-    activity,
-    doing: activity[activity.length - 1] || null,
-    children: [],
-  };
-}
-
-/** What holds a queued task up. A lane is strictly sequential and barriers
- *  run in order after the merge, so the answer is always the thing in front. */
-function queueAfter(t, s) {
-  if (t.barrier) {
-    const i = s.barriers.findIndex((b) => b.n === t.n);
-    const prev = i > 0 ? s.barriers[i - 1] : null;
-    return prev ? `after T${prev.n}` : 'after the merge';
-  }
-  const lane = s.lanes.find((l) => l.id === t.lane);
-  if (!lane) return '';
-  const i = lane.tasks.findIndex((x) => x.n === t.n);
-  const prev = lane.tasks.slice(0, i).reverse().find((x) => x.status !== 'done');
-  return prev ? `after T${prev.n}` : 'next in the lane';
-}
-
-/**
- * What the parallelism bought, once there is nothing left to run.
- *
- * Only on a clean finish. A run that ended with a task blocked has a report
- * to read and a command to retype, and "how it went" over the top of that
- * would be answering a question nobody asked yet.
- */
-function outcomeOf(s, tasks) {
-  if (!s.totals.total || s.totals.done !== s.totals.total) return null;
-  const at = (iso) => { const ms = Date.parse(iso); return Number.isFinite(ms) ? ms : null; };
-  const starts = tasks.map((t) => at(t.startedAt)).filter((x) => x != null);
-  const ends = tasks.map((t) => at(t.endedAt)).filter((x) => x != null);
-  if (!starts.length || !ends.length) return null;
-  const i = s.integration || {};
-  return {
-    // Floored, like `dur()`: rounded, this and the elapsed clock in the topbar
-    // disagree by a second about the same span, in the same viewport.
-    wallSeconds: Math.max(1, Math.floor((Math.max(...ends) - Math.min(...starts)) / 1000)),
-    agentSeconds: Math.round(tasks.reduce((n, t) => {
-      const a = at(t.startedAt), b = at(t.endedAt);
-      return n + (a != null && b != null && b > a ? (b - a) / 1000 : 0);
-    }, 0)),
-    commits: tasks.reduce((n, t) => n + (t.commits ? t.commits.length : 0), 0),
-    suite: i.suite || null,
-    review: i.review || null,
-  };
-}
-
-function shape(s) {
-  const tasks = [...s.lanes.flatMap((l) => l.tasks), ...s.barriers];
-  const branchOf = {};
-  for (const l of s.lanes) branchOf[l.id] = l.branch;
-
-  // Every task gets an agent, because the feed carries events from tasks that
-  // have already settled and each line still has to say who it came from.
-  const index = new Map();
-  for (const t of tasks) index.set(t.n, agentOf(t, s, branchOf));
-
-  const crew = tasks
-    .filter((t) => t.status === 'running' || STOPPED.has(t.status))
-    .map((t) => index.get(t.n));
-
-  const ends = tasks.map((t) => Date.parse(t.endedAt)).filter((x) => Number.isFinite(x));
-
-  return {
-    crew,
-    index,
-    queue: tasks.filter((t) => t.status === 'pending').map((t) => ({
-      n: t.n, tag: tagOf(t), title: t.title, barrier: t.barrier, after: queueAfter(t, s),
-    })),
-    settled: tasks.filter((t) => t.status === 'done').map((t) => ({
-      n: t.n, tag: tagOf(t), title: t.title, status: t.status,
-      outputTokens: t.outputTokens, commits: (t.commits || []).length,
-    })),
-    outcome: outcomeOf(s, tasks),
-    lastEndedAt: ends.length ? Math.max(...ends) : null,
-    feed: (s.feed || []).map((ev) => attribute(ev, index)),
-  };
-}
-
-/**
- * Who a feed line came from. Two `implementer` rows under an identical label,
- * with no face and no parent, on the one surface whose whole job is to tell
- * events apart. The face resolves it because the colour already says the
- * lane; the `title` carries the full path.
- */
-function attribute(ev, index) {
-  const parent = index.get(ev.n);
-  if (!parent) return { ...ev, tag: `T${ev.n}` };
-  const kid = ev.parentId ? (parent.children || []).find((k) => k.id === ev.parentId) : null;
-  const who = kid || parent;
-  return {
-    ...ev,
-    tag: who.tag,
-    by: { id: who.id, lane: who.lane, barrier: who.barrier, sub: who.sub, status: who.status },
-    path: kid ? `${parent.tag} › ${kid.tag}` : parent.tag,
-  };
-}
-
-// ----------------------------------------------------------------- render
+let snap = null;
+const openIds = new Set();   // quem o leitor abriu — sobrevive ao re-render
+let feedQuery = '', feedKind = '';
 
 function render(s) {
-  raw = s;
-  $('plan-title').textContent = relPlan(s) || 'plo';
-
-  if (!s.ready) {
-    view = null;
-    $('plan-name').textContent = s.title || 'plo';
-    $('plan-sub').textContent = '';
-    paint($('verdict'), '');
-    paint($('alerts'), '');
-    $('stages').hidden = true;
-    for (const id of ['queue-section', 'outcome-section', 'settled-section']) $(id).hidden = true;
-    $('crew-section').hidden = false;
-    $('crew-tally').textContent = '';
-    const host = $('crew');
-    host.dataset.mode = 'flat';
-    paint(host, `<div class="empty-state">${esc(s.error || s.message || 'nothing to show yet')}</div>`);
-    renderFeed();
-    return;
-  }
-
-  view = shape(s);
-
-  $('plan-name').textContent = s.title || 'plo';
-  $('plan-sub').innerHTML = [
-    s.base ? `base <code>${esc(s.base.branch)}</code> at <code>${esc(short(s.base.commit))}</code>` : '',
-    s.testCommand ? `tests <code>${esc(s.testCommand)}</code>` : '',
-    `${plural(s.lanes.length, 'lane')} · max ${s.maxLanes}`,
-  ].filter(Boolean).join('<span class="sep">·</span>');
-
+  snap = s;
+  $('plan-title').textContent = s.plan;
+  $('plan-name').textContent = s.title;
   $('m-progress').textContent = `${s.totals.done}/${s.totals.total}`;
   $('m-cost').textContent = tokens(s.totals.outputTokens);
-  // This page is made to sit in a background tab; the tab strip should report.
-  const stuck = s.totals.failed + s.totals.blocked;
-  document.title = `${stuck ? '⚠ ' : ''}${s.totals.done}/${s.totals.total} · ${s.title}`;
+  $('live').className = `live ${s.endedAt ? 'off' : 'on'}`;
+  $('live-text').textContent = s.endedAt ? 'finished' : 'live';
+
+  $('plan-sub').innerHTML = [
+    `base <code>${esc(s.base.branch)}</code> at <code>${esc(s.base.commit)}</code>`,
+    `tests <code>${esc(s.testCommand)}</code>`,
+    `${plural(s.lanes, 'lane')} · max ${s.maxLanes}`,
+  ].join('<span class="sep">·</span>');
 
   paint($('verdict'), verdictHtml(s));
   renderStages(s);
   renderAlerts(s);
   renderCrew(s);
-  renderQueue();
+  renderQueue(s);
   renderOutcome(s);
-  renderSettled();
-  renderFeed();
+  renderSettled(s);
+  renderFeed(s);
   tick();
 }
 
-const allAgents = () => (view ? view.crew.flatMap((a) => [a, ...(a.children || [])]) : []);
-const liveAgents = () => allAgents().filter((a) => a.status === 'running');
-
-/**
- * The run in one sentence, at the top, in the largest type on the page.
- * It counts people, not only tasks: two agents alive inside one task is a
- * fact the task count hides.
- */
+/** A run numa frase. Agora conta gente, não só tarefa: dois agentes vivos numa
+ *  tarefa só é um fato que a contagem de tarefas esconde. */
 function verdictHtml(s) {
   const t = s.totals;
-  const hurt = view.crew.filter((a) => STOPPED.has(a.status));
-  const live = liveAgents();
+  const hurt = allAgents(s).filter((a) => a.status === 'failed' || a.status === 'blocked' || a.status === 'interrupted');
+  const live = liveAgents(s);
   const complete = t.done === t.total;
 
   const parts = [complete ? `All ${plural(t.total, 'task')} done` : `${t.done} of ${t.total} done`];
@@ -1989,7 +1910,6 @@ function verdictHtml(s) {
     const held = a.endedAt ? `<span class="soft"> for <span data-since="${esc(a.endedAt)}">–</span></span>` : '';
     parts.push(`<span class="bad">${esc(a.tag)} ${word}${held}</span>`);
   }
-  if (hurt.length > 2) parts.push(`<span class="soft">+${hurt.length - 2} more</span>`);
   if (live.length) parts.push(`<span class="soft">${plural(live.length, 'agent')} working</span>`);
   else if (!complete) parts.push('<span class="soft">nobody working</span>');
 
@@ -1997,126 +1917,56 @@ function verdictHtml(s) {
   return statusIcon(mark, 17) + parts.join('<span class="sep">·</span>');
 }
 
-/**
- * The pipeline, full width, above everything it explains.
- *
- * Reporting `barrier-failed` as a word asks the reader to already know that
- * barriers run after the merge and before the suite in order to place it.
- * Here the position carries that.
- */
+const STOPPED = new Set(['failed', 'blocked', 'interrupted']);
+/** A fase que está segurando a run enquanto nenhum agente está vivo. */
+function runningStage(s) {
+  const st = (s.stages || []).find((x) => x.status === 'running');
+  if (!st) return 'waiting to start';
+  return st.detail ? `${st.label.toLowerCase()} · ${st.detail}` : st.label.toLowerCase();
+}
+
+const allAgents = (s) => s.crew.flatMap((a) => [a, ...(a.children || [])]);
+const liveAgents = (s) => allAgents(s).filter((a) => a.status === 'running');
+
 function renderStages(s) {
   const stages = s.stages || [];
   $('stages').hidden = !stages.length;
   paint($('stages'), stages.map((st) => `<li class="stage ${esc(st.status)}">`
     + statusIcon(st.status, 14)
     + `<span class="st-label">${esc(st.label)}</span>`
-    + `<span class="sr">${esc(STATUS_WORD[st.status] || st.status)}${st.detail ? ',' : ''}</span>`
     + (st.detail ? `<span class="st-detail" title="${esc(st.detail)}">${esc(st.detail)}</span>` : '')
     + '</li>').join(''));
 }
 
-/**
- * A banner that says what went wrong and leaves the reader to retype the fix
- * has done half the job. Every alert here ends in the command it implies.
- */
 function renderAlerts(s) {
-  const out = [];
-  const acts = (html) => `<div class="acts">${html}</div>`;
-  const resume = () => copyBtnHtml(cmd(s, 'resume'), 'the resume command', { label: 'Copy resume' });
-
-  if (s.rateLimit) {
-    const at = s.rateLimit.resetsAt ? new Date(s.rateLimit.resetsAt * 1000).toLocaleTimeString() : null;
-    out.push(`<div class="alert bad">${alertIcon(true)}<div>Usage limit <b>${esc(s.rateLimit.status)}</b> on the ${esc(s.rateLimit.rateLimitType || 'current')} window${at ? ` — resets ${esc(at)}` : ''}. Lanes that died here resume with <code>plo resume</code>.</div>${acts(resume())}</div>`);
-  }
-  if (s.planChanged) {
-    out.push(`<div class="alert">${alertIcon(false)}<div>The plan file changed after <code>plo init</code>. Task numbering may have shifted — re-run <code>plo analyze</code> before resuming.</div>${acts(copyBtnHtml(cmd(s, 'analyze'), 'the analyze command', { label: 'Copy analyze' }))}</div>`);
-  }
-  for (const a of view.crew.filter((x) => x.status === 'failed' || x.status === 'blocked')) {
-    out.push(`<div class="alert bad">${alertIcon(true)}<div><b>${esc(a.tag)}</b> ${esc((STATUS_WORD[a.status] || a.status).toLowerCase())} — ${esc(dedupeStatus(a.status, gist(a.error)) || 'no error recorded')}</div>`
-      // Open the row, not a drawer: the account it wrote is one click away
-      // under the agent it belongs to, beside what it was doing at the time.
-      + acts(resume() + `<button class="chip" data-open="${esc(a.id)}">Read it</button>`) + '</div>');
-  }
-  paint($('alerts'), out.join(''));
+  paint($('alerts'), (s.alerts || []).map((al) => `<div class="alert ${al.bad ? 'bad' : ''}">
+      ${alertIcon(al.bad)}<div><b>${esc(al.title)}</b> ${esc(al.text)}</div>
+      ${al.copy ? `<div class="acts">${copyBtnHtml(al.copy, 'the resume command', { label: 'Copy resume' })}</div>` : ''}
+    </div>`).join(''));
 }
 
-// -------------------------------------------------------------- the crew
-
-/** Nouns, not gerunds: the same string has to finish "nobody working — …"
- *  and "waiting on …", and only a noun does both. */
-const STAGE_NAMES = {
-  run: 'the lane tasks', merge: 'the merge', barriers: 'the barrier tasks',
-  suite: 'the full suite', review: 'the cross-lane review',
-};
-
-/**
- * What is holding the run up while nobody is alive. "Nothing running" said
- * twice in 150px, with the answer sitting in the stage strip right above.
- *
- * A stage that is under way answers it. When none is — the lanes finished and
- * the merge has not started, which is the emptiest this screen ever gets —
- * the next stage that is not done is the thing being waited on. Saying
- * "waiting to start" there was wrong twice: the run started long ago, and it
- * named nothing.
- */
-function runningStage(s) {
-  const stages = s.stages || [];
-  const running = stages.find((x) => x.status === 'running');
-  const st = running || stages.find((x) => x.status !== 'done');
-  if (!st) return stages.length ? 'the run is over' : 'waiting to start';
-  const label = STAGE_NAMES[st.key] || String(st.label).toLowerCase();
-  const said = st.detail ? `${label} · ${st.detail}` : label;
-  return running ? said : `waiting on ${said}`;
-}
+// ---------------------------------------------------------- a tripulação
 
 /*
- * The body of the page: one row per working agent, nesting the subagents it
- * dispatched. Outside `plo`'s own process "lane A" does not work — the agent
- * running the task does, and so do the subagents it opened.
+ * O corpo da tela: uma linha por agente vivo, aninhando os subagentes que ele
+ * mesmo abriu. Fora do processo do `plo`, "lane A" não trabalha — quem
+ * trabalha é o agente da tarefa e os subagentes que ele despachou, e é essa a
+ * unidade que a tela conta.
  */
 function renderCrew(s) {
-  const live = liveAgents().length;
-  const stopped = allAgents().filter((a) => STOPPED.has(a.status)).length;
+  const live = liveAgents(s).length;
+  const stopped = allAgents(s).filter((a) => STOPPED.has(a.status)).length;
   const complete = s.totals.done === s.totals.total;
-  // A finished run has no crew; the section leaves rather than announce a void.
-  $('crew-section').hidden = !view.crew.length && complete;
+  // Uma run encerrada não tem tripulação; a seção sai em vez de anunciar o vazio.
+  $('crew-section').hidden = !s.crew.length && complete;
   $('crew-tally').textContent = [
     live ? `${live} working` : '',
     stopped ? `${stopped} stopped` : '',
-    view.crew.length ? plural(view.crew.length, 'task') : '',
+    s.crew.length ? plural(s.crew.length, 'task') : '',
   ].filter(Boolean).join(' · ');
-
-  const host = $('crew');
-  if (!view.crew.length) {
-    host.dataset.mode = 'flat';
-    paint(host, `<div class="crew-empty">${statusIcon('running', 14)}<span>nobody working — <b>${esc(runningStage(s))}</b></span></div>`);
-    return;
-  }
-  if (host.dataset.mode !== 'crew') {
-    host.dataset.mode = 'crew';
-    host.innerHTML = '';
-    delete host.dataset.sig;
-  }
-
-  // One node per agent, rebuilt only when its own markup changes: an untouched
-  // row keeps whatever the reader had focused inside its drawer.
-  for (const a of view.crew) {
-    let el = host.querySelector(`[data-card="${CSS.escape(a.id)}"]`);
-    if (!el) {
-      el = document.createElement('div');
-      el.dataset.card = a.id;
-      host.appendChild(el);
-    }
-    const cls = `ag ${a.status}${openIds.has(a.id) ? ' open' : ''}`;
-    const html = agentHtml(a, false);
-    if (el.dataset.sig !== html || el.className !== cls) {
-      el.dataset.sig = html;
-      el.className = cls;
-      el.innerHTML = html;
-    }
-  }
-  const wanted = view.crew.map((a) => a.id);
-  for (const el of [...host.children]) if (!wanted.includes(el.dataset.card)) el.remove();
+  paint($('crew'), s.crew.length
+    ? s.crew.map((a) => agentHtml(a)).join('')
+    : `<div class="crew-empty">${statusIcon('running', 14)}<span>nobody working — <b>${esc(runningStage(s))}</b></span></div>`);
 }
 
 function agentHtml(a, kid = false) {
@@ -2124,51 +1974,33 @@ function agentHtml(a, kid = false) {
   const doing = humanize(a.doing);
   const live = a.status === 'running';
   const bad = a.status === 'failed' || a.status === 'blocked';
-  // Inherits the parent's nature for the colour, not for the label: a
-  // subagent a barrier dispatched is inside one, it is not one.
+  // Herda a natureza do pai para a cor, não para a etiqueta: um subagente
+  // despachado por uma barreira está dentro de uma, não é uma.
   const isBarrierTask = a.barrier && !a.sub;
 
-  // Warn is for a call that failed inside an agent that is still going. Once
-  // it has stopped, the same failed call is history and amber over it reads as
-  // a live problem — a subagent that died is reported by the still orb and the
-  // glyph on its face, not by colouring what it was doing at the time.
-  const halted = STOPPED.has(a.status);
-  const warn = live && doing && doing.ok === false;
-  const orb = (kind) => (live || halted
-    ? orbHtml(kind, live ? (warn ? 'warn' : '') : 'stopped', kid ? 7 : 8.5)
-    : '');
-
   const line = bad && a.error
-    ? `<div class="ag-doing bad">${orb(doing && doing.kind)}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
-    // Halted with nothing written down — a subagent never files a report. The
-    // last thing it did stands in for the account, in the slot the account
-    // would have used, so both stopped rows read the same way.
-    : halted && doing
-      ? `<div class="ag-doing bad">${orb(doing.kind)}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span>`
-        + `<span class="err" title="${esc(doing.obj)}">stopped while ${esc(doing.verb)}${doing.obj ? ` — ${esc(doing.obj)}` : ''}</span></div>`
+    ? `<div class="ag-doing bad">${orbHtml(doing && doing.kind, 'stopped', kid ? 7 : 8.5)}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
     : doing
-      ? `<div class="ag-doing${warn ? ' warn' : ''}">
-           ${orb(doing.kind)}
+      ? `<div class="ag-doing${doing.ok === false ? ' warn' : ''}">
+           ${live ? orbHtml(doing.kind, doing.ok === false ? 'warn' : '', kid ? 7 : 8.5) : ''}
            <span class="verb">${esc(doing.verb)}</span>
            <span class="obj" title="${esc(doing.obj)}">${esc(doing.obj)}</span>
          </div>`
-      : `<div class="ag-doing${halted ? ' bad' : ''}">${orb('think')}<span class="verb">${esc(live ? 'starting up' : STATUS_WORD[a.status] || a.status)}</span></div>`;
+      : `<div class="ag-doing">${bad ? orbHtml('scan', 'stopped', kid ? 7 : 8.5) : ''}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span></div>`;
 
   const meta = [
-    `<span class="clock"${live ? ` data-since="${esc(a.startedAt || '')}"` : ''}>${live ? '–' : esc(span(a))}</span>`,
+    `<span class="clock"${live ? ` data-since="${esc(a.startedAt)}"` : ''}>${live ? '–' : esc(span(a))}</span>`,
     a.turns ? `<span class="drop">${plural(a.turns, 'turn')}</span>` : '',
     a.outputTokens ? `<span class="drop">${tokens(a.outputTokens)} tok</span>` : '',
-    a.attempts > 1 ? `<span class="drop">attempt ${a.attempts}</span>` : '',
   ].filter(Boolean).join('');
 
   const kids = (a.children || []).length
     ? `<div class="kids">${a.children.map((k) => `<div class="kid ag ${esc(k.status)}${openIds.has(k.id) ? ' open' : ''}">${agentHtml(k, true)}</div>`).join('')}</div>`
     : '';
 
-  // The account of whoever stopped comes before the log: it is the answer to
-  // the question that made the reader click. Clipped to 118 characters in the
-  // header, it existed only in a native `title` — which nobody reads on a
-  // second monitor.
+  // O relatório de quem parou vem antes do log: é a resposta à pergunta que
+  // fez o leitor clicar. Cortado em 130 caracteres no cabeçalho, ele existia
+  // só num `title` nativo — que ninguém lê num segundo monitor.
   const report = bad && a.error
     ? `<div class="ag-report"><h3>${esc(a.status === 'blocked' ? 'Why it stopped' : 'Error')}</h3>
          <div class="md">${md(a.error)}</div>
@@ -2179,10 +2011,7 @@ function agentHtml(a, kid = false) {
 
   const log = open
     ? `<div class="ag-log">
-         <div class="log-head"><b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}
-           <div class="grow"></div>
-           ${a.n ? `<button class="chip" data-task="${a.n}" aria-controls="panel">Task record</button>` : ''}
-         </div>
+         <div class="log-head"><b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}</div>
          <div class="feed">${(a.activity || []).slice().reverse().map((ev) => activityHtml(ev)).join('')
            || '<div class="empty">no events yet</div>'}</div>
        </div>`
@@ -2202,51 +2031,33 @@ function agentHtml(a, kid = false) {
       ${chevIcon()}
     </button>`;
 
-  // A subagent is already wrapped by its parent; a task wraps itself.
-  return row + drawer + (kid ? '' : kids);
+  // Um subagente já vem embrulhado pelo pai; a tarefa embrulha a si mesma.
+  return kid ? row + drawer : `<div class="ag ${esc(a.status)}${open ? ' open' : ''}" data-card="${esc(a.id)}">${row}${drawer}${kids}</div>`;
 }
 
-/** Takes out of the account the word the label beside it already carries. */
+/** Tira do relato a palavra que a etiqueta ao lado já carrega. */
 function dedupeStatus(status, text) {
   const word = (STATUS_WORD[status] || status).split(' ')[0];
   return String(text).replace(new RegExp(`^${word}[.:,\\s—-]+`, 'i'), '');
 }
 
-/**
- * How long a call took, once its result came back. Anything under a second
- * gets nothing: a column of "0s" hides the one line this is for, which is the
- * test run that sat there for four minutes.
- */
 function took(a) {
-  const ms = a.durationMs != null ? a.durationMs
-    : (a.at && a.doneAt ? Date.parse(a.doneAt) - Date.parse(a.at) : null);
-  if (ms == null || !isFinite(ms) || ms < 1000) return '';
-  return ms < 60000 ? `${Math.round(ms / 1000)}s` : dur(ms);
+  if (!a.durationMs || a.durationMs < 1000) return '';
+  return a.durationMs < 60000 ? `${Math.round(a.durationMs / 1000)}s` : dur(a.durationMs);
 }
 
 function activityHtml(a, who = false) {
   const at = `<span class="at">${esc(clock(a.at))}</span>`;
-  // Deliberately not a button: sixty of them would be sixty tab stops through
-  // near-identical labels, and the agent it came from is one click away.
-  //
-  // Two `implementer` rows under an identical label, with no face and no
-  // parent, on the one surface whose whole job is to tell events apart. The
-  // face resolves it because the colour already says the lane.
+  // Dois `implementer` sob rótulo idêntico, sem rosto e sem pai, na única
+  // superfície cujo trabalho inteiro é desambiguar. O rosto resolve porque a
+  // cor já diz a lane; o `title` carrega o caminho completo.
   const tag = who
-    ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(a.path || a.tag || '')}">`
+    ? `<span class="who${a.barrier ? ' barrier' : ''}" title="${esc(a.by ? a.by.path : a.tag || '')}">`
       + (a.by ? avatarHtml(a.by, 14, { plain: true }) : '')
       + `<span>${esc(a.tag || '')}</span></span>`
     : '';
   const open = `<div class="ln${a.ok === false ? ' bad' : ''}">${at}${tag}`;
-
   if (a.kind === 'text') return `${open}<span class="ico"></span><span class="say" title="${esc(a.text)}">${esc(a.text)}</span></div>`;
-  if (a.kind === 'run') return `${open}<span class="ico">${resultIcon(null)}</span><span class="name sub">${esc(a.label || 'run')}</span></div>`;
-  if (a.kind === 'result') {
-    const ran = a.durationMs > 1000 ? dur(a.durationMs) : '';
-    return `${open}<span class="ico">${resultIcon(a.ok)}</span><span class="name">${esc(a.label || 'result')}</span><span class="arg" title="${esc(a.text || '')}">${esc(a.text || '')}</span><span class="took">${esc(ran)}</span></div>`;
-  }
-  // A failed call's preview is the whole reason the line is red; it rides in
-  // the target column after the target, and the tooltip carries both in full.
   const why = a.ok === false && a.preview ? `<span class="why"> ${esc(a.preview)}</span>` : '';
   return `${open}<span class="ico">${resultIcon(a.ok)}</span>`
     + `<span class="name${a.sub ? ' sub' : ''}">${a.sub ? '↳ ' : ''}${esc(a.name)}</span>`
@@ -2254,11 +2065,11 @@ function activityHtml(a, who = false) {
     + `<span class="took">${esc(took(a))}</span></div>`;
 }
 
-// ------------------------------------------------------------- the queue
+// ---------------------------------------------------------------- a fila
 
-/** What is still going to become an agent, and what is holding each one up. */
-function renderQueue() {
-  const q = view.queue;
+/** O que ainda vai virar agente, e o que segura cada um. */
+function renderQueue(s) {
+  const q = s.queue || [];
   $('queue-section').hidden = !q.length;
   $('queue-tally').textContent = q.length ? String(q.length) : '';
   paint($('queue'), q.map((t) => `<div class="qrow">
@@ -2269,358 +2080,407 @@ function renderQueue() {
     </div>`).join(''));
 }
 
-/**
- * The question that pays for the tool — was it worth running these in
- * parallel — used to be answered by a gantt chart, and then by nothing: the
- * run ended in 600px of empty panel. Here it is a two-line sum, which is what
- * it always was.
- */
+/** O fechamento da run: o que ela custou e o que a paralelização rendeu. */
 function renderOutcome(s) {
-  const o = view.outcome;
+  const o = s.outcome;
   $('outcome-section').hidden = !o;
   if (!o) return;
   const gain = (o.agentSeconds / o.wallSeconds).toFixed(1);
-  const facts = [
-    `<span><b>${plural(s.totals.total, 'task')}</b> across ${plural(s.lanes.length, 'lane')}</span>`,
-    `<span><b>${tokens(s.totals.outputTokens)}</b> output tokens</span>`,
-    `<span><b>${o.commits}</b> commits</span>`,
-    o.suite ? `<span><b>${o.suite.skipped ? 'not run' : o.suite.ok ? 'pass' : 'fail'}</b> full suite</span>` : '',
-  ].filter(Boolean).join('');
-  const review = o.review
-    ? `<div class="review">${resultIcon(Boolean(o.review.clean))}<span>${mdInline(esc(o.review.verdict || (o.review.clean ? 'Clean.' : 'Findings recorded.')))}</span></div>`
-    : '';
   paint($('outcome'), `
     <div class="headline">
       <b>${esc(dur(o.wallSeconds * 1000))}</b> wall clock
       <span class="vs">against <b style="font-size:15px">${esc(dur(o.agentSeconds * 1000))}</b> of agent time —
-        <b style="font-size:15px">${gain}×</b> from ${plural(s.lanes.length, 'lane')}</span>
+        <b style="font-size:15px">${gain}×</b> from ${plural(s.lanes, 'lane')}</span>
     </div>
-    <div class="facts">${facts}</div>${review}`);
+    <div class="facts">
+      <span><b>${plural(s.totals.total, 'task')}</b> across ${plural(s.lanes, 'lane')}</span>
+      <span><b>${tokens(s.totals.outputTokens)}</b> output tokens</span>
+      <span><b>${o.commits}</b> commits</span>
+      <span><b>${o.specs}</b> specs green</span>
+    </div>
+    <div class="review">${resultIcon(o.reviewOk)}<span>${mdInline(esc(o.review))}</span></div>`);
 }
 
-/** What is already out of the way — one band, not three sections. */
-function renderSettled() {
-  const done = view.settled;
-  $('settled-section').hidden = !done.length;
-  if (!done.length) return;
-  paint($('settled'), `<div class="grp">
-      <span class="lbl"><b>Done</b> ${done.length}</span>
-      ${done.map((t) => `<span class="ag-tag${t.tag.startsWith('Barrier') ? ' barrier' : ''}" title="${esc(t.title)}">${esc(t.tag)}</span>`).join('')}
-    </div>`
-    + `<span class="lbl">${tokens(done.reduce((n, t) => n + (t.outputTokens || 0), 0))} tokens · ${plural(done.reduce((n, t) => n + t.commits, 0), 'commit')}</span>`);
+/** O que já saiu do caminho — uma faixa, não três seções. */
+function renderSettled(s) {
+  const done = (s.settled || []).filter((t) => t.status === 'done');
+  const hurt = (s.settled || []).filter((t) => t.status !== 'done');
+  $('settled-section').hidden = !done.length && !hurt.length;
+
+  const grp = (label, items) => !items.length ? '' : `<div class="grp">
+      <span class="lbl"><b>${esc(label)}</b> ${items.length}</span>
+      ${items.map((t) => `<span class="ag-tag${t.tag.startsWith('Barrier') ? ' barrier' : ''}" title="${esc(t.title)}">${esc(t.tag)}</span>`).join('')}
+    </div>`;
+
+  paint($('settled'), [
+    grp('Done', done),
+    grp('Stopped', hurt),
+    done.length ? `<span class="lbl">${tokens(done.reduce((n, t) => n + (t.outputTokens || 0), 0))} tokens · ${plural(done.reduce((n, t) => n + (t.commits || 0), 0), 'commit')}</span>` : '',
+  ].filter(Boolean).join(''));
 }
 
-// ----------------------------------------------------- the firehose, kept
-
-const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Update']);
-/** Everything on a line a reader could plausibly be looking for. */
-const feedText = (a) => [a.name, a.target, a.text, a.preview, a.label, a.tag].filter(Boolean).join(' ').toLowerCase();
+// -------------------------------------------------- o firehose, guardado
 
 function feedMatch(a) {
   if (feedKind === 'err' && a.ok !== false) return false;
   if (feedKind === 'bash' && a.name !== 'Bash') return false;
-  if (feedKind === 'edit' && !EDIT_TOOLS.has(a.name)) return false;
-  return !feedQuery || feedText(a).includes(feedQuery);
+  if (feedKind === 'edit' && !['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Update'].includes(a.name)) return false;
+  if (!feedQuery) return true;
+  return [a.name, a.target, a.text, a.preview, a.tag].filter(Boolean).join(' ').toLowerCase().includes(feedQuery);
 }
 
-function renderFeed() {
-  const all = view ? view.feed : [];
-  const feed = all.filter(feedMatch);
-  // A filtered count that hides the total reads as a shrinking run.
-  $('p-count').textContent = !all.length ? ''
-    : feed.length === all.length ? plural(all.length, 'event') : `${feed.length} of ${all.length}`;
-
-  const host = $('p-feed');
-  // Repainted every second: a reader who scrolled back must not be yanked to
-  // the top by an event they were not reading.
-  const top = host.scrollTop;
-  const changed = paint(host, feed.length
-    ? feed.slice().reverse().map((a) => activityHtml(a, true)).join('')
-    : `<div class="empty">${all.length ? 'no event matches' : 'no agent events yet'}</div>`);
-  if (changed) host.scrollTop = top;
+function renderFeed(s) {
+  const all = (s.feed || []).filter(feedMatch);
+  $('p-count').textContent = all.length ? `${all.length} events` : '';
+  paint($('p-feed'), all.slice().reverse().map((a) => activityHtml(a, true)).join('')
+    || '<div class="empty">nothing to show</div>');
 }
 
-// ------------------------------------------------------------- the record
-
-/*
- * The task record: session id, log path, declared writes, plan steps — what
- * this task *is*, as opposed to what its agent is doing. The row's drawer
- * answers the second question; this answers the first, and both are one click
- * deep.
- */
-async function loadTask(n) {
-  try {
-    const r = await fetch(`/api/task?n=${encodeURIComponent(n)}`);
-    const body = await r.json();
-    if (openTask !== n) return; // a newer click already won the panel
-    if (!r.ok) { $('d-body').innerHTML = `<pre>${esc(body.error || r.statusText)}</pre>`; return; }
-    drawTask(body.task);
-  } catch (e) {
-    if (openTask === n) $('d-body').innerHTML = `<pre>${esc(e.message)}</pre>`;
-  }
-}
-
-function drawTask(t) {
-  $('d-title').innerHTML = `${statusIcon(t.status)}<span class="label">T${t.n} · ${esc(t.title)}</span>`;
-
-  const statusPill = t.status === 'done' ? 'ok' : t.status === 'running' ? 'live' : t.status === 'pending' ? '' : 'bad';
-  const kv = [
-    ['Status', `<span class="pill ${statusPill}">${esc(STATUS_WORD[t.status] || t.status)}${t.barrier ? ' · barrier' : ''}</span>`],
-    ['Lane', t.lane ? esc(String(t.lane).toUpperCase()) : '—'],
-    // A running task's duration is a clock, and a clock in the payload would
-    // repaint this panel every second — with the reader's focus inside it.
-    ['Duration', t.status === 'running' && t.startedAt ? `<span data-since="${esc(t.startedAt)}">–</span>` : esc(span(t))],
-    ['Turns', String(t.turns || 0)],
-    ['Attempts', String(t.attempts || 0)],
-    ['Output tokens', typeof t.outputTokens === 'number' ? t.outputTokens.toLocaleString() : '—'],
-    ['Model', `<span class="mono">${esc(t.model || '—')}</span>`],
-    ['Session', t.sessionId
-      ? `<span class="v-cp"><span class="mono">${esc(t.sessionId)}</span>${copyBtnHtml(t.sessionId, 'the session id')}</span>`
-      : '<span class="mono">—</span>'],
-    ['Commits', (t.commits || []).length ? `<span class="mono">${t.commits.map((c) => esc(short(c))).join(' ')}</span>` : '—'],
-    ['Log', t.logFile
-      ? `<span class="v-cp"><span class="mono">${esc(t.logFile)}</span>${copyBtnHtml(t.logFile, 'the log path')}</span>`
-      : '<span class="mono">—</span>'],
-  ];
-
-  // No `.pad` wrapper. The rows were inset 12px from a panel that already has
-  // a gutter, so every rule between them stopped short of the edge it divided.
-  const parts = [`<div class="list kv">${kv.map(([k, v]) => `<div class="kv-row"><span class="k">${KV_ICON[k] || ''}${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div>`];
-
-  if (t.error) parts.push(`<h3>${t.status === 'blocked' ? 'Why it stopped' : 'Error'}</h3><div class="md">${md(t.error)}</div>`);
-  // A blocked task's error IS its final message; printing both twice reads as
-  // two findings when there is one. The stored error keeps the report's line
-  // breaks and the digest collapses them, so compare on flattened text.
-  const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
-  const resultText = t.result && (t.result.body || t.result.text);
-  const duplicated = resultText && t.error
-    && (flat(t.error).includes(flat(resultText).slice(0, 60)) || flat(resultText).includes(flat(t.error).slice(0, 60)));
-  if (resultText && !duplicated) parts.push(`<h3>Agent result${t.result.clipped ? ' · clipped' : ''}</h3><div class="md">${md(resultText)}</div>`);
-  if (t.files && t.files.writes.length) parts.push(`<h3>Declared writes</h3><pre>${t.files.writes.map(esc).join('\n')}</pre>`);
-  if (t.files && t.files.excluded.length) parts.push(`<h3>Excluded by negation</h3><pre>${t.files.excluded.map(esc).join('\n')}</pre>`);
-  if (t.steps && t.steps.length) {
-    parts.push(`<h3>Plan steps</h3><ul class="steps tick">${t.steps.map((st) => `<li class="${st.checked ? 'on' : ''}">${checkbox(st.checked)}<span>${mdInline(esc(st.text))}</span></li>`).join('')}</ul>`);
-  }
-  parts.push(`<h3>Activity${t.truncated ? ' · tail' : ''}</h3><div class="pad"><div class="feed" style="margin:0;max-height:none">${
-    t.activity.length ? t.activity.slice().reverse().map((a) => activityHtml(a)).join('') : '<div class="empty">no agent events recorded</div>'
-  }</div></div>`);
-
-  // Painted, not assigned: the stream redraws this every second while a task
-  // is open, and an unguarded write destroys whatever the reader had focused.
-  if (paint($('d-body'), parts.join(''))) tick();
-}
-
-// -------------------------------------------------------------- the panel
-
-/*
- * One drawer, two contents, and it is modal at every width. The column beside
- * the board is gone: it spent 40% of the screen on the events nobody reads
- * twice, which is the whole reason this redesign exists.
- */
-function applyPanel() {
-  document.body.dataset.panel = panelOpen ? 'open' : '';
-  const p = $('panel');
-  p.setAttribute('aria-hidden', panelOpen ? 'false' : 'true');
-  if (panelOpen) p.removeAttribute('inert');
-  else p.setAttribute('inert', '');
-
-  const onTask = openTask != null;
-  $('p-feed').hidden = onTask;
-  $('p-tools').hidden = onTask;
-  $('d-body').hidden = !onTask;
-  $('p-back').hidden = !onTask;
-  $('p-count').hidden = onTask;
-  if (!onTask) $('d-title').textContent = 'Run activity';
-}
-
-/**
- * `#task=4` survives a reload and pastes into Slack, which is most of what a
- * URL is for. `pushState` never fires `hashchange`, so the page can write the
- * hash without hearing itself and reopening what it just opened.
- */
-const hashTask = () => {
-  const m = /^#task=(\d+)$/.exec(location.hash || '');
-  return m ? Number(m[1]) : null;
-};
-
-function writeHash(n) {
-  const want = n == null ? '' : `#task=${n}`;
-  if (location.hash === want) return;
-  if (n == null) history.replaceState(null, '', location.pathname + location.search);
-  else history.pushState(null, '', want);
-}
-
-window.addEventListener('hashchange', () => {
-  const n = hashTask();
-  if (n == null) { if (openTask != null) backToFeed(); return; }
-  if (n !== openTask) showTask(n);
-});
-
-function showFeed(trigger) {
-  if (trigger) openedFrom = trigger;
-  openTask = null;
-  panelOpen = true;
-  writeHash(null);
-  applyPanel();
-  renderFeed();
-  $('p-q').focus();
-}
-
-function showTask(n, trigger) {
-  if (trigger) openedFrom = trigger;
-  openTask = n;
-  panelOpen = true;
-  writeHash(n);
-  applyPanel();
-  $('d-close').focus();
-  loadTask(n);
-}
-
-/** Back to the run feed, keeping the drawer where it is. */
-function backToFeed() {
-  openTask = null;
-  writeHash(null);
-  applyPanel();
-  renderFeed();
-  $('p-feed').scrollTop = 0;
-}
-
-function closePanel() {
-  if (!panelOpen) return;
-  openTask = null;
-  panelOpen = false;
-  writeHash(null);
-  // Focus must not stay inside a container that is about to be inert.
-  if (openedFrom && document.contains(openedFrom)) openedFrom.focus();
-  openedFrom = null;
-  applyPanel();
-  renderFeed();
-}
-
-/** Keep Tab inside the drawer while it is open — a modal that leaks focus
- *  behind its own scrim is worse than one that never claimed to be modal. */
-function trapTab(e) {
-  if (!panelOpen || e.key !== 'Tab') return;
-  const focusable = [...$('panel').querySelectorAll('button, input, select, [href], [tabindex]:not([tabindex="-1"])')]
-    .filter((el) => !el.hidden && !el.closest('[hidden]') && el.offsetParent !== null);
-  if (!focusable.length) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-}
-
-/** Expand one agent and put it where the reader can see it. The alert that
- *  reports a failure is usually above the fold and the row rarely is. */
-function openAgent(id) {
-  openIds.add(id);
-  if (raw && raw.ready) renderCrew(raw);
-  const el = $('crew').querySelector(`[data-card="${CSS.escape(id)}"]`);
-  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-}
-
-// ------------------------------------------------------------- interaction
+// ---------------------------------------------------------- interação
 
 document.addEventListener('click', (e) => {
   const cp = e.target.closest('[data-copy]');
   if (cp) { handleCopy(cp); return; }
 
-  const jump = e.target.closest('[data-open]');
-  if (jump) { openAgent(jump.dataset.open); return; }
-
-  const record = e.target.closest('[data-task]');
-  if (record) { showTask(Number(record.dataset.task), record); return; }
-
   const row = e.target.closest('.ag-row');
   if (row) {
     const id = row.dataset.agent;
     if (openIds.has(id)) openIds.delete(id); else openIds.add(id);
-    if (raw && raw.ready) renderCrew(raw);
+    renderCrew(snap);
     return;
   }
-
-  if (e.target.closest('#open-feed')) { showFeed(e.target.closest('#open-feed')); return; }
-  if (e.target.closest('#p-back')) { backToFeed(); return; }
-  if (e.target.closest('#d-close') || e.target.id === 'scrim') closePanel();
-  // Closing on any outside click made it impossible to hold a feed line
-  // against the agent row it came from — which is why both surfaces exist.
+  if (e.target.closest('#open-feed')) { openPanel(true); return; }
+  if (e.target.closest('#d-close') || e.target.closest('#scrim')) { openPanel(false); return; }
+  // Fechar em qualquer clique fora tornava impossível segurar uma linha do
+  // feed contra a linha do agente de onde ela veio — que é a razão de as duas
+  // superfícies existirem. Esc, o botão e o scrim (que só cobre a tela
+  // estreita) continuam fechando.
 });
+
+function openPanel(on) {
+  document.body.dataset.panel = on ? 'open' : '';
+  if (on) $('p-q').focus();
+}
 
 document.addEventListener('keydown', (e) => {
-  trapTab(e);
-  if (e.key === 'Escape') closePanel();
+  if (e.key === 'Escape') openPanel(false);
 });
 
-$('p-q').addEventListener('input', (e) => { feedQuery = e.target.value.trim().toLowerCase(); renderFeed(); });
-$('p-kind').addEventListener('change', (e) => { feedKind = e.target.value; renderFeed(); });
-$('p-wrap').addEventListener('click', () => {
-  const on = $('p-wrap').getAttribute('aria-pressed') !== 'true';
-  $('p-wrap').setAttribute('aria-pressed', String(on));
-  $('p-feed').classList.toggle('wrap', on);
-});
+$('p-q').addEventListener('input', (e) => { feedQuery = e.target.value.trim().toLowerCase(); renderFeed(snap); });
+$('p-kind').addEventListener('change', (e) => { feedKind = e.target.value; renderFeed(snap); });
 
 /*
- * A tooltip only knows which way to open at the instant it opens: the row
- * scrolls, the crew grows, and the same anchor is mid-screen now and eighteen
- * pixels off the bottom a minute from now.
+ * Um tooltip só sabe para onde abrir no instante em que abre: a linha rola,
+ * a tripulação cresce, e a mesma âncora está no meio da tela agora e a
+ * dezoito pixels do rodapé daqui a um minuto.
  */
 document.addEventListener('mouseover', (e) => {
-  const tip = e.target.closest && e.target.closest('.tip');
+  const tip = e.target.closest('.tip');
   if (!tip) return;
-  tip.classList.toggle('up', tip.getBoundingClientRect().bottom + 76 > window.innerHeight);
+  const r = tip.getBoundingClientRect();
+  tip.classList.toggle('up', r.bottom + 76 > window.innerHeight);
 }, true);
 document.addEventListener('focusin', (e) => {
-  const tip = e.target.closest && e.target.closest('.tip');
+  const tip = e.target.closest('.tip');
   if (tip) tip.classList.toggle('up', tip.getBoundingClientRect().bottom + 76 > window.innerHeight);
 });
 
-applyPanel();
-// A link into a task opens on it.
-if (hashTask() != null) showTask(hashTask());
-
-// ------------------------------------------------------------------ timers
-
-/** The clocks are what make a still screen look alive. */
+/** Os relógios são o que faz uma tela parada parecer viva. */
 function tick() {
-  if (document.hidden) return;
-  if (raw && raw.ready) {
-    const first = raw.totals.firstStartedAt;
-    $('m-elapsed').textContent = !first ? '–'
-      : raw.totals.active || !view || !view.lastEndedAt ? since(first)
-        : dur(view.lastEndedAt - Date.parse(first));
-  }
-  for (const el of document.querySelectorAll('[data-since]')) {
-    el.textContent = el.dataset.since ? since(el.dataset.since) : '–';
-  }
+  for (const el of document.querySelectorAll('[data-since]')) el.textContent = since(el.dataset.since);
+  if (snap) $('m-elapsed').textContent = snap.endedAt
+    ? dur(Date.parse(snap.endedAt) - Date.parse(snap.startedAt))
+    : since(snap.startedAt);
 }
 setInterval(tick, 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 
-// --------------------------------------------------------------- transport
+// ------------------------------------------------------ mock scenarios
 
-function setLive(on, text) {
-  $('live').className = `live ${on ? 'on' : 'off'}`;
-  $('live-text').textContent = text;
+document.querySelector('.mockbar').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-scn]');
+  if (!b) return;
+  for (const other of document.querySelectorAll('.mockbar button')) other.classList.toggle('on', other === b);
+  openIds.clear();
+  render(SCENARIOS[b.dataset.scn]());
+});
+
+/* =====================================================================
+ * Dados mockados
+ *
+ * Todo campo aqui é derivável do que o agente já escreve no log
+ * `stream-json` e do checkpoint que o `plo` mantém:
+ *
+ *   tag/title/lane/barrier  ← plano + `.plan-state-*.json`
+ *   status/startedAt/turns  ← checkpoint (monitor.js: taskView)
+ *   model                   ← evento `init` do log (monitor.js:186)
+ *   doing                   ← última chamada de tool do log
+ *   children                ← eventos `Task` agrupados por
+ *                             `parent_tool_use_id` (monitor.js:182,205)
+ *
+ * Nada de inventar campo que a fase 2 não teria de onde tirar.
+ * =================================================================== */
+
+const T0 = Date.now();
+const ago = (min, sec = 0) => new Date(T0 - min * 60000 - sec * 1000).toISOString();
+
+const tool = (at, name, target, ok = true, extra = {}) => ({ at, kind: 'tool', name, target, ok, ...extra });
+const say = (at, text) => ({ at, kind: 'text', text });
+
+const T1_LOG = [
+  say(ago(9), 'Reading the plan task and the files it declares. Starting from the token map.'),
+  tool(ago(8, 40), 'Read', '…/styles/tokens.css'),
+  tool(ago(8, 10), 'Write', '…/lib/theme.test.ts', true, { sub: true }),
+  tool(ago(7, 30), 'Bash', 'npm test -- --run src/lib/theme.test.ts', false, { sub: true, durationMs: 11000, preview: '2 failed — theme is not defined' }),
+  tool(ago(6, 50), 'Edit', '…/lib/theme.ts', true, { sub: true }),
+  tool(ago(6, 20), 'Bash', 'npm test -- --run 2>&1 | tail -30', true, { sub: true, durationMs: 16000 }),
+  tool(ago(5, 30), 'Bash', 'git add src/lib/theme.ts src/styles/tokens.css', true, { sub: true }),
+  tool(ago(5, 10), 'Bash', 'git commit -m "feat(theme): tokens and the resolver"', true, { sub: true }),
+  say(ago(4, 20), 'Tokens landed and committed. Handing the diff to a reviewer before I touch the toggle.'),
+  tool(ago(4), 'Task', 'review the theme token diff', true),
+  tool(ago(3, 10), 'Grep', '"prefers-color-scheme" in src', true, { sub: true }),
+  tool(ago(2, 30), 'Bash', 'git show HEAD:src/lib/theme.ts', false, { sub: true, preview: 'This command requires approval' }),
+  tool(ago(1, 40), 'Bash', 'npx vitest run tests/theme-toggle.test.tsx tests/nav', true, { durationMs: 3000 }),
+  tool(ago(1, 5), 'Bash', 'npx vitest run tests/session.test.ts', false, { preview: 'This Bash command contains multiple operations' }),
+  say(ago(0, 40), 'Verified the failures: all 8 unrelated specs break for reasons of their own.'),
+  tool(ago(0, 12), 'Bash', 'npx vitest run tests/theme-toggle.test.tsx'),
+];
+
+const T2_LOG = [
+  say(ago(4, 10), 'The toggle lives in the header, so I start by reading what the header already imports.'),
+  tool(ago(3, 40), 'Read', '…/components/Header.tsx'),
+  tool(ago(3), 'Grep', '"useTheme" in src/components', true),
+  tool(ago(2, 20), 'Write', '…/components/ThemeToggle.test.tsx', true, { sub: true }),
+  tool(ago(1, 30), 'Bash', 'npm test -- --run ThemeToggle', false, { sub: true, durationMs: 9000, preview: '1 failed — ThemeToggle is not exported' }),
+  tool(ago(0, 25), 'Read', '…/components/Header.tsx'),
+];
+
+const B6_LOG = [
+  say(ago(3, 20), 'Both lanes are merged. Running the app shell task against the combined tree.'),
+  tool(ago(2, 50), 'Bash', 'git log --oneline -8'),
+  tool(ago(2, 10), 'Read', '…/app/layout.tsx'),
+  tool(ago(1, 30), 'Edit', '…/app/layout.tsx', true, { sub: true }),
+  tool(ago(0, 50), 'Bash', 'npm test -- --run', true, { sub: true, durationMs: 42000 }),
+  tool(ago(0, 10), 'Bash', 'npm run build', true, { durationMs: 21000 }),
+];
+
+const last = (log, pred = () => true) => [...log].reverse().find((a) => pred(a)) || null;
+
+/** O agente da tarefa vê o que ele mesmo chamou; o subagente vê o que é dele. */
+const own = (log) => log.filter((a) => !a.sub);
+const subLog = (log, from, to) => log.slice(from, to).map((a) => ({ ...a, sub: false }));
+
+const agent = (o) => ({ children: [], activity: [], turns: 0, ...o, doing: o.doing || last(o.activity || []) });
+
+/** Quem despachou passa lane e natureza adiante — é o que a cor lê. */
+const lineage = (list) => list.map((a) => ({
+  ...a,
+  children: (a.children || []).map((k) => ({ ...k, lane: a.lane, barrier: a.barrier, sub: true })),
+}));
+
+function crewRunning() {
+  return lineage([
+    agent({
+      id: 'a-t1', tag: 'A · T1', lane: 'A', title: 'Theme tokens in the design system',
+      status: 'running', model: 'opus', startedAt: ago(9), turns: 54, outputTokens: 6200,
+      activity: own(T1_LOG),
+      children: [
+        agent({
+          id: 'a-t1-s1', tag: 'implementer', title: 'write the token map and make its test pass',
+          status: 'done', model: 'sonnet', startedAt: ago(8, 20), endedAt: ago(4, 40), turns: 22, outputTokens: 3100,
+          activity: subLog(T1_LOG, 2, 8),
+        }),
+        agent({
+          id: 'a-t1-s2', tag: 'code-reviewer', title: 'review the theme token diff',
+          status: 'running', model: 'sonnet', startedAt: ago(4), turns: 9, outputTokens: 1400,
+          activity: subLog(T1_LOG, 10, 12),
+        }),
+      ],
+    }),
+    agent({
+      id: 'b-t2', tag: 'B · T2', lane: 'B', title: 'Toggle in the header',
+      status: 'running', model: 'opus', startedAt: ago(4, 20), turns: 12, outputTokens: 1900,
+      activity: own(T2_LOG),
+      children: [
+        agent({
+          id: 'b-t2-s1', tag: 'implementer', title: 'red test for the toggle component',
+          status: 'running', model: 'sonnet', startedAt: ago(2, 30), turns: 6, outputTokens: 800,
+          activity: subLog(T2_LOG, 3, 5),
+        }),
+      ],
+    }),
+  ]);
 }
 
-let lastEventAt = 0;
-const source = new EventSource('/api/stream');
-source.addEventListener('snapshot', (e) => {
-  const payload = JSON.parse(e.data);
-  skew = payload.now - Date.now();
-  lastEventAt = Date.now();
-  render(payload.snapshot);
-  // The record is a live view too — a task finishing while it is open should
-  // show that, not a frozen snapshot from when it was clicked.
-  if (openTask != null && panelOpen) loadTask(openTask);
-});
-source.onopen = () => setLive(true, 'live');
-source.onerror = () => setLive(false, 'reconnecting…');
-setInterval(() => {
-  if (source.readyState !== 1) return;
-  const age = Math.round((Date.now() - lastEventAt) / 1000);
-  setLive(true, age < 30 ? 'live' : `live · quiet ${dur(age * 1000)}`);
-}, 1000);
+/** O feed global sai da tripulação, nunca de uma segunda fonte. */
+function buildFeed(crew) {
+  const rows = [];
+  const by = (a, path) => ({ id: a.id, lane: a.lane, barrier: a.barrier, sub: a.sub, status: a.status, path });
+  for (const a of crew) {
+    for (const ev of a.activity) rows.push({ ...ev, tag: a.tag, barrier: a.barrier, by: by(a, a.tag) });
+    for (const k of a.children || []) {
+      for (const ev of k.activity) rows.push({ ...ev, tag: k.tag, sub: true, by: by(k, `${a.tag} › ${k.tag}`) });
+    }
+  }
+  return rows.sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+}
+
+const STAGES = (run, merge, barriers, suite, review) => [
+  { label: 'Run', status: run[0], detail: run[1] },
+  { label: 'Merge', status: merge[0], detail: merge[1] },
+  { label: 'Barriers', status: barriers[0], detail: barriers[1] },
+  { label: 'Full suite', status: suite[0], detail: suite[1] },
+  { label: 'Cross-lane review', status: review[0], detail: review[1] },
+];
+
+const BASE = {
+  title: 'Dark Mode — Implementation Plan',
+  base: { branch: 'feat/dark-mode', commit: 'a1b2c3d' },
+  testCommand: 'npm test',
+  plan: 'docs/plans/2026-08-20-dark-mode.md',
+  lanes: 2, maxLanes: 2, startedAt: ago(12), endedAt: null,
+};
+
+const QUEUE = [
+  { tag: 'A · T5', title: 'Persist the preference per user', after: 'after T1' },
+  { tag: 'Barrier · T6', title: 'App shell — the global switch lands', barrier: true, after: 'after the merge' },
+  { tag: 'Barrier · T7', title: 'Charts and images follow the theme', barrier: true, after: 'after T6' },
+  { tag: 'Barrier · T8', title: 'Smoke gate, changelog and PR', barrier: true, after: 'after T7' },
+];
+
+const SETTLED = [
+  { tag: 'A · T3', title: 'Dark palette in the design system', status: 'done', outputTokens: 4200, commits: 2 },
+  { tag: 'B · T4', title: 'Storybook stories for the toggle', status: 'done', outputTokens: 3100, commits: 1 },
+];
+
+const SCENARIOS = {
+  running() {
+    const crew = crewRunning();
+    return {
+      ...BASE,
+      totals: { done: 2, total: 8, outputTokens: 18400 },
+      stages: STAGES(['running', '2 of 6 tasks'], ['pending', '2 lanes'], ['pending', '0/3 tasks'], ['pending'], ['pending']),
+      alerts: [], crew, queue: QUEUE, settled: SETTLED, feed: buildFeed(crew),
+    };
+  },
+
+  blocked() {
+    const crew = crewRunning();
+    crew[1] = lineage([agent({
+      id: 'b-t2', tag: 'B · T2', lane: 'B', title: 'Toggle in the header',
+      status: 'blocked', model: 'opus', startedAt: ago(4, 20), endedAt: ago(0, 50), turns: 12, outputTokens: 1900,
+      error: '**Blocked.** The toggle needs `useTheme` from Task 1, which has not committed the hook yet.\n\nWaiting would deadlock the lane, so I stopped instead of guessing at the interface. Task 1 declares `Produces: useTheme()` and is still running its own reviewer, so the hook should land on its next commit.\n\n**To carry on:** let T1 settle, then resume — this lane picks up T2 from its own worktree, no rebase needed.',
+      resume: 'plo resume --plan docs/plans/2026-08-20-dark-mode.md',
+      branch: 'feat/dark-mode-lane-b',
+      activity: own(T2_LOG),
+      children: [
+        agent({
+          id: 'b-t2-s1', tag: 'implementer', title: 'red test for the toggle component',
+          status: 'failed', model: 'sonnet', startedAt: ago(2, 30), endedAt: ago(1, 20), turns: 6, outputTokens: 800,
+          error: '**Failed.** `ThemeToggle` is not exported from `src/components` — the red test cannot even import the component it is meant to fail against.',
+          activity: subLog(T2_LOG, 3, 5),
+        }),
+      ],
+    })])[0];
+    return {
+      ...BASE,
+      totals: { done: 2, total: 8, outputTokens: 18400 },
+      stages: STAGES(['running', '2 of 6 tasks'], ['pending', '2 lanes'], ['pending', '0/3 tasks'], ['pending'], ['pending']),
+      alerts: [{ bad: true, title: 'Lane B stopped.', text: 'T2 is blocked on an interface Task 1 has not produced. The lane will not pick up T5 until it settles.', copy: 'plo resume --plan docs/plans/2026-08-20-dark-mode.md' }],
+      crew, queue: QUEUE, settled: SETTLED, feed: buildFeed(crew),
+    };
+  },
+
+  /* Lanes encerradas, barreira ainda não começou: ninguém vivo e a run longe
+     de acabar. Era a tela mais vazia do produto e a que mais parece falha. */
+  merging() {
+    return {
+      ...BASE,
+      totals: { done: 5, total: 8, outputTokens: 31200 },
+      stages: STAGES(['done', '6 tasks'], ['running', '2 lanes'], ['pending', '0/3 tasks'], ['pending'], ['pending']),
+      alerts: [], crew: [],
+      queue: QUEUE.slice(1),
+      settled: [
+        ...SETTLED,
+        { tag: 'A · T1', title: 'Theme tokens in the design system', status: 'done', outputTokens: 9600, commits: 3 },
+        { tag: 'B · T2', title: 'Toggle in the header', status: 'done', outputTokens: 5200, commits: 2 },
+        { tag: 'A · T5', title: 'Persist the preference per user', status: 'done', outputTokens: 3900, commits: 1 },
+      ],
+      feed: [],
+    };
+  },
+
+  integrating() {
+    const crew = lineage([
+      agent({
+        id: 'bar-t6', tag: 'Barrier · T6', title: 'App shell — the global switch lands',
+        status: 'running', model: 'opus', barrier: true, startedAt: ago(3, 30), turns: 18, outputTokens: 5100,
+        activity: own(B6_LOG),
+        children: [
+          agent({
+            id: 'bar-t6-s1', tag: 'implementer', title: 'wire the provider into the app shell',
+            status: 'running', model: 'sonnet', startedAt: ago(1, 40), turns: 7, outputTokens: 1200,
+            activity: subLog(B6_LOG, 3, 5),
+          }),
+        ],
+      }),
+    ]);
+    return {
+      ...BASE,
+      totals: { done: 5, total: 8, outputTokens: 31200 },
+      stages: STAGES(['done', '6 tasks'], ['done', '2 lanes'], ['running', '0/3 tasks'], ['pending'], ['pending']),
+      alerts: [], crew,
+      queue: QUEUE.slice(2),
+      settled: [
+        ...SETTLED,
+        { tag: 'A · T1', title: 'Theme tokens in the design system', status: 'done', outputTokens: 9600, commits: 3 },
+        { tag: 'B · T2', title: 'Toggle in the header', status: 'done', outputTokens: 5200, commits: 2 },
+        { tag: 'A · T5', title: 'Persist the preference per user', status: 'done', outputTokens: 3900, commits: 1 },
+      ],
+      feed: buildFeed(crew),
+    };
+  },
+
+  done() {
+    return {
+      ...BASE, endedAt: ago(2),
+      outcome: {
+        wallSeconds: 600, agentSeconds: 1600, commits: 13, specs: 212,
+        reviewOk: true,
+        review: 'Cross-lane review found no blocking issues. Two lanes had each written their own `resolveTheme` helper; the reviewer kept lane A\u2019s and pointed lane B\u2019s import at it.',
+      },
+      totals: { done: 8, total: 8, outputTokens: 48700 },
+      stages: STAGES(['done', '6 tasks'], ['done', '2 lanes'], ['done', '3 tasks'], ['done', '212 specs'], ['done', 'no blocking findings']),
+      alerts: [], crew: [], queue: [],
+      settled: [
+        ...SETTLED,
+        { tag: 'A · T1', title: 'Theme tokens in the design system', status: 'done', outputTokens: 9600, commits: 3 },
+        { tag: 'B · T2', title: 'Toggle in the header', status: 'done', outputTokens: 5200, commits: 2 },
+        { tag: 'A · T5', title: 'Persist the preference per user', status: 'done', outputTokens: 3900, commits: 1 },
+        { tag: 'Barrier · T6', title: 'App shell — the global switch lands', status: 'done', outputTokens: 7300, commits: 2 },
+        { tag: 'Barrier · T7', title: 'Charts and images follow the theme', status: 'done', outputTokens: 4100, commits: 1 },
+        { tag: 'Barrier · T8', title: 'Smoke gate, changelog and PR', status: 'done', outputTokens: 5300, commits: 1 },
+      ],
+      feed: [],
+    };
+  },
+};
+
+/*
+ * Deep link: `#scn=blocked&open=a-t1,b-t2` escolhe o cenário e já abre os
+ * logs pedidos. Existe para a captura de tela e para a revisão — um estado
+ * que só se alcança clicando não pode ser mostrado num link.
+ */
+function fromHash() {
+  const q = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const scn = SCENARIOS[q.get('scn')] ? q.get('scn') : 'running';
+  openIds.clear();
+  for (const id of (q.get('open') || '').split(',').filter(Boolean)) openIds.add(id);
+  for (const b of document.querySelectorAll('.mockbar button')) b.classList.toggle('on', b.dataset.scn === scn);
+  render(SCENARIOS[scn]());
+  openPanel(Boolean(q.get('panel')));
+}
+window.addEventListener('hashchange', fromHash);
+fromHash();
 </script>
 </body>
 </html>

@@ -1,5 +1,12 @@
 # Dashboard do `plo serve` — ajustes de layout e usabilidade
 
+> **Histórico.** Este documento auditou e projetou o layout de board + trilho +
+> timeline, que a v2 substituiu: a unidade da tela deixou de ser a lane e passou
+> a ser o agente. A tela atual está descrita no `README.md`; o protótipo que a
+> validou está em `docs/prototypes/`. O que segue é o raciocínio que produziu o
+> layout anterior — mantido porque as medições e as referências continuam
+> valendo, não porque descrevem a tela de hoje.
+
 Auditado em `src/ui.html` @ `6096bcf`, medido contra a run real do takz `1.11.0`
 num viewport de **1728×1080**. Referências visuais coletadas no Mobbin (web).
 
