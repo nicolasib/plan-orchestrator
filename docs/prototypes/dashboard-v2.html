@@ -1516,17 +1516,21 @@ function orbDots(n, { jitter = 0, spread = 1, ring = false } = {}) {
  * fora na hora de desenhar. Aqui ela vira forma:
  *
  *   scan    esfera densa e regular, varrendo — ler, procurar, olhar o git
- *   churn   nuvem irregular, com pontos soltos — editar, testar, commitar
+ *   churn   esfera desarranjada, de contorno quebrado — editar, testar
  *   think   esfera fechada e lenta — pensar, planejar
  *   orbit   um anel em perspectiva — despachar para outro agente
  *
  * A distribuição de Fibonacci é o que dá o espaçamento uniforme do `scan`; o
  * `churn` é a mesma distribuição desarranjada de propósito, porque
  * irregularidade lida como esforço.
+ *
+ * O desarranjo é medido em 20px, não ampliado: com jitter alto a silhueta
+ * esférica se perde e o orb lê como sujeira, não como trabalho. O que
+ * distingue `churn` de `scan` é o contorno quebrado, não a dispersão.
  */
 const ORB_BODY = {
   scan: orbDots(26),
-  churn: orbDots(19, { jitter: 0.5, spread: 1.4 }),
+  churn: orbDots(23, { jitter: 0.2, spread: 1.1 }),
   think: orbDots(30, { spread: 0.82 }),
   orbit: orbDots(16, { ring: true }),
 };
