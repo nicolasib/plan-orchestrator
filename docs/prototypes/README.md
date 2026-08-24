@@ -21,11 +21,21 @@ vazia não é notícia; um agente parado há vinte minutos é.
 Cada linha responde de uma vez: lane, task, modelo, tempo vivo, turns, e **uma
 frase** do que o agente está fazendo — não um log.
 
+## Barreira
+
+O chip de uma barreira carrega um ícone (duas trilhas chegando numa parede) e
+um tooltip que explica o termo — ninguém que abre o dashboard pela primeira
+vez sabe o que uma barreira é, e `Barrier · T6` sozinho não ensina.
+
 ## Avatares
 
 Identidade (cor, olhos, ângulo do topo) sai do hash do id do agente: o mesmo
 agente é o mesmo rosto do começo ao fim da run. O **humor sai do status** —
 quem falhou não sorri. É a única feição que o id não escolhe.
+
+Anel azul enquanto trabalha, check verde quando termina. O anel verde sozinho
+era a mesma forma numa cor diferente — a diferença que menos se nota de
+relance.
 
 ## Cenários
 

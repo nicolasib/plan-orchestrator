@@ -881,16 +881,38 @@
   @media (min-width: 900px) {
     .frame-body { display: flex; }
     .scroller { flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
-    .scrim { display: block; }
-    aside {
-      position: fixed; top: 0; right: 0; height: 100%; width: min(560px, 100vw);
-      z-index: 5; transform: translateX(100%); visibility: hidden;
-      border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
-      transition: transform .16s cubic-bezier(.32, .72, 0, 1), visibility 0s .16s;
-    }
-    aside.open { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
-    .railbtn { display: inline-flex; }
   }
+
+  /*
+   * O painel é irmão do frame, não filho: como gaveta ele é do documento, e
+   * empilhá-lo dentro de um `.frame` que é `position: fixed` deixava o scrim
+   * (z-index 4, irmão do frame) por cima da própria gaveta — tela escura,
+   * nada clicável. Estado no `<body>`, para não haver duas classes que
+   * possam divergir.
+   */
+  #scrim { z-index: 50; display: block; }
+  #panel {
+    position: fixed; top: 0; right: 0; height: 100%; width: min(560px, 100vw);
+    z-index: 60; transform: translateX(100%); visibility: hidden;
+    background: var(--surface); border: 0; border-left: 1px solid var(--line);
+    border-radius: 0; box-shadow: var(--shadow-lg);
+    transition: transform .16s cubic-bezier(.32, .72, 0, 1), visibility 0s .16s;
+  }
+  body[data-panel="open"] #panel { transform: none; visibility: visible; transition: transform .16s cubic-bezier(.32, .72, 0, 1); }
+  body[data-panel="open"] #scrim { opacity: 1; pointer-events: auto; }
+  @media (prefers-reduced-motion: reduce) { #panel { transition: none; } }
+
+  /* Um botão que é a cópia exata do badge ao lado dele não se anuncia como
+     clicável. Canto vivo, tinta do acento e a mesma altura dos vizinhos —
+     as três coisas que o separavam de `live` eram nenhuma. */
+  .railbtn {
+    display: inline-flex; height: 26px; min-height: 0; padding: 0 11px; margin-left: 8px;
+    border-radius: var(--radius-sm); font-weight: 500;
+    background: var(--accent-soft); border-color: transparent; color: var(--accent-ink);
+  }
+  .railbtn:hover { background: var(--accent); color: #fff; }
+  .railbtn:active { transform: translateY(.5px); }
+  .live { height: 26px; margin-left: 6px; }
 
   .wrap { max-width: 1180px; margin-inline: auto; }
   main > section > h2 { display: flex; align-items: center; gap: 8px; }
@@ -901,14 +923,14 @@
   /* Um agente é alguém trabalhando, então tem cara. A identidade (cor, olhos,
      inclinação) sai do id — o mesmo agente é o mesmo rosto em toda a run. O
      humor sai do status: quem falhou não sorri. */
-  .av { position: relative; flex: 0 0 auto; line-height: 0; }
+  .av { position: relative; flex: 0 0 auto; display: inline-flex; line-height: 0; }
   .av svg { display: block; border-radius: 50%; }
   .av .ring {
     position: absolute; inset: -3px; border-radius: 50%;
     border: 1.5px solid transparent;
   }
-  .av.running .ring { border-color: var(--run); animation: avspin 2.4s linear infinite; border-left-color: transparent; border-bottom-color: transparent; }
-  .av.done .ring { border-color: var(--done); opacity: .55; }
+  .av.running .ring { border-color: var(--accent); border-left-color: transparent; border-bottom-color: transparent; animation: avspin 2.4s linear infinite; }
+  .av.done .ring { border-color: var(--done); }
   .av.failed .ring, .av.blocked .ring { border-color: var(--fail); }
   .av.pending { opacity: .5; }
   .av.running svg { animation: avbob 3.2s ease-in-out infinite; }
@@ -920,12 +942,20 @@
   /* O modelo mora no avatar: é a etiqueta de crachá de quem está trabalhando. */
   .av .badge {
     position: absolute; right: -4px; bottom: -4px;
-    min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px;
+    min-width: 15px; height: 15px; padding: 0 2.5px; border-radius: 8px;
     background: var(--surface); border: 1px solid var(--line);
-    color: var(--text); font: 600 9.5px/14px var(--ui); text-align: center;
+    color: var(--text); font: 600 9px/13px var(--ui); text-align: center;
     letter-spacing: .02em; text-transform: uppercase;
   }
-  .av.sm .badge { min-width: 14px; height: 14px; line-height: 12px; font-size: 8.5px; border-radius: 7px; right: -3px; bottom: -3px; }
+  .av.sm .badge { min-width: 12.5px; height: 12.5px; line-height: 11px; font-size: 8px; border-radius: 7px; right: -3px; bottom: -3px; }
+  /* O check fecha o assunto. O anel verde sozinho é a mesma forma do anel
+     azul numa cor diferente — a diferença que menos se nota de relance. */
+  .av .tick {
+    position: absolute; right: -4px; top: -4px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--done); display: grid; place-items: center;
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+  .av.sm .tick { width: 12px; height: 12px; right: -3px; top: -3px; }
 
   /* --------------------------------------------------------- a tripulação */
 
@@ -938,8 +968,10 @@
 
   .ag {
     border: 1px solid var(--line); border-radius: var(--radius);
-    background: var(--surface); box-shadow: var(--shadow); overflow: hidden;
+    background: var(--surface); box-shadow: var(--shadow);
   }
+  .ag > :last-child { border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px); }
+  .ag > .ag-row:only-child { border-radius: inherit; }
   .ag.failed, .ag.blocked { border-color: color-mix(in srgb, var(--fail) 42%, var(--line)); }
 
   /* A linha inteira é o botão. Um chevron de 12px como único alvo de clique é
@@ -957,7 +989,24 @@
     flex: 0 0 auto; font: 500 10.5px/1 var(--mono); letter-spacing: .02em;
     color: var(--text-2); background: var(--code-bg); padding: 3px 6px; border-radius: 5px;
   }
-  .ag-tag.barrier { color: var(--accent-ink); background: var(--accent-soft); }
+  .ag-tag.barrier { color: var(--accent-ink); background: var(--accent-soft); display: inline-flex; align-items: center; gap: 5px; }
+  .ag-tag.barrier svg { flex: 0 0 auto; }
+
+  /* Uma explicação que só aparece quando pedida. O `title` nativo chega tarde
+     demais e some cedo demais para um termo que o leitor está vendo pela
+     primeira vez. */
+  .tip { position: relative; }
+  .tip::after {
+    content: attr(data-tip);
+    position: absolute; left: 0; top: calc(100% + 7px); width: max-content; max-width: 300px;
+    padding: 8px 10px; border-radius: var(--radius-sm);
+    background: var(--surface-2); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+    color: var(--text-2); font: 400 11.5px/1.5 var(--ui); letter-spacing: 0; text-transform: none;
+    white-space: normal; text-align: left;
+    opacity: 0; pointer-events: none; transition: opacity .12s ease .18s; z-index: 20;
+  }
+  .tip:hover::after, .tip:focus-visible::after { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .tip::after { transition: none; } }
   .ag-name { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Uma frase, não um log. É a linha que responde "o que ele está fazendo". */
@@ -973,7 +1022,7 @@
   /* Três pontinhos: a única coisa na tela que se move quando nada muda, e a
      razão pela qual dá pra ver de longe que a run está viva. */
   .dots { display: inline-flex; gap: 2.5px; flex: 0 0 auto; align-items: center; height: 12px; }
-  .dots i { width: 3px; height: 3px; border-radius: 50%; background: var(--run); opacity: .35; animation: blip 1.4s ease-in-out infinite; }
+  .dots i { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); opacity: .35; animation: blip 1.4s ease-in-out infinite; }
   .dots i:nth-child(2) { animation-delay: .18s; }
   .dots i:nth-child(3) { animation-delay: .36s; }
   @keyframes blip { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
@@ -1005,13 +1054,15 @@
   /* --------------------------------------------------------------- o log */
 
   /* Só existe depois do clique. Era metade da tela; agora é uma gaveta. */
-  .ag-log { border-top: 1px solid var(--line-soft); background: var(--surface-2); }
+  .ag-log { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+  .ag-log:last-child { border-bottom: 0; }
   .ag-log .feed { margin: 0; border: 0; border-radius: 0; background: transparent; max-height: 320px; }
   .ag-log .log-head {
     display: flex; align-items: center; gap: 8px;
-    padding: 7px 13px; border-bottom: 1px solid var(--line-soft);
+    padding: 6px 13px; border-bottom: 1px solid var(--line-soft);
     font-size: 11px; color: var(--text-3);
   }
+  .ag-log .log-head b { font-weight: 500; color: var(--text-2); font-family: var(--mono); font-size: 10.5px; }
   .kid .ag-log { margin-left: 0; }
 
   /* ------------------------------------------------------------- a fila */
@@ -1101,7 +1152,12 @@
   </div>
   </div>
 
-  <aside id="panel" aria-labelledby="d-title">
+</div>
+
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside id="panel" aria-labelledby="d-title">
     <div class="head">
       <h2 id="d-title">Run activity</h2>
       <div class="grow"></div>
@@ -1119,11 +1175,7 @@
     </div>
     <div class="feed run" id="p-feed"></div>
   </aside>
-</div>
 
-</div>
-
-<div class="scrim" id="scrim"></div>
 
 <div class="mockbar" role="group" aria-label="Prototype scenario">
   <span class="tag">mock</span>
@@ -1223,6 +1275,20 @@ const alertIcon = (bad) => {
     <circle cx="7" cy="10" r=".85" fill="${c}" /></svg>`;
 };
 
+const BARRIER_TIP = 'Barrier task: it runs after every lane has merged, on the combined tree — so it can touch files that the lanes were kept apart to avoid.';
+
+/*
+ * Duas trilhas chegando numa parede.
+ *
+ * O `mergeIcon` do ui.html — dois branches dobrando num só — é bonito a 13px
+ * e ilegível a 11: as curvas viram um traço com um ponto. Aqui a forma é
+ * feita para o tamanho em que ela é usada, e diz o que a barreira faz: as
+ * lanes param nela.
+ */
+const barrierIcon = (s = 11) => `<svg width="${s}" height="${s}" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M1.7 3.6 H6.3 M1.7 8.4 H6.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+  <path d="M9.1 1.7 V10.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>`;
+
 const chevIcon = () => `<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.4 2.6 L8 6 L4.4 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
 
 // ------------------------------------------------------------- avatares
@@ -1291,11 +1357,13 @@ const MODEL_TAG = (m) => {
   return s ? s.slice(0, 1).toUpperCase() : '?';
 };
 
+const tickMark = () => `<span class="tick"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><path d="M1.8 4.6 L3.6 6.4 L7.2 2.6" fill="none" stroke="var(--on-brand)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></span>`;
+
 function avatarHtml(a, size = 28) {
   const sm = size <= 22 ? ' sm' : '';
   const badge = a.model ? `<span class="badge" title="${esc(a.model)}">${esc(MODEL_TAG(a.model))}</span>` : '';
   return `<span class="av ${esc(a.status)}${sm}" title="${esc(a.model || '')}">
-    ${avatarSvg(a.id, size, a.status)}<span class="ring"></span>${badge}</span>`;
+    ${avatarSvg(a.id, size, a.status)}<span class="ring"></span>${a.status === 'done' ? tickMark() : ''}${badge}</span>`;
 }
 
 // ------------------------------------------------------- o que ele faz
@@ -1453,7 +1521,7 @@ function agentHtml(a, kid = false) {
 
   const log = open
     ? `<div class="ag-log">
-         <div class="log-head">${esc(a.tag)} · last ${plural((a.activity || []).length, 'event')}</div>
+         <div class="log-head">${avatarHtml(a, 16)}<b>${esc(a.tag)}</b> · last ${plural((a.activity || []).length, 'event')}</div>
          <div class="feed">${(a.activity || []).slice().reverse().map((ev) => activityHtml(ev)).join('')
            || '<div class="empty">no events yet</div>'}</div>
        </div>`
@@ -1463,7 +1531,7 @@ function agentHtml(a, kid = false) {
       ${avatarHtml(a, kid ? 22 : 28)}
       <span class="ag-main">
         <span class="ag-who">
-          <span class="ag-tag${a.barrier ? ' barrier' : ''}">${esc(a.tag)}</span>
+          <span class="ag-tag${a.barrier ? ' barrier tip' : ''}"${a.barrier ? ` data-tip="${esc(BARRIER_TIP)}" tabindex="0"` : ''}>${a.barrier ? barrierIcon(11) : ''}${esc(a.tag)}</span>
           <span class="ag-name">${esc(a.title)}</span>
         </span>
         ${line}
@@ -1473,7 +1541,7 @@ function agentHtml(a, kid = false) {
     </button>`;
 
   // Um subagente já vem embrulhado pelo pai; a tarefa embrulha a si mesma.
-  return kid ? row + log : `<div class="ag ${esc(a.status)}${open ? ' open' : ''}" data-card="${esc(a.id)}">${row}${kids}${log}</div>`;
+  return kid ? row + log : `<div class="ag ${esc(a.status)}${open ? ' open' : ''}" data-card="${esc(a.id)}">${row}${log}${kids}</div>`;
 }
 
 /** Tira do relato a palavra que a etiqueta ao lado já carrega. */
@@ -1508,7 +1576,7 @@ function renderQueue(s) {
   $('queue-tally').textContent = q.length ? String(q.length) : '';
   paint($('queue'), q.map((t) => `<div class="qrow">
       ${statusIcon('pending', 14)}
-      <span class="ag-tag${t.barrier ? ' barrier' : ''}">${esc(t.tag)}</span>
+      <span class="ag-tag${t.barrier ? ' barrier tip' : ''}"${t.barrier ? ` data-tip="${esc(BARRIER_TIP)}" tabindex="0"` : ''}>${t.barrier ? barrierIcon(11) : ''}${esc(t.tag)}</span>
       <span class="qtitle">${esc(t.title)}</span>
       <span class="after">${esc(t.after)}</span>
     </div>`).join(''));
@@ -1522,7 +1590,7 @@ function renderSettled(s) {
 
   const grp = (label, items) => !items.length ? '' : `<div class="grp">
       <span class="lbl"><b>${esc(label)}</b> ${items.length}</span>
-      ${items.map((t) => `<span class="ag-tag" title="${esc(t.title)}">${esc(t.tag)}</span>`).join('')}
+      ${items.map((t) => `<span class="ag-tag${t.tag.startsWith('Barrier') ? ' barrier' : ''}" title="${esc(t.title)}">${esc(t.tag)}</span>`).join('')}
     </div>`;
 
   paint($('settled'), [
@@ -1561,12 +1629,11 @@ document.addEventListener('click', (e) => {
   }
   if (e.target.closest('#open-feed')) { openPanel(true); return; }
   if (e.target.closest('#d-close') || e.target.closest('#scrim')) { openPanel(false); return; }
-  if ($('panel').classList.contains('open') && !e.target.closest('#panel')) openPanel(false);
+  if (document.body.dataset.panel === 'open' && !e.target.closest('#panel')) openPanel(false);
 });
 
 function openPanel(on) {
-  $('panel').classList.toggle('open', on);
-  $('scrim').classList.toggle('open', on);
+  document.body.dataset.panel = on ? 'open' : '';
   if (on) $('p-q').focus();
 }
 
