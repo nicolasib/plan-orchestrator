@@ -50,10 +50,22 @@ reimplementada aqui em CSS puro. As partículas são posicionadas uma vez, em
 espiral de Fibonacci, e quem gira é o contêiner: nenhum frame custa
 JavaScript, e vinte orbs na tela não pesam mais que um.
 
-**O estado escolhe o movimento, não só a cor.** Trabalhando: gira redondo, no
-acento. Vivo mas tropeçado numa chamada que falhou: mais devagar e fora de
-eixo, em `--warn`. Parado: a esfera colapsa e o movimento cessa, em `--fail` —
-imobilidade é o sinal.
+**A forma diz que tipo de trabalho é; a cor e o ritmo dizem como ele vai.**
+São dois eixos independentes, e ambos saem de dados que já existiam.
+
+O corpo vem da família do verbo, que o `humanize()` já precisava classificar
+para escolher a palavra:
+
+| Família | Corpo | Verbos |
+|---|---|---|
+| `scan` | esfera regular, varrendo | ler, procurar, olhar o git, buscar na web |
+| `churn` | nuvem irregular, com pontos soltos | editar, escrever, testar, buildar, commitar |
+| `think` | esfera fechada e lenta | pensar, planejar |
+| `orbit` | um anel em perspectiva | despachar subagente, usar skill |
+
+O estado não troca a forma — muda a cor e o ritmo: em curso no acento; vivo
+depois de uma chamada que falhou, em `--warn` e mais devagar; parado, a esfera
+colapsa e o movimento cessa, em `--fail`. Imobilidade é o sinal.
 
 Ele substitui três pontos de 3px que o comentário do próprio código chamava de
 "a razão pela qual dá pra ver de longe que a run está viva", e que a três

@@ -1106,6 +1106,12 @@
     transform-style: preserve-3d;
     animation: orbspin 3.4s linear infinite;
   }
+  /* Um movimento por família, na mesma ordem em que o corpo muda: varrer é
+     regular, remexer é irregular, pensar é lento, despachar é uma órbita. */
+  .orb.scan .ball  { animation: orbspin 3.4s linear infinite; }
+  .orb.churn .ball { animation: orbchurn 2.4s ease-in-out infinite; }
+  .orb.think .ball { animation: orbspin 7.5s linear infinite; }
+  .orb.orbit .ball { animation: orbring 2.8s linear infinite; }
   .orb i {
     position: absolute; top: 50%; left: 50%;
     width: var(--dot); height: var(--dot); margin: calc(var(--dot) / -2) 0 0 calc(var(--dot) / -2);
@@ -1121,26 +1127,42 @@
   .ag-log .orb::after { background: radial-gradient(circle at 50% 50%, transparent 58%, var(--surface-2) 104%); }
 
   @keyframes orbspin { to { transform: rotateY(360deg); } }
-  @keyframes orbdrift {
-    0%   { transform: rotateY(0deg) rotateX(9deg); }
-    50%  { transform: rotateY(180deg) rotateX(-9deg); }
-    100% { transform: rotateY(360deg) rotateX(9deg); }
+  @keyframes orbchurn {
+    0%   { transform: rotateY(0deg) rotateX(-16deg); }
+    25%  { transform: rotateY(90deg) rotateX(11deg); }
+    50%  { transform: rotateY(180deg) rotateX(-7deg); }
+    75%  { transform: rotateY(270deg) rotateX(15deg); }
+    100% { transform: rotateY(360deg) rotateX(-16deg); }
+  }
+  /* O anel precisa da inclinação para ser um anel: no plano XZ, visto de
+     frente, ele é uma linha. */
+  @keyframes orbring {
+    from { transform: rotateX(62deg) rotateY(0deg); }
+    to   { transform: rotateX(62deg) rotateY(360deg); }
   }
 
-  /* Tropeçou numa chamada, mas está vivo: mais devagar e fora de eixo. */
+  /* O estado não troca a forma: ele muda a cor e o ritmo, e a família
+     continua legível por baixo. Só a duração é sobrescrita — o keyframe da
+     variante segue sendo o dela. */
   .orb.warn { color: var(--warn); }
-  .orb.warn .ball { animation: orbdrift 6.4s ease-in-out infinite; }
+  .orb.warn .ball { animation-duration: 6.4s; }
   /* Parou: a esfera colapsa e o movimento cessa. Imobilidade é o sinal. */
   .orb.stopped { color: var(--fail); }
   .orb.stopped .ball { animation: none; transform: rotateY(24deg) scale(.68); }
+  .orb.stopped.orbit .ball { transform: rotateX(62deg) scale(.68); }
   .orb.stopped i { opacity: .8; }
 
   /* `.orb.warn .ball` tem uma classe a mais que `.orb .ball` e ganharia o
      desempate: a supressão precisa cobrir cada variante por nome, ou ela
      silencia a que menos importa e deixa passar a que se mexe mais. */
+  /* A supressão precisa alcançar cada variante pelo mesmo número de classes
+     que a define, ou a mais específica sobrevive à media query. */
   @media (prefers-reduced-motion: reduce) {
-    .orb .ball, .orb.warn .ball, .orb.stopped .ball { animation: none; transform: rotateY(24deg); }
+    .orb.scan .ball, .orb.churn .ball, .orb.think .ball, .orb.orbit .ball,
+    .orb.warn .ball, .orb.stopped .ball { animation: none; transform: rotateY(24deg); }
+    .orb.orbit .ball { transform: rotateX(62deg); }
     .orb.stopped .ball { transform: rotateY(24deg) scale(.68); }
+    .orb.stopped.orbit .ball { transform: rotateX(62deg) scale(.68); }
   }
 
   .ag-meta { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -1463,27 +1485,64 @@ const barrierIcon = (s = 11) => `<svg width="${s}" height="${s}" viewBox="0 0 12
  * eles se acumulem nos polos, que é o que qualquer distribuição ingênua por
  * latitude/longitude faz. Calculado uma vez para todos os orbs da página.
  */
-const ORB_DOTS = (() => {
-  const N = 26, golden = Math.PI * (3 - Math.sqrt(5));
+function orbDots(n, { jitter = 0, spread = 1, ring = false } = {}) {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const noise = (k, i) => ((hash(`${k}:${i}`) % 1000) / 1000) - 0.5;
   const out = [];
-  for (let i = 0; i < N; i += 1) {
-    const y = 1 - (i / (N - 1)) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const th = i * golden;
-    out.push([(Math.cos(th) * r).toFixed(3), y.toFixed(3), (Math.sin(th) * r).toFixed(3)]);
+  for (let i = 0; i < n; i += 1) {
+    let x, y, z;
+    if (ring) {
+      const th = (i / n) * Math.PI * 2;
+      x = Math.cos(th); z = Math.sin(th); y = noise('ring', i) * 0.22;
+    } else {
+      y = 1 - (i / (n - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = i * golden;
+      x = Math.cos(th) * r; z = Math.sin(th) * r;
+    }
+    if (jitter) { x += noise('x', i) * jitter; y += noise('y', i) * jitter; z += noise('z', i) * jitter; }
+    const s = spread === 1 ? 1 : 1 + Math.abs(noise('s', i)) * 2 * (spread - 1);
+    out.push([(x * s).toFixed(3), (y * s).toFixed(3), (z * s).toFixed(3)]);
   }
   return out;
-})();
+}
 
-const ORB_BALL = `<span class="ball">${ORB_DOTS
-  .map(([x, y, z]) => `<i style="--x:${x};--y:${y};--z:${z}"></i>`).join('')}</span>`;
+/*
+ * Quatro corpos, um por família de trabalho.
+ *
+ * A esfera uniforme responde "há trabalho acontecendo" e para por aí. Mas o
+ * `humanize()` logo abaixo já sabe *que tipo* de trabalho é — ele precisa
+ * saber, para escolher o verbo — e essa classificação estava sendo jogada
+ * fora na hora de desenhar. Aqui ela vira forma:
+ *
+ *   scan    esfera densa e regular, varrendo — ler, procurar, olhar o git
+ *   churn   nuvem irregular, com pontos soltos — editar, testar, commitar
+ *   think   esfera fechada e lenta — pensar, planejar
+ *   orbit   um anel em perspectiva — despachar para outro agente
+ *
+ * A distribuição de Fibonacci é o que dá o espaçamento uniforme do `scan`; o
+ * `churn` é a mesma distribuição desarranjada de propósito, porque
+ * irregularidade lida como esforço.
+ */
+const ORB_BODY = {
+  scan: orbDots(26),
+  churn: orbDots(19, { jitter: 0.5, spread: 1.4 }),
+  think: orbDots(30, { spread: 0.82 }),
+  orbit: orbDots(16, { ring: true }),
+};
+
+const ORB_BALL = Object.fromEntries(Object.entries(ORB_BODY).map(([k, dots]) => [k,
+  `<span class="ball">${dots.map(([x, y, z]) => `<i style="--x:${x};--y:${y};--z:${z}"></i>`).join('')}</span>`]));
 
 /**
- * O orb de um agente. `mode` sai do estado, não do gosto: `''` trabalhando,
- * `warn` vivo depois de uma chamada que falhou, `stopped` parado.
+ * O orb de um agente. Duas coisas independentes: `kind` é a família do
+ * trabalho e escolhe o corpo; `mode` é o estado e escolhe a cor e o ritmo —
+ * `''` em curso, `warn` vivo depois de uma chamada que falhou, `stopped`
+ * parado. Um agente que edita e um que lê nunca têm a mesma forma, e a
+ * mesma forma nunca tem duas cores ao mesmo tempo.
  */
-const orbHtml = (mode, r = 8.5) =>
-  `<span class="orb ${mode}" style="--r:${r}px" aria-hidden="true">${ORB_BALL}</span>`;
+const orbHtml = (kind, mode, r = 8.5) =>
+  `<span class="orb ${kind || 'scan'} ${mode}" style="--r:${r}px" aria-hidden="true">${ORB_BALL[kind] || ORB_BALL.scan}</span>`;
 
 const chevIcon = () => `<svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.4 2.6 L8 6 L4.4 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
 
@@ -1633,27 +1692,28 @@ function avatarHtml(a, size = 28, { plain = false } = {}) {
  */
 function humanize(a) {
   if (!a) return null;
-  if (a.kind === 'text') return { verb: 'thinking', obj: gist(a.text, 110), ok: true, quiet: true };
+  const say = (verb, obj, kind) => ({ verb, obj, kind, ok: a.ok });
+  if (a.kind === 'text') return { verb: 'thinking', obj: gist(a.text, 110), ok: true, quiet: true, kind: 'think' };
   const t = a.target || '';
   switch (a.name) {
     case 'Bash': {
-      if (/\b(vitest|jest|pytest|go test|npm test|pnpm test|yarn test)\b/.test(t)) return { verb: 'running the tests', obj: t, ok: a.ok };
-      if (/^git commit/.test(t)) return { verb: 'committing', obj: t, ok: a.ok };
-      if (/^git (status|log|diff|show|rev-parse)/.test(t)) return { verb: 'checking git', obj: t, ok: a.ok };
-      if (/^git (checkout|stash|reset|merge|rebase)/.test(t)) return { verb: 'moving the tree', obj: t, ok: a.ok };
-      if (/^(npm|pnpm|yarn) (run )?(build|typecheck|lint)/.test(t)) return { verb: 'building', obj: t, ok: a.ok };
-      return { verb: 'running', obj: t, ok: a.ok };
+      if (/\b(vitest|jest|pytest|go test|npm test|pnpm test|yarn test)\b/.test(t)) return say('running the tests', t, 'churn');
+      if (/^git commit/.test(t)) return say('committing', t, 'churn');
+      if (/^git (status|log|diff|show|rev-parse)/.test(t)) return say('checking git', t, 'scan');
+      if (/^git (checkout|stash|reset|merge|rebase)/.test(t)) return say('moving the tree', t, 'churn');
+      if (/^(npm|pnpm|yarn) (run )?(build|typecheck|lint)/.test(t)) return say('building', t, 'churn');
+      return say('running', t, 'churn');
     }
-    case 'Edit': case 'MultiEdit': case 'Update': return { verb: 'editing', obj: t, ok: a.ok };
-    case 'Write': case 'NotebookEdit': return { verb: 'writing', obj: t, ok: a.ok };
-    case 'Read': return { verb: 'reading', obj: t, ok: a.ok };
-    case 'Grep': case 'Glob': return { verb: 'searching', obj: t, ok: a.ok };
-    case 'Task': case 'Agent': return { verb: 'delegating', obj: t, ok: a.ok };
-    case 'Skill': return { verb: 'using the skill', obj: t, ok: a.ok };
-    case 'TodoWrite': return { verb: 'planning', obj: t, ok: a.ok };
-    case 'WebFetch': case 'WebSearch': return { verb: 'looking it up', obj: t, ok: a.ok };
-    case 'result': return { verb: a.ok === false ? 'failed' : 'finished', obj: a.text || '', ok: a.ok };
-    default: return { verb: String(a.name || 'working').toLowerCase(), obj: t, ok: a.ok };
+    case 'Edit': case 'MultiEdit': case 'Update': return say('editing', t, 'churn');
+    case 'Write': case 'NotebookEdit': return say('writing', t, 'churn');
+    case 'Read': return say('reading', t, 'scan');
+    case 'Grep': case 'Glob': return say('searching', t, 'scan');
+    case 'Task': case 'Agent': return say('delegating', t, 'orbit');
+    case 'Skill': return say('using the skill', t, 'orbit');
+    case 'TodoWrite': return say('planning', t, 'think');
+    case 'WebFetch': case 'WebSearch': return say('looking it up', t, 'scan');
+    case 'result': return say(a.ok === false ? 'failed' : 'finished', a.text || '', 'scan');
+    default: return say(String(a.name || 'working').toLowerCase(), t, 'scan');
   }
 }
 
@@ -1915,14 +1975,14 @@ function agentHtml(a, kid = false) {
   const isBarrierTask = a.barrier && !a.sub;
 
   const line = bad && a.error
-    ? `<div class="ag-doing bad">${orbHtml('stopped', kid ? 7 : 8.5)}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
+    ? `<div class="ag-doing bad">${orbHtml(doing && doing.kind, 'stopped', kid ? 7 : 8.5)}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span><span class="err">${esc(dedupeStatus(a.status, gist(a.error, 118)))}</span><span class="more">read it</span></div>`
     : doing
       ? `<div class="ag-doing${doing.ok === false ? ' warn' : ''}">
-           ${live ? orbHtml(doing.ok === false ? 'warn' : '', kid ? 7 : 8.5) : ''}
+           ${live ? orbHtml(doing.kind, doing.ok === false ? 'warn' : '', kid ? 7 : 8.5) : ''}
            <span class="verb">${esc(doing.verb)}</span>
            <span class="obj" title="${esc(doing.obj)}">${esc(doing.obj)}</span>
          </div>`
-      : `<div class="ag-doing">${bad ? orbHtml('stopped', kid ? 7 : 8.5) : ''}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span></div>`;
+      : `<div class="ag-doing">${bad ? orbHtml('scan', 'stopped', kid ? 7 : 8.5) : ''}<span class="verb">${esc(STATUS_WORD[a.status] || a.status)}</span></div>`;
 
   const meta = [
     `<span class="clock"${live ? ` data-since="${esc(a.startedAt)}"` : ''}>${live ? '–' : esc(span(a))}</span>`,
