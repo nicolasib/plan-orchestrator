@@ -1,5 +1,11 @@
 # Dashboard v2 — protótipo
 
+> **Já portado.** A tela descrita aqui é a que o `plo serve` serve hoje —
+> `src/ui.html`, com dados reais. Este arquivo continua sendo o lugar barato de
+> iterar no desenho (sem servidor, sem run, cinco cenários num clique), mas a
+> partir do port ele é uma cópia: mudança feita aqui não chega ao produto
+> sozinha, e o produto pode ter andado sem ele.
+
 `dashboard-v2.html` abre direto no navegador. Sem servidor, sem build, dados
 mockados:
 
@@ -96,15 +102,21 @@ Todo campo do mock é derivável do que o agente já escreve no log
 | `doing` | última chamada de tool do log, passada por `humanize()` |
 | `children` | eventos `Task` agrupados por `parent_tool_use_id` |
 
-## O que a fase 2 precisa mudar no `monitor.js`
+## O que o port mudou no `monitor.js`
 
-1. **`model` no snapshot da lista.** Hoje só sai em `taskDetail`
-   (`monitor.js:639`); `taskView` não o carrega, então a lista não tem como
-   mostrar quem está rodando com o quê.
-2. **Árvore de subagentes.** `digestLog` reduz `parent_tool_use_id` a um
-   booleano `sub` (`monitor.js:182`) e descarta o id do pai. Guardando
-   `parentId` no evento e casando com o `id` do `tool_use` do `Task`
-   (`monitor.js:205`), cada subagente vira um nó: vivo enquanto não chega o
-   `tool_result` daquele id.
-3. **Nada mais.** `humanize()` é do lado do cliente — o log já entrega nome da
-   tool e alvo.
+1. **`model` no snapshot da lista.** Saía só em `taskDetail`; `taskView` passou
+   a carregá-lo, e o crachá do avatar mostra quem está rodando com o quê sem
+   abrir nada.
+2. **Árvore de subagentes.** `digestLog` reduzia `parent_tool_use_id` a um
+   booleano `sub` e descartava o id do pai. Guardando o id, um `Task` vira um
+   nó: a chamada é o nascimento, o `tool_result` correspondente é a morte, e
+   tudo que carrega aquele id é o que ele fez no meio. Turnos, tokens e modelo
+   do subagente passaram a ser dele — antes o modelo da task virava o do último
+   subagente que falou.
+3. **A cauda sobrevive à parada.** `activity` era populada só para `running`; o
+   que a task fazia quando morreu é a resposta para por que ela morreu. Só o
+   `done` continua sem cauda: ele colapsa num chip que ninguém abre.
+4. **`subagent_type` no evento de despacho.** A descrição diz o que o subagente
+   foi fazer; isto diz quem ele é, que é o rótulo da linha.
+
+`humanize()` continua do lado do cliente — o log já entrega nome da tool e alvo.

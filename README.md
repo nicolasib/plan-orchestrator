@@ -128,11 +128,24 @@ limit that killed it — is already on disk in `.plo-logs/task-<n>.jsonl`, becau
     plo serve --plan <plan.md> --port 8080 --open
 
 A second window, not a second run: read-only, loopback-bound, no dependency and
-no build step. Cards follow the work — a lane with nothing left collapses to one
-line, and the barrier running during integration gets a card of its own, because
-by then it is the only thing working. Settled lanes drop to a table that closes
-with its own totals, so the turns, commits and tokens in the topbar add up
-under the column that composed them.
+no build step.
+
+**Its unit is the agent, not the lane.** A lane does not work; the agent running
+the task does, and so do the subagents it dispatched. So the page is one row per
+agent — lane, task, model, how long it has been alive, turns, and one sentence
+saying what it is doing. `Bash · npx vitest run tests/theme-toggle.test.tsx`
+makes you parse a command to find out the tests are running; `running the tests`
+puts the verb first and leaves the command as evidence. Each agent nests the
+subagents it opened, drawn from the `parent_tool_use_id` its log already carried:
+a `Task` call is the subagent's birth, the matching `tool_result` its death, and
+everything in between is what it did. They carry their own turns, tokens and
+model, because they run on their own.
+
+Each row expands to that agent's log, and whoever stopped opens on the account
+it wrote — rendered as the Markdown it is, with the `plo resume` and the lane
+branch beside it. `Task record` inside the drawer opens the task itself: session
+id, log path, declared writes, plan steps and the full activity tail, at
+`#task=4`, which survives a reload and pastes into Slack.
 
 It counts output tokens, not dollars. The agent reports `total_cost_usd` and
 that is an API price; nobody running this off a subscription pays it, so on
@@ -146,29 +159,25 @@ Across the top, the run is a pipeline: `run → merge → barriers → full suit
 cross-lane review`, in the only order they can happen. A failure lands on the
 stage that owns it — `Barriers ✗` with the two stages after it visibly
 untouched says more than the word `barrier-failed` in a status field, which
-only means something to a reader who already knows the order.
+only means something to a reader who already knows the order. It is also the
+answer when nobody is working: between the last lane task and the merge the
+crew is empty, and the page says which stage it is waiting on rather than
+"nothing running" twice.
 
-Under it, the run is a timeline: one band per lane, one bar per task, all on
-the same clock. This is where you find out whether running these lanes at once
-paid, and what held the rest up — on the `1.11.0` release the three lanes
-finished inside twenty-two minutes side by side and the single serial barrier
-after them took twenty-six, which is the whole argument about that run in one
-picture. A task that has not started has no honest place on a time axis, so it
-waits beside it. While anything is running the axis has no end: it grows
-against your clock, not against anything on disk.
+`Up next` lists what has not become an agent yet and what each one is waiting
+behind; `Out of the way` collapses everything finished into one band. When the
+last task lands, `How it went` closes the run with the only question that pays
+for the tool: wall clock against summed agent time, and the multiple the lanes
+returned.
 
-The right-hand rail carries the run in one chronological feed: time, lane, tool,
-target, and how long the call took. Each lane writes its own log, so this is the
-only place that answers "what happened, in what order" — the `git checkout -b`
-that failed inside the barrier is a red row here and nowhere else. Search it,
+`Activity` opens the whole run as one chronological feed — time, who, tool,
+target, how long the call took. Each lane writes its own log, so this is the
+only place that answers "what happened, in what order", and every line carries
+the face of the agent it came from, because two `implementer` rows under an
+identical label are the thing this surface exists to tell apart. Search it,
 narrow it to errors, Bash or edits, or turn on `Wrap` when the line you want is
-the one the ellipsis ate. Click any task and the rail switches to its record:
-commits, session id, declared writes, plan steps, and the full activity tail —
-and the URL becomes `#task=4`, which survives a reload and pastes into Slack.
-Below 900px there is no room for two columns, so the rail becomes a drawer over
-the page — and only then does it behave as a dialog, with the scrim, the focus
-trap and `aria-modal` that would be a lie beside a board you can still read and
-click.
+the one the ellipsis ate. It is a drawer at every width: as a fixed column it
+spent 40% of the screen on the events nobody reads twice.
 
 Nothing on the page asks to be retyped. The blocked banner carries the
 `plo resume --plan …` it implies, and the branch, the session id and the log
