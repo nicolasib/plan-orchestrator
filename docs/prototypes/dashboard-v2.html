@@ -906,7 +906,7 @@
      clicável. Canto vivo, tinta do acento e a mesma altura dos vizinhos —
      as três coisas que o separavam de `live` eram nenhuma. */
   .railbtn {
-    display: inline-flex; height: 26px; min-height: 0; padding: 0 11px; margin-left: 8px;
+    display: inline-flex; height: 28px; min-height: 0; padding: 0 13px; margin: 0;
     border-radius: var(--radius-sm); font-weight: 500;
     background: var(--accent-soft); border-color: transparent; color: var(--accent-ink);
   }
@@ -933,7 +933,11 @@
     margin: 0 0 1px; font-size: 22px; font-weight: 600; letter-spacing: -.028em;
     line-height: 1.2; color: var(--text);
   }
-  .summary { padding-top: 20px; gap: 6px; }
+  /* O botão passa a morar aqui: à direita do sumário havia uma faixa vazia do
+     tamanho de três botões, e ele estava espremido entre os contadores da
+     barra, onde parecia mais um deles. */
+  .summary { padding-top: 20px; gap: 6px 16px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .sum-main { display: grid; gap: 6px; min-width: 0; }
   /* Abaixo do título, o veredito deixa de ser a manchete e vira o subtítulo
      que ele sempre foi — mesmo peso, um degrau de tamanho abaixo. */
   .verdict { font-size: 14px; }
@@ -1144,7 +1148,6 @@
     <span class="stat"><b id="m-progress">–</b> done</span>
     <span class="stat"><b id="m-cost">–</b> tokens</span>
     <span class="stat"><b id="m-elapsed">–</b> elapsed</span>
-    <button class="railbtn" id="open-feed" aria-controls="panel">Activity</button>
     <span class="live on" id="live"><i class="pip"></i><span id="live-text">live</span></span>
   </div>
 </header>
@@ -1153,9 +1156,12 @@
   <div class="scroller">
   <div class="wrap">
     <div class="summary">
-      <h2 class="plan-name" id="plan-name">…</h2>
-      <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
-      <div class="subline" id="plan-sub"></div>
+      <div class="sum-main">
+        <h2 class="plan-name" id="plan-name">…</h2>
+        <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+        <div class="subline" id="plan-sub"></div>
+      </div>
+      <button class="railbtn" id="open-feed" aria-controls="panel">Activity</button>
     </div>
 
     <ol class="stages" id="stages" aria-label="Run pipeline" hidden></ol>
