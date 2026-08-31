@@ -87,7 +87,13 @@ function buildTaskPrompt(st, plan, taskNumber, lane) {
 async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   const lane = st.lanes.find((l) => l.id === laneId);
   const rec = st.tasks[String(n)] || {};
-  const sessionId = rec.sessionId || newSessionId();
+  // A fresh id per attempt, never `rec.sessionId ||` — the agent CLI refuses a
+  // `--session-id` it has already seen, so reusing the id off the checkpoint
+  // made any task that failed once permanently unretryable: every later attempt
+  // died on "Session ID <uuid> is already in use" before the agent ran, and the
+  // retry loop spun on it. Nothing resumes that session — a retry re-runs the
+  // task from scratch — so the id is only a label for the log.
+  const sessionId = newSessionId();
   const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
   const baseBefore = wt.headCommit(lane.worktree);
 
