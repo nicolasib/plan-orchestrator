@@ -138,6 +138,9 @@ p code {
 
 /* --- section rhythm ------------------------------------------------------ */
 section { padding-block: clamp(48px, 6vw, 92px); }
+/* The nav is sticky and 64px tall; an anchor that lands at the viewport top
+   lands under it. */
+#how, #limits, #install, #agent { scroll-margin-top: 84px; }
 .lede { color: var(--text-2); font-size: clamp(15px, 1.35vw, 17.5px); line-height: 1.62; max-width: 60ch; }
 .h2 { font-size: clamp(28px, 3.5vw, 46px); }
 .h3 { font-size: clamp(17px, 1.5vw, 19px); font-weight: 560; letter-spacing: -.012em; }
@@ -196,6 +199,11 @@ section { padding-block: clamp(48px, 6vw, 92px); }
 }
 .hero .lede { margin-top: 22px; font-size: clamp(16px, 1.5vw, 18.5px); max-width: 46ch; }
 .hero .cta { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 32px; }
+/* The primary button hands the install to an agent, which is a claim that
+   needs one sentence of what the agent will actually do before you click. */
+.hero .cta-fine { margin-top: 15px; max-width: 46ch; color: var(--text-2); font-size: 13.5px; line-height: 1.6; }
+.hero .cta-fine a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.hero .cta-fine a:hover { text-decoration-color: currentColor; }
 
 /* The shot bleeds past the container's right edge: the dashboard is a wide
    surface and cropping it to a column would make it look like a card. */
@@ -319,6 +327,13 @@ section { padding-block: clamp(48px, 6vw, 92px); }
 /* --- install ------------------------------------------------------------- */
 .install { text-align: center; }
 .install .term { text-align: left; max-width: 620px; margin: clamp(28px, 3.5vw, 40px) auto 0; }
+/* The prompt is prose, not a two-line command: it needs the width, and it is
+   the path the page leads with, so it carries the mark's border. */
+.install .term.wide { max-width: 780px; border-color: var(--brand-line); }
+.install .term.wide .term-bar { background: linear-gradient(100deg, var(--brand-soft), transparent 58%), var(--surface-2); }
+.install .term.wide pre { color: var(--text); white-space: pre-wrap; }
+.orline { display: flex; align-items: center; gap: 14px; max-width: 620px; margin: 26px auto 0; color: var(--text-faint); font-size: 12.5px; }
+.orline::before, .orline::after { content: ""; height: 1px; flex: 1; background: var(--line-soft); }
 .install .cta { display: flex; justify-content: center; flex-wrap: wrap; gap: 11px; margin-top: 26px; }
 .install .lede { margin-inline: auto; }
 
@@ -342,6 +357,7 @@ footer .fine { color: var(--text-2); font-size: 13px; }
   .stagger > *:nth-child(1) { animation-delay: .05s; }
   .stagger > *:nth-child(2) { animation-delay: .14s; }
   .stagger > *:nth-child(3) { animation-delay: .23s; }
+  .stagger > *:nth-child(4) { animation-delay: .3s; }
   .heroshot { opacity: 0; animation: rise .8s cubic-bezier(.16,1,.3,1) .3s forwards; }
   @keyframes rise { to { opacity: 1; transform: none; } }
 }
@@ -402,9 +418,10 @@ footer .fine { color: var(--text-2); font-size: 13px; }
         <h1>Start the plan.<br>Walk away.</h1>
         <p class="lede">Each task runs as its own process with a fresh context. A dead session resumes exactly where it stopped.</p>
         <div class="cta">
-          <a class="btn btn-primary" href="#install">Install</a>
+          <a class="btn btn-primary" href="#agent">Ask your agent to install it</a>
           <a class="btn btn-ghost" href="https://github.com/nicolasib/plan-orchestrator">View on GitHub</a>
         </div>
+        <p class="cta-fine">A prompt that clones it, puts <code>plo</code> on your PATH, checks the one plugin it needs, and stops at the lane graph for you to approve. Or <a href="#install">type the two commands</a> yourself.</p>
       </div>
 
       <div class="shotwrap heroshot">
@@ -433,7 +450,11 @@ footer .fine { color: var(--text-2); font-size: 13px; }
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>
         <span><b>Claude Code</b>, or any headless agent CLI</span>
       </span>
-      <span class="req"><span>Zero dependencies. No build step.</span></span>
+      <span class="req">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
+        <span>The <b>superpowers</b> plugin</span>
+      </span>
+      <span class="req"><span>Zero npm dependencies</span></span>
     </div>
   </div>
 
@@ -525,6 +546,12 @@ $ claude -p   <span class="dim">task 4 · lane A</span></div>
       </dl>
 
       <p class="lede rise" style="margin-top:26px">Two details that matter in practice. A negation in the plan is honoured, so <code>(new, do not touch b.test.js)</code> records one write and not two. And reads are never conflicts: two tasks importing the same helper stay parallel.</p>
+
+      <article class="cell tinted rise" style="margin-top:clamp(26px,3vw,38px)">
+        <h3 class="h3">It does not reimplement superpowers. It depends on it.</h3>
+        <p>The plan plo parses is the one <code>superpowers:writing-plans</code> already emits — the <code>Files:</code> and <code>Interfaces:</code> blocks are the graph. Inside each process, the per-task loop is <code>superpowers:subagent-driven-development</code>: implementer, task review, fix loop, ledger. None of that is rebuilt here. What plo adds is what that skill has no opinion about — which tasks can run at once, where each one runs, and what survives a crash.</p>
+        <div class="art"><span class="hi">/plugin install</span> superpowers@claude-plugins-official</div>
+      </article>
     </div>
   </section>
 
@@ -596,10 +623,48 @@ $ claude -p   <span class="dim">task 4 · lane A</span></div>
   <!-- INSTALL ---------------------------------------------------------------- -->
   <section id="install" class="install">
     <div class="wrap">
-      <h2 class="h2 rise">Two commands and it is on your PATH.</h2>
-      <p class="lede rise" style="margin-top:18px">Node and git are the whole dependency list. There is nothing to build.</p>
+      <h2 class="h2 rise">Hand it to the agent you already have open.</h2>
+      <p class="lede rise" style="margin-top:18px">It installs the way it runs: you approve, it does the work. Node 20, git and the superpowers plugin are the whole dependency list, and the prompt checks all three.</p>
 
-      <div class="term rise">
+      <div id="agent" class="term wide rise">
+        <div class="term-bar">
+          <b>prompt</b><span>paste into Claude Code, or any agent with a shell</span>
+          <button class="copy" type="button" data-copy-from="#agent-prompt">
+            <span class="copy-label">Copy prompt</span>
+          </button>
+        </div>
+<pre id="agent-prompt">Install plo (plan-orchestrator) for me, then set up the run.
+
+1. Clone https://github.com/nicolasib/plan-orchestrator somewhere outside this
+   repo and run `npm link` in it, so `plo` lands on my PATH. Needs Node 20+.
+   Confirm with `plo --help`.
+
+2. plo sits on top of superpowers and does not reimplement it: it reads the
+   plan format superpowers:writing-plans emits, and every task it spawns runs
+   superpowers:subagent-driven-development in its own process. If I do not
+   have that plugin, install it and tell me:
+       /plugin install superpowers@claude-plugins-official
+
+3. Take the plan we are working on — if there is none, write one with
+   superpowers:writing-plans first — and run:
+       plo analyze --plan &lt;plan.md&gt; --max-lanes 3
+   Print the lanes and every edge with its evidence, then STOP. Do not run
+   init or run until I have read the graph and approved it. A missing edge is
+   the expensive error, and this is the cheap place to catch it.
+
+4. Once I approve: `plo init`, then `plo run`. Start
+   `plo serve --plan &lt;plan.md&gt; --open` in the background and give me the URL
+   it prints, so I can watch it unattended. Close with `plo integrate` —
+   merge, barrier tasks, the FULL suite, then one cross-lane review.
+
+Never edit my plan to make the graph look nicer. If an edge is wrong, write
+the override into .plan-lanes-&lt;plan&gt;.json with the reason, and tell me what
+you changed.</pre>
+      </div>
+
+      <div class="orline rise"><span>or type it yourself</span></div>
+
+      <div class="term rise" style="margin-top:22px">
         <div class="term-bar">
           <b>bash</b>
           <button class="copy" type="button" data-copy="git clone https://github.com/nicolasib/plan-orchestrator&#10;cd plan-orchestrator &amp;&amp; npm link">
@@ -675,7 +740,12 @@ $ claude -p   <span class="dim">task 4 · lane A</span></div>
     var timer;
 
     btn.addEventListener('click', function () {
-      var text = btn.getAttribute('data-copy');
+      /* Either the text is on the attribute, or it is the block above it. The
+         prompt is long enough that duplicating it into an attribute would be
+         two copies to keep in sync. */
+      var from = btn.getAttribute('data-copy-from');
+      var src = from && document.querySelector(from);
+      var text = src ? src.textContent.trim() : btn.getAttribute('data-copy');
       clearTimeout(timer);
 
       var settle = function (msg, state) {
