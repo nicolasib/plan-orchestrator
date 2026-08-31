@@ -32,6 +32,16 @@ const isSettled = (s) => s === STATUS.DONE;
 /** Re-runnable on resume: the work is unfinished and nothing is holding it. */
 const isResumable = (s) => s === STATUS.PENDING || s === STATUS.INTERRUPTED || s === STATUS.FAILED;
 
+// How many times one `run`/`resume` invocation may relaunch the same task
+// before its lane stalls. Without a ceiling the scheduler re-offers a failed
+// task on every pass of its loop: a task that fails the same way each time
+// spins forever, burning wall clock and log without ever advancing. Observed
+// at 24,827 attempts before this existed.
+// `reconcile` clears the counter, so running `plo resume` — an explicit human
+// act, after looking at the failure — always grants a fresh budget. The cap
+// governs one invocation, never the life of a task.
+const MAX_ATTEMPTS = 3;
+
 /**
  * The state file is named per PLAN, not per directory.
  *
@@ -168,6 +178,16 @@ function reconcile(state, { gitCommitsFor, planContents } = {}) {
   }
 
   for (const [n, rec] of Object.entries(state.tasks)) {
+    // An explicit resume is the human saying they looked at the failure, so the
+    // attempt budget starts over. Leaving it spent would make MAX_ATTEMPTS a
+    // permanent death sentence for a task whose cause was since fixed.
+    if (isResumable(rec.status) && (rec.attempts || 0) >= MAX_ATTEMPTS) {
+      notes.push({
+        level: 'info',
+        message: `T${n} had spent its ${MAX_ATTEMPTS} attempts; resume grants a fresh budget.`,
+      });
+      rec.attempts = 0;
+    }
     if (rec.status === STATUS.RUNNING) {
       rec.status = STATUS.INTERRUPTED;
       notes.push({ level: 'info', message: `Task ${n} was running when the run stopped — marked interrupted.` });
@@ -215,6 +235,7 @@ function readyTasks(state, edges) {
       // corruption per-lane worktrees exist to prevent.
       if (rec.status === STATUS.RUNNING || inFlight.has(n)) break; // lane busy
       if (!isResumable(rec.status)) break;                        // e.g. blocked: lane stalls
+      if ((rec.attempts || 0) >= MAX_ATTEMPTS) break;              // exhausted: lane stalls
       if (depsOf(n).every((d) => settled.has(d))) ready.push({ n, lane: lane.id });
       break;
     }
@@ -245,5 +266,5 @@ function summarize(state) {
 module.exports = {
   SCHEMA, STATUS, statePathFor, legacyStatePathFor, planSlug, hashPlan,
   create, load, save, updateTask, reconcile, readyTasks, summarize,
-  isSettled, isResumable,
+  isSettled, isResumable, MAX_ATTEMPTS,
 };

@@ -119,6 +119,47 @@ test('readyTasks: barriers wait for every lane task, then run in order', () => {
   assert.equal(ready[0].barrier, true);
 });
 
+// The runaway this exists to stop: before MAX_ATTEMPTS the scheduler re-offered
+// a failed task on every pass, so a task failing identically each time spun
+// without limit — 24,827 relaunches in the incident that motivated the cap.
+test('readyTasks: a task that has spent its attempts stalls its lane', () => {
+  const st = mkState(tmpPlan());
+  st.tasks['1'].status = state.STATUS.FAILED;
+
+  st.tasks['1'].attempts = state.MAX_ATTEMPTS - 1;
+  assert.ok(state.readyTasks(st, []).some((r) => r.n === 1), 'one attempt left — still offered');
+
+  st.tasks['1'].attempts = state.MAX_ATTEMPTS;
+  assert.ok(!state.readyTasks(st, []).some((r) => r.n === 1), 'budget spent — not offered');
+  assert.ok(!state.readyTasks(st, []).some((r) => r.n === 2), 'and nothing behind it starts');
+});
+
+// A lane stalling must not stall the others: the cap is per task, and lane B
+// has no stake in lane A's failure.
+test('readyTasks: an exhausted task stalls only its own lane', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['1'], { status: state.STATUS.FAILED, attempts: state.MAX_ATTEMPTS });
+  assert.deepEqual(state.readyTasks(st, []).map((r) => r.n), [3], "lane B is unaffected");
+});
+
+test('reconcile: resume returns the attempt budget to an exhausted task', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['1'], { status: state.STATUS.FAILED, attempts: state.MAX_ATTEMPTS });
+
+  const notes = state.reconcile(st, {});
+
+  assert.equal(st.tasks['1'].attempts, 0, 'budget restored');
+  assert.ok(state.readyTasks(st, []).some((r) => r.n === 1), 'and the task runs again');
+  assert.ok(notes.some((x) => /spent its/.test(x.message)), 'and it says so');
+});
+
+test('reconcile: a task with attempts left keeps its count', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['1'], { status: state.STATUS.FAILED, attempts: 1 });
+  state.reconcile(st, {});
+  assert.equal(st.tasks['1'].attempts, 1, 'only an exhausted budget is reset');
+});
+
 test('readyTasks: a failed task is offered again on resume', () => {
   const st = mkState(tmpPlan());
   st.tasks['1'].status = state.STATUS.FAILED;
