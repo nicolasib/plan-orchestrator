@@ -206,8 +206,13 @@ want only if you actually mean to expose it.
 and again the moment it exits. On resume:
 
 - a task left `running` becomes `interrupted`
-- a task with commits on its lane branch that state calls unfinished is promoted
-  to `done` — **git outranks the state file**
+- a task with commits on its lane branch that never reported done — it died, was
+  aborted, or said BLOCKED — becomes `needs-verify`, **never `done`**. Git
+  outranks the state file on what landed; it says nothing about whether the
+  task review and the smoke gate ran, and SDD commits after the implementer,
+  before either. The next attempt keeps the base the work started from and is
+  told to review and smoke-gate the commits already there instead of starting
+  over. A failed attempt that committed lands in the same state.
 - if the plan file changed since `init`, you get a warning, because task
   numbering may have shifted
 

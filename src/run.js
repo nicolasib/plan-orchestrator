@@ -52,7 +52,7 @@ function prepareLanes(planPath, st, { worktreeDir, extraSeed, log = () => {} }) 
 }
 
 /** Everything one spawned process needs to know, assembled from plan + state. */
-function buildTaskPrompt(st, plan, taskNumber, lane) {
+function buildTaskPrompt(st, plan, taskNumber, lane, verify = null) {
   const task = plan.tasks.find((t) => t.n === taskNumber);
   const settled = Object.entries(st.tasks)
     .filter(([, r]) => r.status === state.STATUS.DONE)
@@ -77,6 +77,7 @@ function buildTaskPrompt(st, plan, taskNumber, lane) {
     testCommand: st.testCommand,
     globalConstraints: plan.constraints.raw,
     priorInterfaces,
+    verify,
   });
 }
 
@@ -95,7 +96,13 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   // task from scratch — so the id is only a label for the log.
   const sessionId = newSessionId();
   const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
-  const baseBefore = wt.headCommit(lane.worktree);
+
+  // A task that committed but never reported done is verified, not redone. Its
+  // base stays where the work started, so the commits it already made are
+  // counted — and reviewed — as this task's.
+  const verifying = rec.status === state.STATUS.NEEDS_VERIFY && Boolean(rec.baseBefore);
+  const baseBefore = verifying ? rec.baseBefore : wt.headCommit(lane.worktree);
+  const verify = verifying ? { baseBefore, commits: rec.commits || [], lastError: rec.error || null } : null;
 
   state.updateTask(planPath, st, n, {
     status: state.STATUS.RUNNING,
@@ -107,13 +114,13 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     baseBefore,
     error: null,
   });
-  opts.log(`T${n} (lane ${laneId}): started — session ${sessionId.slice(0, 8)} — log ${logFile}`);
+  opts.log(`T${n} (lane ${laneId}): ${verifying ? 'verifying' : 'started'} — session ${sessionId.slice(0, 8)} — log ${logFile}`);
 
   let outcome;
   try {
     outcome = await runAgent({
       cwd: lane.worktree,
-      prompt: buildTaskPrompt(st, plan, n, lane),
+      prompt: buildTaskPrompt(st, plan, n, lane, verify),
       sessionId,
       model: opts.model,
       permissionMode: opts.permissionMode,
@@ -135,11 +142,13 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   const blocked = /STATUS:\s*BLOCKED/i.test(outcome.result || '');
 
   // Trust git over the agent's self-report: commits are the evidence that work
-  // landed. An agent claiming DONE with no commits has not done the task.
+  // landed. An agent claiming DONE with no commits has not done the task. And
+  // the reverse: commits from a process that did not report done are work that
+  // landed unverified — the next attempt verifies them instead of redoing them.
   const ok = outcome.ok && !blocked && commits.length > 0;
   const status = ok
     ? state.STATUS.DONE
-    : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
+    : blocked ? state.STATUS.BLOCKED : commits.length ? state.STATUS.NEEDS_VERIFY : state.STATUS.FAILED;
 
   let error = null;
   if (!ok) {

@@ -25,12 +25,18 @@ const STATUS = {
   FAILED: 'failed',
   BLOCKED: 'blocked',
   INTERRUPTED: 'interrupted',
+  // Commits on the lane, but no process ever reported the task done. SDD
+  // commits after the implementer and before the review, so the commits say
+  // work landed — not that it was reviewed or passed its smoke gate. The next
+  // attempt verifies them instead of starting over.
+  NEEDS_VERIFY: 'needs-verify',
 };
 
 /** Terminal for scheduling purposes: don't re-run these. */
 const isSettled = (s) => s === STATUS.DONE;
 /** Re-runnable on resume: the work is unfinished and nothing is holding it. */
-const isResumable = (s) => s === STATUS.PENDING || s === STATUS.INTERRUPTED || s === STATUS.FAILED;
+const isResumable = (s) => s === STATUS.PENDING || s === STATUS.INTERRUPTED || s === STATUS.FAILED
+  || s === STATUS.NEEDS_VERIFY;
 
 // How many times one `run`/`resume` invocation may relaunch the same task
 // before its lane stalls. Without a ceiling the scheduler re-offers a failed
@@ -162,9 +168,12 @@ function updateTask(planPath, state, n, patch) {
  *
  * - A task left `running` had its process killed: it is `interrupted`, and its
  *   partial work (if any) is visible in git.
- * - A task with commits on its lane branch that state calls pending was
- *   completed by a process that died before reporting. `gitCommitsFor` lets the
- *   caller supply that lookup so this stays testable without a repo.
+ * - A task with commits on its lane branch that state does not call done was
+ *   worked on by a process that never reported success: it died, was aborted,
+ *   or said BLOCKED. Its commits are recorded and it becomes `needs-verify` —
+ *   never `done`, because nothing proves the review and the smoke gate ran.
+ *   `gitCommitsFor` lets the caller supply that lookup so this stays testable
+ *   without a repo.
  */
 function reconcile(state, { gitCommitsFor, planContents } = {}) {
   const notes = [];
@@ -197,12 +206,16 @@ function reconcile(state, { gitCommitsFor, planContents } = {}) {
       const commits = gitCommitsFor(Number(n), rec) || [];
       if (commits.length) {
         rec.commits = commits;
-        rec.status = STATUS.DONE;
+        if (rec.status !== STATUS.NEEDS_VERIFY) {
+          notes.push({
+            level: 'warn',
+            message: `Task ${n} has ${commits.length} commit(s) on its lane branch but never reported done`
+              + `${rec.error ? ` (last error: ${String(rec.error).split('\n')[0].slice(0, 120)})` : ''} — `
+              + 'reconciled from git as needs-verify: the next attempt runs its review and smoke gate on those commits.',
+          });
+        }
+        rec.status = STATUS.NEEDS_VERIFY;
         rec.reconciled = true;
-        notes.push({
-          level: 'info',
-          message: `Task ${n} has ${commits.length} commit(s) on its lane branch but was not recorded done — reconciled from git.`,
-        });
       }
     }
   }

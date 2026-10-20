@@ -38,9 +38,34 @@ Hard rules:
 }
 
 /**
+ * For a task whose earlier attempt committed and never reported done. The
+ * commits are real; whether they were reviewed and smoke-gated is unknown. So
+ * the attempt continues the task from them instead of starting it over — and
+ * the review has to cover them, which means a BASE before them.
+ */
+function verifySection({ taskNumber, baseBefore, commits, lastError }) {
+  const shas = commits.map((c) => String(c).slice(0, 7)).join(' ') || '(see git log)';
+  const why = lastError ? `It stopped with: ${String(lastError).split('\n')[0].slice(0, 200)}\n\n` : '';
+  return `
+## This task already has commits — verify them, do not start over
+
+An earlier attempt at Task ${taskNumber} committed to this branch and never reported done:
+${shas}, on top of \`${baseBefore}\`.
+
+${why}Nothing proves those commits were reviewed or passed the smoke gate. Do not
+reimplement the task. Continue it through SDD from where its ledger says it stopped:
+
+- Use BASE = \`${baseBefore}\` for the review package, not \`git rev-parse HEAD\`,
+  so the review covers the commits already there.
+- Run the task review, the fix loop, and the smoke gate if the task carries one,
+  on that work. Commit only what they make you change.
+`;
+}
+
+/**
  * The per-task prompt: one task, full implement → review → fix cycle, via SDD.
  */
-function laneTaskPrompt({ planPath, taskNumber, taskTitle, laneId, laneTasks, branch, worktree, testCommand, globalConstraints, priorInterfaces }) {
+function laneTaskPrompt({ planPath, taskNumber, taskTitle, laneId, laneTasks, branch, worktree, testCommand, globalConstraints, priorInterfaces, verify }) {
   return `${laneBoundary({ laneId, laneTasks, taskNumber, branch })}
 
 ## Your task
@@ -51,7 +76,7 @@ Implement **Task ${taskNumber}: ${taskTitle}** from the plan at:
 
 Read only that task's section plus the plan's **Global Constraints**. Do not read
 or act on other tasks' sections beyond what you need to understand an interface.
-
+${verify ? verifySection({ taskNumber, ...verify }) : ''}
 ## How to execute it
 
 Use the **superpowers:subagent-driven-development** skill, scoped to this single

@@ -182,9 +182,9 @@ test('e2e: analyze -> init -> worktrees -> lane isolation -> crash recovery', (t
     },
   });
 
-  assert.equal(reloaded.tasks[String(taskA)].status, state.STATUS.DONE,
-    'a task whose process died after committing is recovered from git, not lost');
-  assert.equal(reloaded.tasks[String(taskA)].commits.length, 1);
+  assert.equal(reloaded.tasks[String(taskA)].status, state.STATUS.NEEDS_VERIFY,
+    'a task whose process died after committing keeps its work, but nothing proves it was reviewed');
+  assert.equal(reloaded.tasks[String(taskA)].commits.length, 1, 'recovered from git, not lost');
   assert.ok(notes.some((n) => /reconciled from git/.test(n.message)));
 
   // The other lanes are untouched by the recovery.
@@ -192,8 +192,8 @@ test('e2e: analyze -> init -> worktrees -> lane isolation -> crash recovery', (t
 
   // --- resume picks up exactly where it stopped --------------------------
   const ready = state.readyTasks(reloaded, dag.edges).map((r) => r.n).sort();
-  assert.ok(!ready.includes(taskA), 'the recovered task is not re-run');
-  assert.deepEqual(ready, [laneB.tasks[0], st.lanes[2].tasks[0]].sort());
+  assert.ok(ready.includes(taskA), 'the recovered task is offered again, to verify its commits');
+  assert.deepEqual(ready, [taskA, laneB.tasks[0], st.lanes[2].tasks[0]].sort());
 
   // --- clean -------------------------------------------------------------
   for (const lane of st.lanes) {

@@ -25,6 +25,7 @@ const STATUS_MARK = {
   [state.STATUS.FAILED]: '✗',
   [state.STATUS.BLOCKED]: '■',
   [state.STATUS.INTERRUPTED]: '⚡',
+  [state.STATUS.NEEDS_VERIFY]: '?',
 };
 
 function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
