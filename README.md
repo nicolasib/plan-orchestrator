@@ -62,6 +62,28 @@ Two details that matter in practice:
 - **Reads are not conflicts.** Only declared writes serialize lanes. Two tasks
   importing the same helper stay parallel.
 
+## Cross-lane edges carry code
+
+An edge that ends up between two lanes is not just an ordering. Every kind that
+can cross lanes — write-write, interface, override, docs-after-code — means the
+later task builds on what the earlier one wrote. So before a task starts, plo
+merges each producer from another lane into the task's lane:
+
+- up to the producer's own last commit, never the other lane's tip, which may
+  hold a task still in flight;
+- with `--no-ff`, so the merge stays off the lane's own line of commits and is
+  never counted as the task's work;
+- once: a producer already in the lane's history is skipped, so resume is safe,
+  and a producer that finished in an earlier run is still merged.
+
+`plo analyze` lists these edges under **CROSS-LANE EDGES**, because it is the one
+place plo writes to a lane branch on its own. A conflict in that merge is aborted
+on the spot — no agent starts on a half-merged tree — and the task fails with the
+files that collided.
+
+Before this, the edge was a wait: the dependent task ran in a worktree that never
+received the producer's code, reported BLOCKED, and the lane sat idle all night.
+
 ## Correcting the DAG
 
 Write `.plan-lanes-<plan>.json` beside the plan (`.plan-lanes-auth-refactor.json` for
@@ -206,12 +228,49 @@ want only if you actually mean to expose it.
 and again the moment it exits. On resume:
 
 - a task left `running` becomes `interrupted`
-- a task with commits on its lane branch that state calls unfinished is promoted
-  to `done` — **git outranks the state file**
+- a task with commits on its lane branch that never reported done — it died, was
+  aborted, or said BLOCKED — becomes `needs-verify`, **never `done`**. Git
+  outranks the state file on what landed; it says nothing about whether the
+  task review and the smoke gate ran, and SDD commits after the implementer,
+  before either. The next attempt keeps the base the work started from and is
+  told to review and smoke-gate the commits already there instead of starting
+  over. A failed attempt that committed lands in the same state.
 - if the plan file changed since `init`, you get a warning, because task
   numbering may have shifted
 
+Only the lane's own commits count as a task's: `git log --first-parent
+--no-merges` from the task's `baseBefore`. A merge into the lane, and everything
+it brought in, is never the task's work.
+
 Resume never reads a transcript.
+
+### The plan a lane reads
+
+Each lane worktree has its own copy of the plan, frozen at the commit the lane
+branched from, and that copy is the one its agent reads. A revision committed on
+the feature branch after `init` would never reach it. So before every task, plo
+overwrites the lane's copy with the plan as it reads now in the primary checkout,
+and marks it `skip-worktree` so that no `git add -A` in the lane commits it — the
+revision is the lane's view, never lane work, and integration never conflicts on
+it. An SDD brief in the lane (`.superpowers/sdd/<plan>/task-N-brief.md`) whose
+text no longer matches the task is deleted before the task starts, so a resumed
+task cannot be implemented from the old text. Both are logged.
+
+### Merging a lane by hand
+
+To unstick a lane yourself — merging another lane into it, say — do it from the
+lane's worktree, then reset the task in the checkpoint:
+
+    cd <lane worktree> && git merge --no-ff <other-lane-branch>
+
+    "status": "pending", "baseBefore": null
+
+Resume then cannot promote the task on the merge's commits: with `baseBefore`
+cleared there is nothing to count from, and the task takes a fresh base when it
+starts. Clearing it is the guarantee; `--no-ff` is the second one — it keeps the
+merge off the lane's first-parent line, which is all resume ever counts, even if
+`baseBefore` is left behind. A fast-forward merge with a stale `baseBefore` would
+put the other lane's commits on that line, so do not skip both.
 
 ## Integration
 

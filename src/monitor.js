@@ -386,7 +386,7 @@ function buildChildren(activity, subs = {}, { activityLimit = 0 } = {}) {
 const laneLabel = (id) => String(id).toUpperCase();
 
 /** Stopped, but not settled the way `done` is: the run needs a human. */
-const STOPPED = new Set([state.STATUS.FAILED, state.STATUS.BLOCKED, state.STATUS.INTERRUPTED]);
+const STOPPED = new Set([state.STATUS.FAILED, state.STATUS.BLOCKED, state.STATUS.INTERRUPTED, state.STATUS.NEEDS_VERIFY]);
 
 function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true } = {}) {
   const rec = st.tasks[String(n)] || {};
@@ -501,7 +501,9 @@ function buildStages(lanes, barriers, integration) {
   const fold = (tasks) => {
     if (tasks.some((t) => t.status === S.FAILED || t.status === S.BLOCKED)) return S.FAILED;
     if (tasks.some((t) => t.status === S.RUNNING)) return S.RUNNING;
-    if (tasks.some((t) => t.status === S.INTERRUPTED)) return S.INTERRUPTED;
+    // Committed but unverified stops a stage the way an interruption does:
+    // work is there, and the next attempt picks it up.
+    if (tasks.some((t) => t.status === S.INTERRUPTED || t.status === S.NEEDS_VERIFY)) return S.INTERRUPTED;
     if (tasks.every((t) => t.status === S.DONE)) return S.DONE;
     return tasks.some((t) => t.status === S.DONE) ? S.RUNNING : S.PENDING;
   };

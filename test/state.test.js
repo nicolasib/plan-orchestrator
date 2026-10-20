@@ -73,14 +73,55 @@ test('reconcile: a task left running becomes interrupted', () => {
   assert.match(notes.map((n) => n.message).join(' '), /Task 1 was running/);
 });
 
-test('reconcile: commits in git outrank a state file that missed them', () => {
+test('reconcile: commits in git are kept, but a task that never reported is not done', () => {
   const st = mkState(tmpPlan());
   st.tasks['1'].status = state.STATUS.RUNNING;
   const notes = state.reconcile(st, { gitCommitsFor: (n) => (n === 1 ? ['sha1', 'sha2'] : []) });
-  assert.equal(st.tasks['1'].status, state.STATUS.DONE, 'a process that died after committing still finished the task');
-  assert.deepEqual(st.tasks['1'].commits, ['sha1', 'sha2']);
+  // SDD commits after the implementer and before the review: commits alone
+  // say work landed, never that it was reviewed or smoke-gated.
+  assert.equal(st.tasks['1'].status, state.STATUS.NEEDS_VERIFY);
+  assert.deepEqual(st.tasks['1'].commits, ['sha1', 'sha2'], 'the work is not lost');
   assert.equal(st.tasks['1'].reconciled, true);
   assert.match(notes.map((n) => n.message).join(' '), /reconciled from git/);
+});
+
+// The UI round of 2026-10-20: T5's session was aborted right after the
+// implementer committed. State recorded the abort, and resume still promoted
+// the task to `done` — no task review, no smoke gate.
+test('reconcile: an aborted task with commits needs verification, never done', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['1'], {
+    status: state.STATUS.FAILED, error: 'The operation was aborted', baseBefore: 'sha0', attempts: 1,
+  });
+  const edges = [{ from: 1, to: 3 }]; // lane B's T3 builds on T1
+
+  state.reconcile(st, { gitCommitsFor: (n) => (n === 1 ? ['sha1'] : []) });
+
+  assert.equal(st.tasks['1'].status, state.STATUS.NEEDS_VERIFY);
+  assert.equal(st.tasks['1'].error, 'The operation was aborted', 'why it stopped is kept for the verifying run');
+  assert.ok(!state.isSettled(st.tasks['1'].status), 'not settled');
+  const ready = state.readyTasks(st, edges).map((r) => r.n);
+  assert.ok(ready.includes(1), 'resume re-runs it to verify the commits');
+  assert.ok(!ready.includes(3), 'and nothing that depends on it starts first');
+});
+
+// T4 of the same round: the agent reported BLOCKED (its smoke gate failed)
+// after committing. Resume turned the commit into `done`, T5 started on it.
+test('reconcile: a blocked task with commits needs verification, never done', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['3'], { status: state.STATUS.BLOCKED, error: 'smoke gate failed', baseBefore: 'sha0' });
+  state.reconcile(st, { gitCommitsFor: (n) => (n === 3 ? ['sha9'] : []) });
+  assert.equal(st.tasks['3'].status, state.STATUS.NEEDS_VERIFY);
+  assert.deepEqual(st.tasks['3'].commits, ['sha9']);
+});
+
+test('reconcile: a task already awaiting verification stays there', () => {
+  const st = mkState(tmpPlan());
+  Object.assign(st.tasks['1'], { status: state.STATUS.NEEDS_VERIFY, baseBefore: 'sha0', commits: ['sha1'] });
+  const notes = state.reconcile(st, { gitCommitsFor: (n) => (n === 1 ? ['sha2', 'sha1'] : []) });
+  assert.equal(st.tasks['1'].status, state.STATUS.NEEDS_VERIFY);
+  assert.deepEqual(st.tasks['1'].commits, ['sha2', 'sha1']);
+  assert.ok(!notes.some((x) => /reconciled from git/.test(x.message)), 'nothing new to report');
 });
 
 test('reconcile: a changed plan file raises a warning rather than silently resuming', () => {

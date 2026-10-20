@@ -1370,10 +1370,10 @@ const tokens = (v) => {
 
 const STATUS_WORD = {
   done: 'Done', running: 'In progress', pending: 'Todo',
-  failed: 'Failed', blocked: 'Blocked', interrupted: 'Interrupted',
+  failed: 'Failed', blocked: 'Blocked', interrupted: 'Interrupted', 'needs-verify': 'Needs verify',
 };
 /** Stopped, but not finished: the run needs a human before it moves again. */
-const STOPPED = new Set(['failed', 'blocked', 'interrupted']);
+const STOPPED = new Set(['failed', 'blocked', 'interrupted', 'needs-verify']);
 
 // --------------------------------------------------------------- glyphs
 
@@ -1403,7 +1403,7 @@ function statusIcon(status, size = 15) {
       return `${open}${ring('var(--fail)')}<path d="M${c - 2.3} ${c - 2.3} l4.6 4.6 M${c + 2.3} ${c - 2.3} l-4.6 4.6" stroke="var(--fail)" stroke-width="1.5" stroke-linecap="round" /></svg>`;
     case 'blocked':
       return `${open}${ring('var(--fail)')}<path d="M${c - 2.6} ${c} h5.2" stroke="var(--fail)" stroke-width="1.6" stroke-linecap="round" /></svg>`;
-    case 'interrupted':
+    case 'interrupted': case 'needs-verify':
       return `${open}${ring('var(--warn)', ' stroke-dasharray="2.6 2.2"')}<circle cx="${c}" cy="${c}" r="1.6" fill="var(--warn)" /></svg>`;
     default:
       return `${open}${ring('var(--idle)')}</svg>`;
@@ -1598,7 +1598,7 @@ function mouthPath(status) {
     case 'done': return 'M8.1 14.4 q3.9 4 7.8 0';
     case 'running': return 'M8.6 15 q3.4 2.2 6.8 0';
     case 'failed': case 'blocked': return 'M8.4 16.2 q3.6 -3 7.2 0';
-    case 'interrupted': return 'M9.2 15.4 q2.8 1.6 4.6 -.6';
+    case 'interrupted': case 'needs-verify': return 'M9.2 15.4 q2.8 1.6 4.6 -.6';
     default: return 'M9.4 15.3 h5.2';
   }
 }
@@ -1645,7 +1645,7 @@ function statusMark(status) {
       return wrap('bad', '<path d="M2.6 2.6 l3.8 3.8 M6.4 2.6 l-3.8 3.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />');
     case 'blocked':
       return wrap('bad', '<path d="M2.4 4.5 h4.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />');
-    case 'interrupted':
+    case 'interrupted': case 'needs-verify':
       return wrap('warn', '<path d="M3.4 2.8 v3.4 M5.6 2.8 v3.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />');
     default:
       return '';

@@ -25,6 +25,7 @@ const STATUS_MARK = {
   [state.STATUS.FAILED]: '✗',
   [state.STATUS.BLOCKED]: '■',
   [state.STATUS.INTERRUPTED]: '⚡',
+  [state.STATUS.NEEDS_VERIFY]: '?',
 };
 
 function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
@@ -82,6 +83,18 @@ function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
   }
   for (const [key, group] of grouped) {
     lines.push(`  T${group.map((e) => e.from).join(', T')} ${key}   ${group[0].evidence.replace(/Task \d+/g, 'each')}`);
+  }
+
+  // An edge that crosses lanes is where a lane needs code it does not have.
+  // Shown at the approval gate, because it is the one place plo writes to a
+  // lane branch on its own.
+  if (d.joins && d.joins.length) {
+    lines.push(rule(`CROSS-LANE EDGES (${d.joins.length}) — the code crosses too`));
+    for (const j of d.joins) {
+      lines.push(`  T${j.from} (lane ${j.fromLane}) → T${j.to} (lane ${j.toLane})   [${j.kind}]`);
+      lines.push(`      plo merges T${j.from}'s commits into lane ${j.toLane} before T${j.to} starts`);
+    }
+    lines.push('  A conflict in that merge fails the task and leaves the lane as it was.');
   }
 
   if (d.conflicts.length) {

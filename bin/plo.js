@@ -157,10 +157,12 @@ async function cmdRun(args, { resuming = false } = {}) {
 
   const notes = state.reconcile(st, {
     planContents: contents,
+    // Only the lane's own commits: a merge into the lane — by plo for a
+    // cross-lane edge, or by hand — is not the task's work.
     gitCommitsFor: (n, rec) => {
       const lane = st.lanes.find((l) => l.id === rec.lane);
       if (!lane || !lane.branch || !rec.baseBefore) return [];
-      return wt.laneCommits(st.repoRoot, rec.baseBefore, lane.branch).map((c) => c.sha);
+      return wt.ownCommits(st.repoRoot, rec.baseBefore, lane.branch).map((c) => c.sha);
     },
   });
   for (const n of notes) log(`${n.level}: ${n.message}`);
@@ -169,6 +171,10 @@ async function cmdRun(args, { resuming = false } = {}) {
   const done = resolveDone(plan, st, args);
   const { overrides } = loadOverrides(abs, args);
   const dag = buildDag(plan.tasks, { done, maxLanes: st.maxLanes, overrides });
+  // Readiness reads the live graph, where finished tasks have dropped out. The
+  // cross-lane merge needs the whole one: a producer that finished in an
+  // earlier run is exactly the one whose code the next task still lacks.
+  const dependencyEdges = buildDag(plan.tasks, { done: [], maxLanes: st.maxLanes, overrides }).edges;
 
   if (args['dry-run']) {
     out(render.dag(plan, dag, { planPath: abs, state: st, dryRun: true }));
@@ -187,6 +193,7 @@ async function cmdRun(args, { resuming = false } = {}) {
 
   const res = await runLanes(abs, st, plan, {
     edges: dag.edges,
+    dependencyEdges,
     maxLanes: st.maxLanes,
     model: args.model,
     permissionMode: args['permission-mode'] || 'acceptEdits',
