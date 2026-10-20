@@ -169,9 +169,9 @@ function removeLaneWorktree({ root, dest, branch, deleteBranch = false }) {
 }
 
 /** Commits a lane branch has that the base does not — the lane's actual output. */
-function laneCommits(root, baseCommit, branch) {
+function laneCommits(root, baseCommit, branch, logArgs = []) {
   try {
-    const out = git(root, ['log', '--format=%H %s', `${baseCommit}..${branch}`]);
+    const out = git(root, ['log', ...logArgs, '--format=%H %s', `${baseCommit}..${branch}`]);
     if (!out) return [];
     return out.split('\n').map((l) => {
       const sp = l.indexOf(' ');
@@ -182,6 +182,19 @@ function laneCommits(root, baseCommit, branch) {
   }
 }
 
+/**
+ * Commits made ON the lane since `baseCommit` — what a task there actually did.
+ *
+ * Not `laneCommits`: a lane can receive another lane's work by merge (plo does
+ * it for a cross-lane edge; a human does it by hand to unstick a lane). Those
+ * commits sit after `baseCommit` too, and counting them is how a merge made a
+ * task look finished. `--first-parent` keeps to the lane's own line, so what a
+ * merge brought in is not listed; `--no-merges` drops the merge commit itself.
+ */
+function ownCommits(root, baseCommit, branch) {
+  return laneCommits(root, baseCommit, branch, ['--first-parent', '--no-merges']);
+}
+
 function isDirty(cwd) {
   return git(cwd, ['status', '--porcelain']).length > 0;
 }
@@ -189,5 +202,5 @@ function isDirty(cwd) {
 module.exports = {
   git, repoRoot, currentBranch, headCommit, laneBranch, laneWorktreePath,
   listWorktrees, ensureLaneWorktree, removeLaneWorktree, seedWorktree,
-  laneCommits, isDirty, samePath, SEEDABLE,
+  laneCommits, ownCommits, isDirty, samePath, SEEDABLE,
 };

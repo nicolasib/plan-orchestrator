@@ -138,7 +138,7 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     return { n, ok: false, fatal: true, error: e.message };
   }
 
-  const commits = wt.laneCommits(st.repoRoot, baseBefore, lane.branch).map((c) => c.sha);
+  const commits = wt.ownCommits(st.repoRoot, baseBefore, lane.branch).map((c) => c.sha);
   const blocked = /STATUS:\s*BLOCKED/i.test(outcome.result || '');
 
   // Trust git over the agent's self-report: commits are the evidence that work

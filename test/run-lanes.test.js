@@ -27,7 +27,60 @@ const state = require('../src/state');
 const wt = require('../src/worktrees');
 const { runLanes, prepareLanes } = require('../src/run');
 
+const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+
+// T1 and T2 are disjoint, so they get a lane each. T3 consumes both, so it
+// follows one of them and has to cross over for the other — the shape of the
+// real T4 -> T5/T6 edge. T4 is independent; it keeps T3 from being a barrier
+// and gives lane B work of its own after T2.
+const CROSS_PLAN = `# Cross-lane plan
+
+## Global Constraints
+
+- Tests: \`npm test\`.
+
+---
+
+### Task 1: Core
+
+**Files:**
+- Create: \`src/core.js\`
+
+- [ ] **Step 1: write core**
+- [ ] **Step 2: test core**
+- [ ] **Step 3: commit**
+
+---
+
+### Task 2: Skin
+
+**Files:**
+- Create: \`src/skin.js\`
+
+- [ ] **Step 1: write skin**
+
+---
+
+### Task 3: Panel
+
+**Files:**
+- Create: \`src/panel.js\`
+
+**Interfaces:**
+- Consumes: \`core()\` (Task 1); \`.sk-panel\` from \`src/skin.js\` (Task 2).
+
+- [ ] **Step 1: build the panel on the skin**
+
+---
+
+### Task 4: Extra
+
+**Files:**
+- Create: \`src/extra.js\`
+
+- [ ] **Step 1: write extra**
+`;
 
 // Two disjoint tasks. At --max-lanes 1 they share a lane, one after the other.
 const PAIR_PLAN = `# Plan
@@ -107,6 +160,7 @@ function useSpec(repo, spec) {
 }
 
 const seen = (repo, n, attempt = 1) => JSON.parse(fs.readFileSync(path.join(repo.seenDir, `task-${n}-${attempt}.json`), 'utf8'));
+const laneOf = (st, n) => st.lanes.find((l) => l.tasks.includes(n));
 const subjects = (root, shas) => shas.map((s) => git(root, 'log', '-1', '--format=%s', s));
 
 async function run(repo, st, plan, dag) {
@@ -145,4 +199,45 @@ test('needs-verify: a failed attempt that committed is verified on the next atte
   assert.match(second, new RegExp(`BASE = \`${baseBefore}\``));
   assert.match(second, /smoke gate/);
   assert.doesNotMatch(seen(repo, 1, 1).prompt, /never reported done/, 'a first attempt gets the ordinary prompt');
+});
+
+// --- 4. resume after a lane was merged into another by hand --------------
+
+test('manual merge: resume never counts merge commits as the task\'s work, whether or not baseBefore was cleared', (t) => {
+  const repo = makeRepo(CROSS_PLAN);
+  t.after(() => cleanup(repo));
+  const { st } = initRun(repo);
+  const a = laneOf(st, 3);
+  const b = laneOf(st, 2);
+
+  // T2 finished in lane B. T3 ran in lane A without it, and stopped.
+  fs.writeFileSync(path.join(b.worktree, 'src', 'skin.js'), '// skin\n');
+  git(b.worktree, 'add', '-A');
+  git(b.worktree, 'commit', '-q', '-m', 'task 2');
+  Object.assign(st.tasks['2'], { status: state.STATUS.DONE, commits: [wt.headCommit(b.worktree)] });
+  Object.assign(st.tasks['3'], {
+    status: state.STATUS.FAILED, attempts: 1, error: 'src/skin.js is not in this worktree', baseBefore: wt.headCommit(a.worktree),
+  });
+
+  // The human repair: merge lane B into lane A by hand.
+  git(a.worktree, 'merge', '-q', '--no-ff', '-m', 'merge lane b by hand', b.branch);
+
+  const resumeDry = () => execFileSync(process.execPath, [PLO, 'resume', '--plan', repo.planPath, '--dry-run'], {
+    cwd: repo.root, encoding: 'utf8', stdio: 'pipe',
+  });
+
+  // baseBefore left as it was: the merge and T2's commit sit after it.
+  state.save(repo.planPath, st);
+  resumeDry();
+  let rec = state.load(repo.planPath).tasks['3'];
+  assert.equal(rec.status, state.STATUS.FAILED, 'not promoted by commits it did not make');
+  assert.deepEqual(rec.commits, []);
+
+  // baseBefore cleared, task back to pending — the documented repair.
+  Object.assign(st.tasks['3'], { status: state.STATUS.PENDING, baseBefore: null, error: null });
+  state.save(repo.planPath, st);
+  resumeDry();
+  rec = state.load(repo.planPath).tasks['3'];
+  assert.equal(rec.status, state.STATUS.PENDING);
+  assert.deepEqual(rec.commits, []);
 });

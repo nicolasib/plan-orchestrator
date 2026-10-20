@@ -157,10 +157,12 @@ async function cmdRun(args, { resuming = false } = {}) {
 
   const notes = state.reconcile(st, {
     planContents: contents,
+    // Only the lane's own commits: a merge into the lane — by plo for a
+    // cross-lane edge, or by hand — is not the task's work.
     gitCommitsFor: (n, rec) => {
       const lane = st.lanes.find((l) => l.id === rec.lane);
       if (!lane || !lane.branch || !rec.baseBefore) return [];
-      return wt.laneCommits(st.repoRoot, rec.baseBefore, lane.branch).map((c) => c.sha);
+      return wt.ownCommits(st.repoRoot, rec.baseBefore, lane.branch).map((c) => c.sha);
     },
   });
   for (const n of notes) log(`${n.level}: ${n.message}`);

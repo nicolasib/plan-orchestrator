@@ -216,7 +216,27 @@ and again the moment it exits. On resume:
 - if the plan file changed since `init`, you get a warning, because task
   numbering may have shifted
 
+Only the lane's own commits count as a task's: `git log --first-parent
+--no-merges` from the task's `baseBefore`. A merge into the lane, and everything
+it brought in, is never the task's work.
+
 Resume never reads a transcript.
+
+### Merging a lane by hand
+
+To unstick a lane yourself — merging another lane into it, say — do it from the
+lane's worktree, then reset the task in the checkpoint:
+
+    cd <lane worktree> && git merge --no-ff <other-lane-branch>
+
+    "status": "pending", "baseBefore": null
+
+Resume then cannot promote the task on the merge's commits: with `baseBefore`
+cleared there is nothing to count from, and the task takes a fresh base when it
+starts. Clearing it is the guarantee; `--no-ff` is the second one — it keeps the
+merge off the lane's first-parent line, which is all resume ever counts, even if
+`baseBefore` is left behind. A fast-forward merge with a stale `baseBefore` would
+put the other lane's commits on that line, so do not skip both.
 
 ## Integration
 
