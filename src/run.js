@@ -51,6 +51,41 @@ function prepareLanes(planPath, st, { worktreeDir, extraSeed, log = () => {} }) 
   return st;
 }
 
+/**
+ * A cross-lane edge means the later task builds on the earlier one's code, not
+ * only that it starts after it: every kind of edge that can cross lanes —
+ * write-write, interface, override, docs-after-code — says the dependent needs
+ * what the producer wrote. Waiting without merging left a task running in a
+ * worktree that never received that code, and it sat blocked all night.
+ *
+ * So each producer in another lane is merged into this lane before the task
+ * starts — up to the producer's own last commit (`commits` is newest first, as
+ * git lists them), never the other lane's tip, which may hold a task still in
+ * flight. Already merged is a no-op, which is what makes resume safe.
+ */
+function mergeProducers(st, n, lane, edges) {
+  const merged = [];
+  const producers = [...new Set(edges.filter((e) => e.to === n).map((e) => e.from))].sort((a, b) => a - b);
+  for (const m of producers) {
+    const rec = st.tasks[String(m)];
+    if (!rec || !rec.lane || rec.lane === lane.id) continue; // same lane already has it; a barrier has no lane
+    const tip = (rec.commits || [])[0];
+    if (!tip || wt.isAncestor(lane.worktree, tip)) continue;
+    const res = wt.mergeCommit(lane.worktree, tip, `merge: T${m} (lane ${rec.lane}) into lane ${lane.id} for T${n}`);
+    if (!res.ok) {
+      return {
+        ok: false,
+        merged,
+        error: `merging T${m} (lane ${rec.lane}, ${shortSha(tip)}) into lane ${lane.id} conflicted in `
+          + `${res.conflicts.join(', ') || `the worktree (${res.detail})`}. The merge was aborted and lane ${lane.id} is as it was. `
+          + `Merge it by hand in ${lane.worktree} (\`git merge --no-ff ${tip}\`), then \`plo resume\`.`,
+      };
+    }
+    merged.push({ m, lane: rec.lane, tip });
+  }
+  return { ok: true, merged };
+}
+
 /** Everything one spawned process needs to know, assembled from plan + state. */
 function buildTaskPrompt(st, plan, taskNumber, lane, verify = null) {
   const task = plan.tasks.find((t) => t.n === taskNumber);
@@ -96,6 +131,27 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   // task from scratch — so the id is only a label for the log.
   const sessionId = newSessionId();
   const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
+  const say = (msg) => opts.log(`T${n} (lane ${laneId}): ${msg}`);
+
+  // Bring the lane up to what this task builds on before its base is taken:
+  // the code of producers in other lanes.
+  let prep;
+  try {
+    prep = mergeProducers(st, n, lane, opts.dependencyEdges || opts.edges || []);
+    for (const x of prep.merged) say(`merged T${x.m} from lane ${x.lane} (${shortSha(x.tip)}) — this task builds on it`);
+  } catch (e) {
+    prep = { ok: false, error: `could not prepare lane ${laneId} for T${n}: ${e.message}` };
+  }
+  if (!prep.ok) {
+    // A failed attempt like any other, so the retry cap bounds it. Thrown
+    // instead, it would leave the status untouched and the scheduler would
+    // offer the task again on every pass.
+    state.updateTask(planPath, st, n, {
+      status: state.STATUS.FAILED, lane: laneId, attempts: (rec.attempts || 0) + 1, endedAt: new Date().toISOString(), error: prep.error,
+    });
+    say(`FAILED — ${prep.error}`);
+    return { n, ok: false, status: state.STATUS.FAILED, error: prep.error, commits: [] };
+  }
 
   // A task that committed but never reported done is verified, not redone. Its
   // base stays where the work started, so the commits it already made are

@@ -195,6 +195,34 @@ function ownCommits(root, baseCommit, branch) {
   return laneCommits(root, baseCommit, branch, ['--first-parent', '--no-merges']);
 }
 
+function isAncestor(cwd, commit, ref = 'HEAD') {
+  try {
+    git(cwd, ['merge-base', '--is-ancestor', commit, ref], { quiet: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge one commit into the worktree's branch, always as a merge commit so it
+ * stays off the lane's first-parent line. A conflict is aborted on the spot:
+ * no agent may start on a half-merged tree.
+ */
+function mergeCommit(cwd, commit, message) {
+  try {
+    git(cwd, ['merge', '--no-ff', '--no-edit', '-m', message, commit], { quiet: true });
+    return { ok: true };
+  } catch (e) {
+    let conflicts = [];
+    try {
+      conflicts = git(cwd, ['diff', '--name-only', '--diff-filter=U']).split('\n').filter(Boolean);
+      git(cwd, ['merge', '--abort'], { quiet: true });
+    } catch { /* nothing to abort: the merge never started */ }
+    return { ok: false, conflicts, detail: String(e.stderr || e.message).trim().slice(0, 500) };
+  }
+}
+
 function isDirty(cwd) {
   return git(cwd, ['status', '--porcelain']).length > 0;
 }
@@ -202,5 +230,5 @@ function isDirty(cwd) {
 module.exports = {
   git, repoRoot, currentBranch, headCommit, laneBranch, laneWorktreePath,
   listWorktrees, ensureLaneWorktree, removeLaneWorktree, seedWorktree,
-  laneCommits, ownCommits, isDirty, samePath, SEEDABLE,
+  laneCommits, ownCommits, isAncestor, mergeCommit, isDirty, samePath, SEEDABLE,
 };

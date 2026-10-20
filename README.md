@@ -62,6 +62,28 @@ Two details that matter in practice:
 - **Reads are not conflicts.** Only declared writes serialize lanes. Two tasks
   importing the same helper stay parallel.
 
+## Cross-lane edges carry code
+
+An edge that ends up between two lanes is not just an ordering. Every kind that
+can cross lanes — write-write, interface, override, docs-after-code — means the
+later task builds on what the earlier one wrote. So before a task starts, plo
+merges each producer from another lane into the task's lane:
+
+- up to the producer's own last commit, never the other lane's tip, which may
+  hold a task still in flight;
+- with `--no-ff`, so the merge stays off the lane's own line of commits and is
+  never counted as the task's work;
+- once: a producer already in the lane's history is skipped, so resume is safe,
+  and a producer that finished in an earlier run is still merged.
+
+`plo analyze` lists these edges under **CROSS-LANE EDGES**, because it is the one
+place plo writes to a lane branch on its own. A conflict in that merge is aborted
+on the spot — no agent starts on a half-merged tree — and the task fails with the
+files that collided.
+
+Before this, the edge was a wait: the dependent task ran in a worktree that never
+received the producer's code, reported BLOCKED, and the lane sat idle all night.
+
 ## Correcting the DAG
 
 Write `.plan-lanes-<plan>.json` beside the plan (`.plan-lanes-auth-refactor.json` for

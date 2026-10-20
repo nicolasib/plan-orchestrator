@@ -25,6 +25,7 @@ const { parsePlan } = require('../src/parse-plan');
 const { buildDag } = require('../src/build-dag');
 const state = require('../src/state');
 const wt = require('../src/worktrees');
+const render = require('../src/render');
 const { runLanes, prepareLanes } = require('../src/run');
 
 const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
@@ -81,6 +82,13 @@ const CROSS_PLAN = `# Cross-lane plan
 
 - [ ] **Step 1: write extra**
 `;
+
+const CROSS_SPEC = {
+  1: { writes: { 'src/core.js': '// core\n' } },
+  2: { writes: { 'src/skin.js': '// skin\n' } },
+  3: { requires: ['src/core.js', 'src/skin.js'], writes: { 'src/panel.js': '// panel\n' } },
+  4: { writes: { 'src/extra.js': '// extra\n' } },
+};
 
 // Two disjoint tasks. At --max-lanes 1 they share a lane, one after the other.
 const PAIR_PLAN = `# Plan
@@ -170,6 +178,91 @@ async function run(repo, st, plan, dag) {
   });
   return { res, log: lines.join('\n') };
 }
+
+// --- 1. a cross-lane edge brings the producer's code ----------------------
+
+test('cross-lane: the analyzer splits T2 and T3 across lanes, and says what plo will do about it', (t) => {
+  const repo = makeRepo(CROSS_PLAN);
+  t.after(() => cleanup(repo));
+  const plan = parsePlan(CROSS_PLAN);
+  const dag = buildDag(plan.tasks, { maxLanes: 2 });
+
+  const a = dag.lanes.find((l) => l.tasks.includes(3));
+  const b = dag.lanes.find((l) => l.tasks.includes(2));
+  assert.notEqual(a.id, b.id, 'fixture premise: T3 and its producer T2 sit in different lanes');
+  assert.deepEqual(dag.joins.map((j) => `${j.from}->${j.to}`), ['2->3']);
+
+  const out = render.dag(plan, dag, { planPath: repo.planPath });
+  assert.match(out, new RegExp(`T2 \\(lane ${b.id}\\) → T3 \\(lane ${a.id}\\)`));
+  assert.match(out, new RegExp(`merges T2's commits into lane ${a.id} before T3 starts`));
+});
+
+test('cross-lane: the dependent task starts with the producer lane merged in', async (t) => {
+  const repo = makeRepo(CROSS_PLAN);
+  t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo);
+  useSpec(repo, CROSS_SPEC);
+
+  const { res, log } = await run(repo, st, plan, dag);
+
+  // Before the fix this was the overnight stall: T3 ran in a worktree that
+  // never received T2's code, and reported BLOCKED.
+  assert.equal(st.tasks['3'].status, state.STATUS.DONE, st.tasks['3'].error || '');
+  assert.ok(res.allLanesDone);
+  const a = laneOf(st, 3);
+  assert.match(log, new RegExp(`T3 \\(lane ${a.id}\\): merged T2`));
+  assert.deepEqual(subjects(repo.root, st.tasks['3'].commits), ['task 3'],
+    "T3's commits are its own — not T2's, not the merge that brought them");
+  assert.ok(!fs.existsSync(path.join(a.worktree, 'src', 'extra.js')),
+    "only T2's work crosses over, not whatever lane B did after it");
+});
+
+test('cross-lane: resume still merges a producer that finished in an earlier run', (t) => {
+  const repo = makeRepo(CROSS_PLAN);
+  t.after(() => cleanup(repo));
+  const { st } = initRun(repo);
+
+  // An earlier run finished T1 and T2 and stopped. On resume both are done,
+  // so they drop out of the live graph — the edge 2->3 with them.
+  for (const n of [1, 2]) {
+    const lane = laneOf(st, n);
+    const file = n === 1 ? 'core.js' : 'skin.js';
+    fs.writeFileSync(path.join(lane.worktree, 'src', file), `// ${file}\n`);
+    git(lane.worktree, 'add', '-A');
+    git(lane.worktree, 'commit', '-q', '-m', `task ${n}`);
+    Object.assign(st.tasks[String(n)], { status: state.STATUS.DONE, commits: [wt.headCommit(lane.worktree)] });
+  }
+  state.save(repo.planPath, st);
+  useSpec(repo, CROSS_SPEC);
+
+  execFileSync(process.execPath, [PLO, 'resume', '--plan', repo.planPath, '--worktree-dir', repo.worktreeDir], {
+    cwd: repo.root, encoding: 'utf8', stdio: 'pipe', env: process.env,
+  });
+
+  const after = state.load(repo.planPath);
+  assert.equal(after.tasks['3'].status, state.STATUS.DONE, after.tasks['3'].error || '');
+  assert.deepEqual(subjects(repo.root, after.tasks['3'].commits), ['task 3']);
+});
+
+test('cross-lane: a merge that conflicts fails the task and leaves the worktree clean', async (t) => {
+  const repo = makeRepo(CROSS_PLAN);
+  t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo);
+  useSpec(repo, CROSS_SPEC);
+
+  // Lane A writes its own src/skin.js before T3 — an add/add conflict with T2.
+  const a = laneOf(st, 3);
+  fs.writeFileSync(path.join(a.worktree, 'src', 'skin.js'), '// a different skin\n');
+  git(a.worktree, 'add', '-A');
+  git(a.worktree, 'commit', '-q', '-m', 'lane a: its own skin');
+
+  await run(repo, st, plan, dag);
+
+  assert.equal(st.tasks['3'].status, state.STATUS.FAILED);
+  assert.match(st.tasks['3'].error, /merging T2 .* into lane .* conflicted in src\/skin\.js/);
+  assert.equal(git(a.worktree, 'status', '--porcelain'), '', 'the conflicted merge was aborted, not left behind');
+  assert.ok(!fs.existsSync(path.join(repo.seenDir, 'task-3-1.json')), 'no agent ran on a half-merged tree');
+});
 
 // --- 3. a task that never reported done is verified, not trusted ----------
 
