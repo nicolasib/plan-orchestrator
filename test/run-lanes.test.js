@@ -26,7 +26,7 @@ const { buildDag } = require('../src/build-dag');
 const state = require('../src/state');
 const wt = require('../src/worktrees');
 const render = require('../src/render');
-const { runLanes, prepareLanes } = require('../src/run');
+const { runLanes, prepareLanes, taskSection } = require('../src/run');
 
 const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -262,6 +262,48 @@ test('cross-lane: a merge that conflicts fails the task and leaves the worktree 
   assert.match(st.tasks['3'].error, /merging T2 .* into lane .* conflicted in src\/skin\.js/);
   assert.equal(git(a.worktree, 'status', '--porcelain'), '', 'the conflicted merge was aborted, not left behind');
   assert.ok(!fs.existsSync(path.join(repo.seenDir, 'task-3-1.json')), 'no agent ran on a half-merged tree');
+});
+
+// --- 2. a plan revised after init reaches the lanes ------------------------
+
+test('plan sync: a revision committed after init reaches the lane, and a stale brief is not reused', async (t) => {
+  const repo = makeRepo(PAIR_PLAN);
+  t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 1 });
+  const lane = st.lanes[0];
+  const original = fs.readFileSync(repo.planPath, 'utf8');
+
+  // A previous attempt left SDD briefs in the lane's workspace.
+  const sdd = path.join(lane.worktree, '.superpowers', 'sdd', 'plan');
+  fs.mkdirSync(sdd, { recursive: true });
+  fs.writeFileSync(path.join(sdd, 'task-1-brief.md'), taskSection(original, 1));
+  fs.writeFileSync(path.join(sdd, 'task-2-brief.md'), taskSection(original, 2));
+
+  // The 09:32 commit: Task 1 is revised on the integration branch while the
+  // lane already exists. Task 2 is untouched.
+  const revised = original.replace('- [ ] **Step 1: write alpha**', '- [ ] **Step 1: write alpha, with the revised contract**');
+  fs.writeFileSync(repo.planPath, revised);
+  git(repo.root, 'commit', '-q', '-am', 'docs: revise task 1');
+
+  useSpec(repo, {
+    1: { observe: ['docs/plan.md', '.superpowers/sdd/plan/task-1-brief.md'], writes: { 'src/alpha.js': '// a\n' } },
+    2: { observe: ['.superpowers/sdd/plan/task-2-brief.md'], writes: { 'src/beta.js': '// b\n' } },
+  });
+
+  const { log } = await run(repo, st, plan, dag);
+
+  const t1 = seen(repo, 1);
+  assert.equal(t1.files['docs/plan.md'], revised, "the lane's copy of the plan is the revised one");
+  assert.equal(t1.files['.superpowers/sdd/plan/task-1-brief.md'], null, 'the brief of the old text is gone');
+  assert.equal(seen(repo, 2).files['.superpowers/sdd/plan/task-2-brief.md'], taskSection(original, 2),
+    "an unchanged task's brief is left alone");
+  assert.match(log, /copy of the plan .* synced/);
+  assert.match(log, /T1 .*stale SDD brief/);
+
+  // The synced plan is the lane's working copy only — never lane work.
+  const touched = git(repo.root, 'diff', '--name-only', `${st.base.commit}..${lane.branch}`).split('\n');
+  assert.ok(!touched.includes('docs/plan.md'), `lane commits must not carry the plan: ${touched.join(', ')}`);
+  assert.equal(git(lane.worktree, 'status', '--porcelain'), '');
 });
 
 // --- 3. a task that never reported done is verified, not trusted ----------

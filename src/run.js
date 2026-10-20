@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const state = require('./state');
 const wt = require('./worktrees');
@@ -49,6 +50,85 @@ function prepareLanes(planPath, st, { worktreeDir, extraSeed, log = () => {} }) 
   }
   state.save(planPath, st);
   return st;
+}
+
+/**
+ * One task's text, cut from the plan the way SDD's `task-brief` script cuts it:
+ * from its `Task N` heading to the next task heading, headings inside a fenced
+ * block not counting. Kept identical on purpose, so a brief already on disk can
+ * be compared with the plan's current text byte for byte.
+ */
+function taskSection(contents, n) {
+  const lines = contents.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  const own = new RegExp(`^#+[ \\t]+Task[ \\t]+${n}([^0-9]|$)`);
+  const out = [];
+  let infence = false;
+  let intask = false;
+  for (const line of lines) {
+    if (/^```/.test(line)) infence = !infence;
+    if (!infence && /^#+[ \t]+Task[ \t]+[0-9]+/.test(line)) intask = own.test(line);
+    if (intask) out.push(line);
+  }
+  return out.length ? `${out.join('\n')}\n` : '';
+}
+
+const realPath = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+/**
+ * Every lane worktree holds its own copy of the plan, frozen at the commit the
+ * lane branched from, and that copy is the one an agent in the lane reads. A
+ * revision committed on the integration branch after `init` never reaches it:
+ * a task was once built from the old text that way. So before each task the
+ * lane's copy is overwritten with the plan as it is now — and marked
+ * skip-worktree, so no `git add -A` turns the revision into lane work. It is
+ * the lane's view of the plan, never the lane's output.
+ *
+ * Returns true when the copy had drifted and was rewritten.
+ */
+function syncLanePlan(st, lane, planPath, planNow) {
+  const rel = path.relative(realPath(st.repoRoot), realPath(planPath));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false; // outside the repo: there is one copy
+  try {
+    wt.git(lane.worktree, ['ls-files', '--error-unmatch', rel], { quiet: true });
+  } catch {
+    return false; // not tracked: the lane has no copy of its own to drift
+  }
+  const copy = path.join(lane.worktree, rel);
+  if (fs.existsSync(copy) && fs.readFileSync(copy, 'utf8') === planNow) return false;
+  wt.git(lane.worktree, ['update-index', '--skip-worktree', rel]);
+  fs.writeFileSync(copy, planNow);
+  return true;
+}
+
+/**
+ * SDD keeps each task's brief in the worktree (`.superpowers/sdd/<plan>/task-N-brief.md`),
+ * and a resumed controller that finds one can dispatch it as it is. A brief
+ * whose text is no longer the task's text is deleted before the task starts, so
+ * the next one is cut from the current plan. A brief that still matches stays.
+ */
+function dropStaleBriefs(lane, n, planPath, planNow) {
+  const root = path.join(lane.worktree, '.superpowers', 'sdd');
+  if (!fs.existsSync(root)) return [];
+  const want = taskSection(planNow, n);
+  const dropped = [];
+  for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    // A workspace that names another plan is that plan's business.
+    const marker = path.join(root, dir.name, 'plan-path');
+    if (fs.existsSync(marker) && path.basename(fs.readFileSync(marker, 'utf8').trim()) !== path.basename(planPath)) continue;
+    const brief = path.join(root, dir.name, `task-${n}-brief.md`);
+    if (!fs.existsSync(brief) || fs.readFileSync(brief, 'utf8') === want) continue;
+    fs.rmSync(brief);
+    dropped.push(brief);
+  }
+  return dropped;
 }
 
 /**
@@ -134,9 +214,12 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   const say = (msg) => opts.log(`T${n} (lane ${laneId}): ${msg}`);
 
   // Bring the lane up to what this task builds on before its base is taken:
-  // the code of producers in other lanes.
+  // the plan as it reads now, and the code of producers in other lanes.
   let prep;
   try {
+    const planNow = fs.readFileSync(planPath, 'utf8');
+    if (syncLanePlan(st, lane, planPath, planNow)) say(`the lane's copy of the plan differed from ${planPath} — synced (kept out of lane commits)`);
+    for (const brief of dropStaleBriefs(lane, n, planPath, planNow)) say(`deleted a stale SDD brief, cut from an older text of the task: ${brief}`);
     prep = mergeProducers(st, n, lane, opts.dependencyEdges || opts.edges || []);
     for (const x of prep.merged) say(`merged T${x.m} from lane ${x.lane} (${shortSha(x.tip)}) — this task builds on it`);
   } catch (e) {
@@ -292,4 +375,4 @@ async function runLanes(planPath, st, plan, opts = {}) {
   return { results, summary, stuck, allLanesDone: stuck.length === 0 };
 }
 
-module.exports = { runLanes, runTask, prepareLanes, buildTaskPrompt, pool };
+module.exports = { runLanes, runTask, prepareLanes, buildTaskPrompt, taskSection, pool };

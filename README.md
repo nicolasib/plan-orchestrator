@@ -244,6 +244,18 @@ it brought in, is never the task's work.
 
 Resume never reads a transcript.
 
+### The plan a lane reads
+
+Each lane worktree has its own copy of the plan, frozen at the commit the lane
+branched from, and that copy is the one its agent reads. A revision committed on
+the feature branch after `init` would never reach it. So before every task, plo
+overwrites the lane's copy with the plan as it reads now in the primary checkout,
+and marks it `skip-worktree` so that no `git add -A` in the lane commits it — the
+revision is the lane's view, never lane work, and integration never conflicts on
+it. An SDD brief in the lane (`.superpowers/sdd/<plan>/task-N-brief.md`) whose
+text no longer matches the task is deleted before the task starts, so a resumed
+task cannot be implemented from the old text. Both are logged.
+
 ### Merging a lane by hand
 
 To unstick a lane yourself — merging another lane into it, say — do it from the
