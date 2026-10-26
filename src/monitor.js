@@ -35,6 +35,10 @@ const TEXT_MAX = 400;
 /** The panel's copy of an agent's report. `TEXT_MAX` is a feed line's budget;
  *  a report is a document and gets a document's. */
 const REPORT_MAX = 8000;
+/** The full suite's output is plain text and a progress bar rewrites its own
+ *  line, so the last 64 KB holds far more than the 40 lines the panel shows. */
+const SUITE_TAIL_BYTES = 64 * 1024;
+const SUITE_LINES = 40;
 
 function tailFile(file, bytes = TAIL_BYTES) {
   let fd;
@@ -385,6 +389,22 @@ function buildChildren(activity, subs = {}, { activityLimit = 0, parentRunning =
     if (activityLimit) n.activity = n.activity.slice(-activityLimit);
   }
   return order;
+}
+
+/**
+ * A terminal's output as the lines a person would have seen. Colour codes are
+ * noise here, and a progress bar redraws its line with `\r`, so only the last
+ * segment of a line is what was on screen. The `# <ISO> $ <command>` header is
+ * plo's own and is shown separately.
+ */
+function cleanTermLines(text) {
+  const lines = String(text)
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')
+    .split('\n')
+    .map((l) => l.replace(/\r+$/, '').split('\r').pop())
+    .filter((l) => !/^# \d{4}-\d\d-\d\dT\S+ \$ /.test(l));
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
 }
 
 const laneLabel = (id) => String(id).toUpperCase();
@@ -739,6 +759,68 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
   const integrationRunning = stages.some((x) => ['merge', 'suite', 'review'].includes(x.key) && x.status === state.STATUS.RUNNING)
     || barriers.some((t) => t.status === state.STATUS.RUNNING);
   const active = (counts[state.STATUS.RUNNING] || 0) > 0 || integrationRunning;
+  const stageNamed = (key) => stages.find((x) => x.key === key);
+  const stageRec = (st.integration || {}).stages || {};
+
+  // The suite's output as it is written, only while it is running: once it
+  // ends, the verdict says it all and the log is a file to open.
+  const suiteRec = stageRec.suite || {};
+  const suiteLive = stageNamed('suite').status === state.STATUS.RUNNING
+    ? {
+      command: suiteRec.command || null,
+      startedAt: suiteRec.startedAt || null,
+      logFile: suiteRec.logFile || null,
+      lines: (() => {
+        const tail = suiteRec.logFile ? tailFile(suiteRec.logFile, SUITE_TAIL_BYTES) : null;
+        return tail ? cleanTermLines(tail.text).slice(-SUITE_LINES) : [];
+      })(),
+    }
+    : null;
+
+  // The cross-lane reviewer is one more agent, read the way a task is. Built
+  // after the stages because its status is the review stage's.
+  const reviewRec = stageRec.review || {};
+  let reviewer = null;
+  if (reviewRec.startedAt) {
+    const reviewStatus = stageNamed('review').status;
+    const status = reviewStatus === state.STATUS.INTERRUPTED ? state.STATUS.INTERRUPTED
+      : reviewStatus === state.STATUS.RUNNING ? state.STATUS.RUNNING
+        : reviewRec.endedAt ? state.STATUS.DONE : reviewStatus;
+    const running = status === state.STATUS.RUNNING;
+    const digest = logs && reviewRec.logFile ? readTaskLog(reviewRec.logFile, { activityLimit }) : null;
+    const lastTool = running && digest && [...digest.activity].reverse().find((a) => a.kind === 'tool');
+    reviewer = {
+      id: 'review',
+      kind: 'review',
+      n: null,
+      title: 'Cross-lane review',
+      status,
+      lane: null,
+      barrier: false,
+      attempts: 1,
+      turns: digest ? digest.turns : 0,
+      commits: [],
+      // Null while it runs: it has not reported, which is not the same as free.
+      costUsd: running ? null : reviewRec.costUsd ?? null,
+      outputTokens: running ? null : reviewRec.outputTokens ?? null,
+      error: null,
+      reconciled: false,
+      startedAt: reviewRec.startedAt,
+      endedAt: reviewRec.endedAt || null,
+      sessionId: reviewRec.sessionId || null,
+      logFile: reviewRec.logFile || null,
+      lastActivityAt: digest ? digest.lastActivityAt : null,
+      model: digest ? digest.model : null,
+      lastTool: lastTool ? { name: lastTool.name, target: lastTool.target, ok: lastTool.ok } : null,
+      lastText: running && digest ? digest.lastText : null,
+      rateLimit: digest ? digest.rateLimit : null,
+      activity: digest ? digest.activity.filter((a) => !a.sub).slice(-activityLimit) : [],
+      children: digest ? buildChildren(digest.activity, digest.subs, { activityLimit, parentRunning: running }) : [],
+    };
+  }
+  // After the task sum, so the figures that were already exact stay exact.
+  const totalCostUsd = typeof reviewRec.costUsd === 'number' ? costUsd + reviewRec.costUsd : costUsd;
+
   const runOver = !active
     && ['done', 'review-findings', 'merge-failed', 'barrier-failed', 'suite-failed'].includes((st.integration || {}).status);
 
@@ -760,7 +842,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
       blocked: counts[state.STATUS.BLOCKED] || 0,
       interrupted: counts[state.STATUS.INTERRUPTED] || 0,
       pending: counts[state.STATUS.PENDING] || 0,
-      costUsd,
+      costUsd: totalCostUsd,
       outputTokens,
       firstStartedAt: startedAts[0] || null,
       active,
@@ -770,6 +852,8 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
     stages,
+    suiteLive,
+    reviewer,
     timeline: buildTimeline(lanes, barriers),
     feed,
     lanes,
@@ -807,4 +891,4 @@ function taskDetail(planPath, n, { activityLimit = 200, alive = processAlive } =
   };
 }
 
-module.exports = { snapshot, taskDetail, taskView, buildFeed, buildChildren, buildStages, buildTimeline, digestLog, readTaskLog, tailFile, toolTarget, shortPath };
+module.exports = { snapshot, taskDetail, taskView, buildFeed, buildChildren, buildStages, buildTimeline, cleanTermLines, digestLog, readTaskLog, tailFile, toolTarget, shortPath };

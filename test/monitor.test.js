@@ -777,3 +777,85 @@ test('taskDetail applies the same liveness', () => {
   state.save(planPath, st);
   assert.equal(monitor.taskDetail(planPath, 2, { alive: () => false }).status, 'interrupted');
 });
+
+// ---------------------------------------------------------------- live suite and reviewer
+
+const liveIntegration = (stages, status) => ({
+  status, mergedLanes: ['A'], suite: null, review: null,
+  pid: process.pid, pidStartedAt: processStamp().startedAt,
+  stages: { merge: { startedAt: M0, endedAt: M1 }, ...stages },
+});
+
+const patchIntegration = (planPath, fn) => {
+  const st = state.load(planPath);
+  fn(st.integration);
+  state.save(planPath, st);
+};
+
+test('cleanTermLines strips colour, keeps the last segment of a rewritten line, drops the header', () => {
+  const raw = '# 2026-10-26T14:00:00.000Z $ npm test\n\x1b[32m✓\x1b[39m a.test.js\r\nprogress 10%\rprogress 100%\n\x1b[1mTests\x1b[22m 3 passed\n';
+  assert.deepEqual(monitor.cleanTermLines(raw), ['✓ a.test.js', 'progress 100%', 'Tests 3 passed']);
+});
+
+test('while the suite runs, the snapshot carries its last lines, and they move', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, `# ${R0} $ npm test\nline one\nline two\n`);
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ suite: { startedAt: R0, logFile, command: 'npm test', pid: process.pid } }, 'suite-running')));
+
+  const live = monitor.snapshot(planPath).suiteLive;
+  assert.equal(live.command, 'npm test');
+  assert.equal(live.startedAt, R0);
+  assert.equal(live.logFile, logFile);
+  assert.equal(live.lines.length, 2);
+
+  fs.appendFileSync(logFile, 'line three\n');
+  assert.equal(monitor.snapshot(planPath).suiteLive.lines.length, 3);
+});
+
+test('suiteLive is null once the suite ended, and has no lines while its log is missing', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ suite: { startedAt: R0, logFile, command: 'npm test' } }, 'suite-running')));
+  assert.deepEqual(monitor.snapshot(planPath).suiteLive.lines, []);
+
+  patchIntegration(planPath, (i) => { i.stages.suite.endedAt = R0; });
+  assert.equal(monitor.snapshot(planPath).suiteLive, null);
+});
+
+test('the reviewer is one more agent: running, with its subagents, its cost null until it ends', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'review.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, [
+    ev({ type: 'system', subtype: 'init', session_id: 'sess-rv', model: 'claude-opus-5' }),
+    assistantTool('Read', { file_path: '/repo/src/a.js' }, 'tu_r', R0),
+    assistantTool('Task', { subagent_type: 'code-reviewer', description: 'review the diff' }, 'tu_rv', R0),
+  ].join(''));
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ review: { startedAt: R0, logFile, sessionId: 'sess-rv' } }, 'reviewing')));
+
+  let r = monitor.snapshot(planPath).reviewer;
+  assert.equal(r.id, 'review');
+  assert.equal(r.kind, 'review');
+  assert.equal(r.n, null);
+  assert.equal(r.title, 'Cross-lane review');
+  assert.equal(r.status, 'running');
+  assert.equal(r.sessionId, 'sess-rv');
+  assert.equal(r.children[0].status, 'running');
+  assert.equal(r.costUsd, null);
+  assert.equal(r.outputTokens, null);
+
+  patchIntegration(planPath, (i) => { Object.assign(i.stages.review, { endedAt: R0, costUsd: 0.42 }); });
+  const s = monitor.snapshot(planPath);
+  r = s.reviewer;
+  assert.equal(r.status, 'done');
+  assert.equal(r.costUsd, 0.42);
+  assert.equal(r.children[0].status, 'interrupted');
+  assert.equal(s.totals.costUsd, 1.5 + 0.42);
+});
+
+test('the reviewer is null before the review starts', () => {
+  const { planPath } = fixture();
+  assert.equal(monitor.snapshot(planPath).reviewer, null);
+});
