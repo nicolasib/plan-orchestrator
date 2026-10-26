@@ -52,40 +52,18 @@
 
 - [ ] **Step 1: Write the failing parser tests** em `test/parse-plan.test.js`
 
+O plano de teste é montado como array de linhas, para os títulos dele não começarem linha neste arquivo (o `plo` leria como tasks deste plano).
+
 ```js
-const EFFORT_PLAN = `# Effort plan
-
-### Task 1: Alpha
-
-**Effort:** medium — troca mecânica
-
-**Files:**
-- Create: \`src/a.js\`
-
-- [ ] step
-
-### Task 2: Beta
-
-**Effort:**  HIGH
-
-- [ ] step
-
-### Task 3: Gamma
-
-- [ ] step
-
-### Task 4: Delta
-
-**Effort:** altissimo — demais
-
-- [ ] step
-
-### Task 5: Epsilon
-
-**Effort:** \`xhigh\`
-
-- [ ] step
-`;
+const EFFORT_PLAN = [
+  '# Effort plan', '',
+  '### Task 1: Alpha', '', '**Effort:** medium — troca mecânica', '',
+  '**Files:**', '- Create: `src/a.js`', '', '- [ ] step', '',
+  '### Task 2: Beta', '', '**Effort:**  HIGH', '', '- [ ] step', '',
+  '### Task 3: Gamma', '', '- [ ] step', '',
+  '### Task 4: Delta', '', '**Effort:** altissimo — demais', '', '- [ ] step', '',
+  '### Task 5: Epsilon', '', '**Effort:** `xhigh`', '', '- [ ] step', '',
+].join('\n');
 const lineOf = (s) => EFFORT_PLAN.split('\n').findIndex((l) => l.includes(s)) + 1;
 
 test('parsePlan: reads the Effort line, level lowercased, reason optional', () => {
