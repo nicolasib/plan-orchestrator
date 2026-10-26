@@ -104,6 +104,35 @@ test('unknown routes 404 and writes are refused', async () => {
   } finally { await s.close(); }
 });
 
+test('the assets route serves the sprite, the font and its licence', async () => {
+  const { planPath } = fixture();
+  const { base, close } = await boot(planPath);
+  try {
+    const svg = await get(base, '/assets/operador.svg');
+    assert.equal(svg.status, 200);
+    assert.match(svg.headers.get('content-type'), /^image\/svg\+xml/);
+    assert.equal((svg.body.match(/<symbol id="op-/g) || []).length, 12);
+    assert.equal(svg.body.includes('class="'), false);
+    assert.ok(svg.body.includes('fill:var(--fig)') && svg.body.includes('fill:var(--ln)'));
+    const ttf = await fetch(`${base}/assets/roboto-condensed.ttf`);
+    assert.equal(ttf.status, 200);
+    assert.equal(ttf.headers.get('content-type'), 'font/ttf');
+    const ofl = await get(base, '/assets/OFL.txt');
+    assert.equal(ofl.status, 200);
+    assert.match(ofl.body, /SIL OPEN FONT LICENSE/i);
+  } finally { await close(); }
+});
+
+test('the assets route answers only its own list', async () => {
+  const { planPath } = fixture();
+  const { base, close } = await boot(planPath);
+  try {
+    for (const p of ['/assets/..%2Fpackage.json', '/assets/operador.svg.bak', '/assets/', '/assets/%E0%A4%A', '/assets/OFL.TXT']) {
+      assert.equal((await get(base, p)).status, 404, p);
+    }
+  } finally { await close(); }
+});
+
 test('a missing state file is displayed, not thrown', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plo-serve-bare-'));
   const planPath = path.join(dir, 'fresh.md');

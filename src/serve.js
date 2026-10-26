@@ -25,6 +25,13 @@ const HEARTBEAT_MS = 15000;
 const PORT_ATTEMPTS = 10;
 
 const UI_FILE = path.join(__dirname, 'ui.html');
+// Closed list: only these names are ever read from src/assets, so no request
+// can reach another file.
+const ASSETS = {
+  'operador.svg': 'image/svg+xml',
+  'roboto-condensed.ttf': 'font/ttf',
+  'OFL.txt': 'text/plain; charset=utf-8',
+};
 
 const json = (res, code, body) => {
   const payload = JSON.stringify(body);
@@ -151,6 +158,30 @@ function createServer({ planPath, activityLimit = 16, pollMs = POLL_MS } = {}) {
       req.on('close', close);
       res.on('error', close);
       ensureTimer();
+      return;
+    }
+
+    if (url.pathname.startsWith('/assets/')) {
+      let name;
+      try {
+        name = decodeURIComponent(url.pathname.slice('/assets/'.length));
+      } catch {
+        json(res, 404, { error: `no route ${url.pathname}` });
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(ASSETS, name)) {
+        json(res, 404, { error: `no route ${url.pathname}` });
+        return;
+      }
+      let body;
+      try {
+        body = fs.readFileSync(path.join(__dirname, 'assets', name));
+      } catch (e) {
+        json(res, 500, { error: `asset ${name} missing: ${e.message}` });
+        return;
+      }
+      res.writeHead(200, { 'content-type': ASSETS[name], 'cache-control': 'no-store' });
+      res.end(body);
       return;
     }
 
