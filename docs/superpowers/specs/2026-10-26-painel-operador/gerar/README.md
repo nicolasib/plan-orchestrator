@@ -17,6 +17,12 @@ vetorizadas, e é isso que permite pedir uma pose nova no mesmo traço.
    recortados com a mesma moldura, com três camadas: `sil` (silhueta), `ln`
    (traço) e `fx` (o que flutua: "!", Z, estrelas, gota).
 
+4. **Sprite.** `monta-sprite.js` lê os doze `../operador/bone-<pose>-<1|2>.svg`,
+   troca as classes `sil`, `ln` e `fx` por estilos com `var(--fig)` e `var(--ln)`
+   e escreve `src/assets/operador.svg`, um `<symbol id="op-<pose>-<n>">` por
+   quadro. Rode da raiz do repositório:
+   `node docs/superpowers/specs/2026-10-26-painel-operador/gerar/monta-sprite.js`
+
 Modelo usado: `gpt-image-2.5-sunburst` (OpenAI Images), qualidade `high`. O
 `vtracer` dá segfault no Python 3.14; o `potracer` não.
 
