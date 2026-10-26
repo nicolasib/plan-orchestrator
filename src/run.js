@@ -6,6 +6,7 @@ const state = require('./state');
 const wt = require('./worktrees');
 const { runAgent, newSessionId, pool } = require('./spawn');
 const { laneTaskPrompt } = require('./prompts');
+const { effortFor, plannedEffort, shouldRaise } = require('./effort');
 
 /**
  * The lane scheduler.
@@ -243,6 +244,10 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   const baseBefore = verifying ? rec.baseBefore : wt.headCommit(lane.worktree);
   const verify = verifying ? { baseBefore, commits: rec.commits || [], lastError: rec.error || null } : null;
 
+  // The plan's level for this task, one step up for each time it stopped on
+  // its own result in this invocation. Null leaves the agent's default.
+  const used = effortFor(plannedEffort(plan.tasks.find((t) => t.n === n)), rec.raises || 0);
+
   state.updateTask(planPath, st, n, {
     status: state.STATUS.RUNNING,
     lane: laneId,
@@ -251,6 +256,7 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     startedAt: new Date().toISOString(),
     logFile,
     baseBefore,
+    effort: used,
     error: null,
   });
   opts.log(`T${n} (lane ${laneId}): ${verifying ? 'verifying' : 'started'} — session ${sessionId.slice(0, 8)} — log ${logFile}`);
@@ -262,6 +268,7 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
       prompt: buildTaskPrompt(st, plan, n, lane, verify),
       sessionId,
       model: opts.model,
+      effort: used,
       permissionMode: opts.permissionMode,
       maxTurns: opts.maxTurns,
       timeoutMs: opts.taskTimeoutMs,
@@ -311,6 +318,9 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     outputTokens: outcome.outputTokens == null && rec.outputTokens == null
       ? null
       : (rec.outputTokens || 0) + (outcome.outputTokens || 0),
+    // Counted only here, where the agent ran to the end: a lane that could not
+    // be prepared or a binary that never opened above leave it as it was.
+    raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
     error,
   });
 

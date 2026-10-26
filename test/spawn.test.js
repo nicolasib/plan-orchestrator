@@ -24,6 +24,15 @@ test('buildArgs omits every optional flag when unset', () => {
   assert.deepEqual(buildArgs({ prompt: 'x' }), ['-p', 'x', '--output-format', 'stream-json', '--verbose']);
 });
 
+test('buildArgs passes --effort right after --model', () => {
+  const a = buildArgs({ prompt: 'x', model: 'opus', effort: 'medium' });
+  const i = a.indexOf('--model');
+  assert.deepEqual(a.slice(i, i + 4), ['--model', 'opus', '--effort', 'medium']);
+});
+test('buildArgs without effort is the argv of today', () => {
+  assert.equal(buildArgs({ prompt: 'x', model: 'opus' }).includes('--effort'), false);
+});
+
 test('parseEvent reads a successful result', () => {
   const ev = parseEvent(JSON.stringify({
     type: 'result', subtype: 'success', is_error: false,

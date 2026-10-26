@@ -7,6 +7,7 @@ const state = require('./state');
 const wt = require('./worktrees');
 const { runAgent, newSessionId } = require('./spawn');
 const { barrierTaskPrompt, crossLaneReviewPrompt } = require('./prompts');
+const { effortFor, plannedEffort, shouldRaise } = require('./effort');
 
 /**
  * The integration phase — the part that only exists because execution was
@@ -113,9 +114,12 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     const sessionId = newSessionId();
     const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
     const baseBefore = wt.headCommit(st.repoRoot);
+    // A barrier obeys its own `**Effort:**` line and climbs like a lane task.
+    // `integrate` never reconciles, so a raise stands until the next run/resume.
+    const used = effortFor(plannedEffort(task), rec.raises || 0);
 
     state.updateTask(planPath, st, n, {
-      status: state.STATUS.RUNNING, sessionId, logFile, baseBefore,
+      status: state.STATUS.RUNNING, sessionId, logFile, baseBefore, effort: used,
       attempts: (rec.attempts || 0) + 1, startedAt: new Date().toISOString(), error: null,
     });
     log(`T${n} (barrier): started — ${task ? task.title : ''}`);
@@ -134,6 +138,7 @@ async function runBarriers(planPath, st, plan, opts = {}) {
       }),
       sessionId,
       model: opts.model,
+      effort: used,
       permissionMode: opts.permissionMode || 'acceptEdits',
       maxTurns: opts.maxTurns,
       timeoutMs: opts.taskTimeoutMs,
@@ -147,12 +152,14 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     // nothing to change), so commits are not required here the way they are for
     // an implementation task.
     const ok = outcome.ok && !blocked;
+    const status = ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
 
     state.updateTask(planPath, st, n, {
-      status: ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED,
+      status,
       endedAt: new Date().toISOString(),
       commits,
       turns: outcome.turns,
+      raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
       error: ok ? null : (outcome.result || outcome.stderr || '').slice(0, 500),
     });
 

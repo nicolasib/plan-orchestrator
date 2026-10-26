@@ -197,6 +197,10 @@ function reconcile(state, { gitCommitsFor, planContents } = {}) {
       });
       rec.attempts = 0;
     }
+    // The effort raise does not survive an invocation, unlike the attempt
+    // budget above, which only resets once spent: every run or resume starts
+    // each task back at the level its plan line asks for.
+    if (rec.raises) rec.raises = 0;
     if (rec.status === STATUS.RUNNING) {
       rec.status = STATUS.INTERRUPTED;
       notes.push({ level: 'info', message: `Task ${n} was running when the run stopped — marked interrupted.` });

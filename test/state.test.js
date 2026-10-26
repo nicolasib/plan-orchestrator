@@ -201,6 +201,14 @@ test('reconcile: a task with attempts left keeps its count', () => {
   assert.equal(st.tasks['1'].attempts, 1, 'only an exhausted budget is reset');
 });
 
+test('reconcile: every run or resume starts each task back at its planned level', () => {
+  const p = tmpPlan();
+  const st = mkState(p);
+  st.tasks['1'].raises = 2;
+  state.reconcile(st);
+  assert.equal(st.tasks['1'].raises, 0);
+});
+
 test('readyTasks: a failed task is offered again on resume', () => {
   const st = mkState(tmpPlan());
   st.tasks['1'].status = state.STATUS.FAILED;
