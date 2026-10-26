@@ -2,7 +2,8 @@
 
 > **Status:** aguardando aprovação; leitura de construtor feita em 26/10.
 > Branch `feat/esforco-e-painel-pipboy`.
-> **Documento irmão:** o painel Pip-Boy (documento B), desenhado em paralelo
+> **Documento irmão:** o painel do operador (documento B,
+> `2026-10-26-painel-operador-design.md`), desenhado em paralelo
 > na mesma branch. Este documento diz **o que** a página precisa mostrar —
 > os dados no snapshot do `monitor` e os estados. **Como** aparece é do B.
 > Os dois viram **um plano só** (§3.1).
