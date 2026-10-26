@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const state = require('./state');
-const { parsePlan } = require('./parse-plan');
+const { parsePlan, EFFORT_LEVELS } = require('./parse-plan');
+const { plannedEffort } = require('./effort');
 const { processAlive } = require('./proc');
 
 /**
@@ -39,6 +40,14 @@ const REPORT_MAX = 8000;
  *  line, so the last 64 KB holds far more than the 40 lines the panel shows. */
 const SUITE_TAIL_BYTES = 64 * 1024;
 const SUITE_LINES = 40;
+/** A Bash call that runs tests, by the runners plans call most. The plan's own
+ *  test command counts too, whatever it is — see `digestLog`. */
+const TEST_CALL = /\b(vitest|jest|pytest|go test|node --test|(npm|pnpm|yarn)( run)? test)\b/;
+/** A test run's verdict sits at the end of its output: the summary line and
+ *  the few lines above it. Capped in characters too, for one-line minified
+ *  output that a line count would let through whole. */
+const TEST_TAIL_LINES = 10;
+const TEST_TAIL_MAX = 1024;
 
 function tailFile(file, bytes = TAIL_BYTES) {
   let fd;
@@ -115,13 +124,14 @@ function subagentType(name, input) {
 }
 
 /** tool_result content arrives as a string or as content blocks. */
-function resultPreview(content) {
-  if (typeof content === 'string') return oneLine(content, 140);
-  if (Array.isArray(content)) {
-    const text = content.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ');
-    return oneLine(text, 140);
-  }
+function resultText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ');
   return '';
+}
+
+function resultPreview(content) {
+  return oneLine(resultText(content), 140);
 }
 
 function emptyDigest() {
@@ -145,6 +155,10 @@ function emptyDigest() {
      *  counters above deliberately skip subagent messages; this is where
      *  those messages land instead of being dropped on the floor. */
     subs: {},
+    /** The last test run, the task's or a subagent's. Kept apart from
+     *  `activity`, which is cut to a window: the test that decides whether
+     *  the work holds is often far older than the last forty calls. */
+    lastTest: null,
     truncated: false,
   };
 }
@@ -161,9 +175,16 @@ function emptyDigest() {
  * counters — the interesting run is the current one, not the sum of the
  * failed ones.
  */
-function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
+function digestLog(text, { activityLimit = ACTIVITY_LIMIT, testCommand = null } = {}) {
   const d = emptyDigest();
   const pending = new Map(); // tool_use_id -> activity entry awaiting its result
+  // The call `d.lastTest` stands for. Only its own result may settle it: with
+  // two runs in flight, the older one coming back says nothing of the newer.
+  let testId = null;
+  // The plan names its test command, and a project's own script is a test run
+  // whether or not it looks like one of the usual runners.
+  const isTest = (command) => typeof command === 'string' && Boolean(command)
+    && ((typeof testCommand === 'string' && Boolean(testCommand) && command.includes(testCommand)) || TEST_CALL.test(command));
   const push = (entry) => {
     d.activity.push(entry);
     if (d.activity.length > activityLimit * 4) d.activity.splice(0, d.activity.length - activityLimit * 4);
@@ -181,6 +202,7 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
       const attempts = d.attempts + 1;
       Object.assign(d, emptyDigest(), { attempts, truncated: d.truncated });
       pending.clear();
+      testId = null;
       push({ kind: 'run', at, label: attempts > 1 ? `attempt ${attempts}` : 'started' });
       stamp(at);
       continue;
@@ -242,6 +264,12 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
             ok: null, preview: null,
           });
           if (block.id) pending.set(block.id, entry);
+          // A subagent's test run counts as the task's: the implementer it
+          // dispatched is usually the one who ran the suite.
+          if (block.name === 'Bash' && block.input && isTest(block.input.command)) {
+            d.lastTest = { command: block.input.command, at, ok: null, tail: null };
+            testId = block.id || null;
+          }
         } else if (block.type === 'text' && block.text && block.text.trim()) {
           const text2 = oneLine(block.text, TEXT_MAX);
           if (!sub) d.lastText = text2;
@@ -257,6 +285,14 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT } = {}) {
         if (!block || block.type !== 'tool_result') continue;
         const entry = pending.get(block.tool_use_id);
         const preview = resultPreview(block.content);
+        if (testId && block.tool_use_id === testId) {
+          // The whole text, not the preview: a preview is one line of 140
+          // characters, and a test's verdict is the last lines of its output.
+          const lines = resultText(block.content).replace(/\s+$/, '').split('\n');
+          d.lastTest.ok = !block.is_error;
+          d.lastTest.tail = lines.slice(-TEST_TAIL_LINES).join('\n').slice(-TEST_TAIL_MAX);
+          testId = null;
+        }
         if (entry) {
           entry.ok = !block.is_error;
           entry.preview = preview;
@@ -420,7 +456,7 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
   // finished ones included. Digesting twice would double the tail read for
   // every task on every poll.
   const limit = Math.max(activityLimit, feedLimit);
-  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit: limit }) : null;
+  const digest = logs && rec.logFile ? readTaskLog(rec.logFile, { activityLimit: limit, testCommand: st.testCommand }) : null;
 
   // The checkpoint is authoritative for status; the log is authoritative for
   // what is happening inside a task that is still running.
@@ -437,6 +473,12 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
   // the answer to why — the same reason its report is kept. A task that is
   // simply `done` keeps nothing: it collapses to a chip and nobody opens it.
   const shown = live || (STOPPED.has(status) ? digest : null);
+  const running = status === state.STATUS.RUNNING;
+
+  // What the plan asked for beside what the last attempt ran at. The two part
+  // when a task that stopped on its own result came back one level higher.
+  const planned = plannedEffort(task);
+  const used = rec.effort || null;
 
   const view = {
     n: Number(n),
@@ -445,9 +487,22 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     lane: rec.lane || null,
     barrier,
     attempts: rec.attempts || 0,
+    // Null when the plan names no level and the agent ran at the inherited one.
+    effort: planned || used ? {
+      planned,
+      used,
+      raised: Boolean(planned && used && EFFORT_LEVELS.indexOf(used) > EFFORT_LEVELS.indexOf(planned)),
+      reason: (task && task.effort && task.effort.reason) || null,
+    } : null,
+    tries: rec.tries || [],
     turns: live ? live.turns : (rec.turns || 0),
     commits: rec.commits || [],
-    costUsd: rec.costUsd ?? (live ? live.costUsd : null),
+    // Null while it runs, as the reviewer's is. The record holds what earlier
+    // attempts spent and this one has not reported yet, so any figure here
+    // would be a past one passed off as the current run's.
+    costUsd: running ? null : rec.costUsd ?? null,
+    // The same rule for the count, for the same reason.
+    //
     // The checkpoint first, because the CLI wrote it from the agent's own
     // report. The log second, and only the figure a result event carried, so
     // runs recorded before `plo` kept this still have a number.
@@ -458,7 +513,7 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     // its tail — the sum said 377 output tokens for 842 turns. Null, never
     // zero and never a fraction: a task that has not reported did not spend
     // nothing.
-    outputTokens: rec.outputTokens ?? (digest ? digest.reportedTokens : null),
+    outputTokens: running ? null : rec.outputTokens ?? (digest ? digest.reportedTokens : null),
     error: rec.error || null,
     reconciled: Boolean(rec.reconciled),
     startedAt: rec.startedAt || null,
@@ -474,6 +529,9 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     // Not gated on `live`: the run this most needs to report is the one that
     // already died of a usage limit, and a dead task is by definition not live.
     rateLimit: digest ? digest.rateLimit : null,
+    // Not gated either: whether the last test passed is the first question
+    // about a task that stopped, and about one that says it is done.
+    lastTest: digest ? digest.lastTest : null,
     // The task's own calls. What a subagent did belongs to the subagent, and
     // hangs off `children` instead of being flattened into its parent's tail.
     activity: shown ? shown.activity.filter((a) => !a.sub).slice(-activityLimit) : [],
@@ -850,6 +908,9 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
     integrationRunning,
     runOver,
     rateLimit: limited[0] || null,
+    // The five-hour window as the agent last reported it. A state written
+    // before plo kept it has none, which is not a window at zero.
+    usage5h: st.usage5h || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
     stages,
     suiteLive,
@@ -858,6 +919,9 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
     feed,
     lanes,
     barriers,
+    // Which task waits on which, as the analyzer found it. Empty for an older
+    // state that did not keep the graph.
+    edges: st.edges || [],
     integration: st.integration,
   };
 }
@@ -883,7 +947,9 @@ function taskDetail(planPath, n, { activityLimit = 200, alive = processAlive } =
     lastText: digest ? digest.lastText : null,
     result: digest ? digest.result : null,
     model: digest ? digest.model : null,
-    outputTokens: digest ? digest.reportedTokens : null,
+    // Null while it runs, as in the view: a result in the log before the
+    // checkpoint moves is not yet the task's figure.
+    outputTokens: view.status === state.STATUS.RUNNING ? null : (digest ? digest.reportedTokens : null),
     truncated: digest ? digest.truncated : false,
     files: task ? { writes: task.writes || [], excluded: task.excludedPaths || [] } : null,
     steps: task ? task.steps : [],

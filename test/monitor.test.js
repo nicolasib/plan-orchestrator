@@ -557,6 +557,10 @@ test('a plan with no barrier tasks has four stages, not a fifth that is always d
 
 test('a token count comes from what the agent reported, never from a running sum', () => {
   const { planPath, logFile } = fixture();
+  // Stopped: a task still running reports no count at all until it ends.
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.FAILED;
+  state.save(planPath, st);
 
   // The sample log accumulates 52 output tokens across its assistant
   // messages and never closes with a result event — exactly the shape of a
@@ -570,7 +574,7 @@ test('a token count comes from what the agent reported, never from a running sum
     type: 'result', subtype: 'success', total_cost_usd: 1.25,
     usage: { output_tokens: 12864, input_tokens: 60, cache_read_input_tokens: 2219083 },
   }));
-  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'the spawn reports its own total');
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'a task that stopped shows what its spawn reported');
 });
 
 test('the checkpoint outranks the log, and the totals add up the run', () => {
@@ -579,6 +583,7 @@ test('the checkpoint outranks the log, and the totals add up the run', () => {
   // What `run.js` writes: summed across attempts, so a retried task counts
   // every spawn it took.
   st.tasks['1'].outputTokens = 40000;
+  st.tasks['2'].status = state.STATUS.FAILED;
   st.tasks['2'].outputTokens = 17760;
   state.save(planPath, st);
 
@@ -587,6 +592,94 @@ test('the checkpoint outranks the log, and the totals add up the run', () => {
   assert.equal(s.lanes[0].tasks[1].outputTokens, 17760, 'the checkpoint wins over anything read from the log');
   assert.equal(s.totals.outputTokens, 57760);
   assert.equal(s.barriers[0].outputTokens, null, 'a task that never ran reported nothing');
+});
+
+// ------------------------------------------------- effort, tries, last test
+
+const subCall = (id, command, at) => ev({ type: 'assistant', timestamp: at, parent_tool_use_id: 'tu_impl', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }], usage: { output_tokens: 5 } } });
+
+test('lastTest is the last test call of the task or of a subagent, with the tail of its output', () => {
+  const out = `${Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')}\nTests 12 passed`;
+  const log = SAMPLE_LOG + subCall('tu_t', 'npx vitest run src/panel.test.ts', '2026-08-19T12:01:00.000Z') + toolResult('tu_t', out, false, '2026-08-19T12:01:20.000Z');
+  const d = monitor.digestLog(log, { testCommand: 'npm test' });
+  assert.equal(d.lastTest.command, 'npx vitest run src/panel.test.ts');
+  assert.equal(d.lastTest.at, '2026-08-19T12:01:00.000Z');
+  assert.equal(d.lastTest.ok, true);
+  assert.deepEqual(d.lastTest.tail.split('\n'), [...Array.from({ length: 9 }, (_, i) => `line ${i + 22}`), 'Tests 12 passed']);
+});
+
+test('the test command of the plan counts, a test still running has ok null, and a plain Bash call is no test', () => {
+  const failed = monitor.digestLog(SAMPLE_LOG, { testCommand: 'npm test' }).lastTest;
+  assert.equal(failed.command, 'npm test -- requests');
+  assert.equal(failed.ok, false, 'an is_error result is a failed test');
+
+  const T = '2026-08-19T12:02:00.000Z';
+  const open = monitor.digestLog(SAMPLE_LOG + subCall('tu_u', 'npm test', T), { testCommand: 'npm test' }).lastTest;
+  assert.deepEqual(open, { command: 'npm test', at: T, ok: null, tail: null }, 'no result yet: still running, nothing to show');
+
+  const plain = [
+    '\n=== 2026-08-19T12:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    assistantTool('Bash', { command: 'ls -la' }, 'tu_l', '2026-08-19T12:00:10.000Z'),
+    toolResult('tu_l', 'total 0', false, '2026-08-19T12:00:11.000Z'),
+  ].join('');
+  assert.equal(monitor.digestLog(plain, { testCommand: 'npm test' }).lastTest, null);
+});
+
+test('effort: planned from the plan, used from the record, raised when used is above', () => {
+  const { planPath } = fixture();
+  fs.writeFileSync(planPath, PLAN.replace('### Task 2: POST /v1/requests\n\n', '### Task 2: POST /v1/requests\n\n**Effort:** medium — x\n\n'));
+  const st = state.load(planPath);
+  st.tasks['2'].effort = 'high';
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.deepEqual(s.lanes[0].tasks[1].effort, { planned: 'medium', used: 'high', raised: true, reason: 'x' });
+  assert.equal(s.lanes[0].tasks[0].effort, null, 'no planned level and none used: nothing to say');
+  assert.equal(s.barriers[0].effort, null);
+});
+
+test('tries pass through as recorded', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  const tries = [{ effort: 'medium', status: 'done', at: '2026-08-19T11:20:00.000Z' }];
+  st.tasks['1'].tries = tries;
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.deepEqual(s.lanes[0].tasks[0].tries, tries);
+  assert.deepEqual(s.lanes[0].tasks[1].tries, [], 'a record from before tries were kept has none');
+});
+
+test('a running task reports no cost and no output yet', () => {
+  const { planPath, logFile } = fixture();
+  const st = state.load(planPath);
+  // An earlier attempt's figures, summed into the record.
+  st.tasks['2'].costUsd = 1.2;
+  st.tasks['2'].outputTokens = 500;
+  state.save(planPath, st);
+  // A result already in the log, so the drawer's own source has a number too.
+  fs.appendFileSync(logFile, ev({ type: 'result', subtype: 'success', total_cost_usd: 0.3, usage: { output_tokens: 300 } }));
+
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.status, state.STATUS.RUNNING);
+  assert.equal(t2.costUsd, null, 'a run that has not ended has not reported its cost');
+  assert.equal(t2.outputTokens, null);
+  assert.equal(monitor.taskDetail(planPath, 2).outputTokens, null);
+});
+
+test('usage5h and edges come from the state, empty for an older state', () => {
+  const { planPath } = fixture();
+  let s = monitor.snapshot(planPath);
+  assert.equal(s.usage5h, null);
+  assert.deepEqual(s.edges, []);
+
+  const st = state.load(planPath);
+  st.usage5h = { utilization: 0.42, resetsAt: 1787211000, at: '2026-08-19T12:00:00.000Z' };
+  st.edges = [{ from: 1, to: 2 }];
+  state.save(planPath, st);
+  s = monitor.snapshot(planPath);
+  assert.deepEqual(s.usage5h, st.usage5h);
+  assert.deepEqual(s.edges, [{ from: 1, to: 2 }]);
 });
 
 // -------------------------------------------------------------- timeline
