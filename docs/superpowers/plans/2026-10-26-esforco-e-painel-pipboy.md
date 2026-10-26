@@ -39,10 +39,10 @@
 **Effort:** high — parser, render e CLI, com a regra de recusa em três comandos
 
 **Files:**
-- Modify: `src/parse-plan.js:140-234`
-- Modify: `src/render.js:20-70`
-- Modify: `bin/plo.js:42-52`
-- Modify: `bin/plo.js:89-234`
+- Modify: `src/parse-plan.js` (`:140-234`)
+- Modify: `src/render.js` (`:20-70`)
+- Modify: `bin/plo.js` (`:42-52`)
+- Modify: `bin/plo.js` (`:89-234`)
 - Test: `test/parse-plan.test.js`
 - Create: `test/effort-cli.test.js`
 
@@ -173,11 +173,11 @@ git commit -m "feat(plano): linha **Effort:** no parser, no portão do analyze e
 
 **Files:**
 - Create: `src/effort.js`
-- Modify: `src/spawn.js:23-32`
-- Modify: `src/spawn.js:74-76`
-- Modify: `src/run.js:203-324`
-- Modify: `src/integrate.js:95-165`
-- Modify: `src/state.js:178-224`
+- Modify: `src/spawn.js` (`:23-32`)
+- Modify: `src/spawn.js` (`:74-76`)
+- Modify: `src/run.js` (`:203-324`)
+- Modify: `src/integrate.js` (`:95-165`)
+- Modify: `src/state.js` (`:178-224`)
 - Modify: `test/fixtures/fake-agent.js`
 - Create: `test/helpers/run-repo.js`
 - Test: `test/spawn.test.js`
@@ -341,8 +341,8 @@ git commit -m "feat(run): --effort por task e subida de nível na nova tentativa
 
 **Files:**
 - Create: `src/proc.js`
-- Modify: `src/run.js:203-324`
-- Modify: `src/integrate.js:95-165`
+- Modify: `src/run.js` (`:203-324`)
+- Modify: `src/integrate.js` (`:95-165`)
 - Create: `test/proc.test.js`
 - Create: `test/records.test.js`
 
@@ -460,11 +460,11 @@ git commit -m "feat(run): pid do plo, custo somado e tentativas no registro de c
 **Effort:** high — evento novo atravessando três chamadores, e o grafo gravado pelo `cmdRun`
 
 **Files:**
-- Modify: `src/spawn.js:39-66`
+- Modify: `src/spawn.js` (`:39-66`)
 - Modify: `src/state.js`
-- Modify: `src/run.js:203-324`
-- Modify: `src/integrate.js:95-265`
-- Modify: `bin/plo.js:151-216`
+- Modify: `src/run.js` (`:203-324`)
+- Modify: `src/integrate.js` (`:95-265`)
+- Modify: `bin/plo.js` (`:151-216`)
 - Test: `test/spawn.test.js`
 - Test: `test/state.test.js`
 - Create: `test/usage.test.js`
@@ -524,9 +524,9 @@ git commit -m "feat(estado): janela de 5 h e arestas do plano gravadas pelo proc
 **Effort:** xhigh — ordem de gravação, etapa largada refeita e sinal no CLI
 
 **Files:**
-- Modify: `src/integrate.js:226-312`
-- Modify: `src/state.js:97`
-- Modify: `bin/plo.js:218-234`
+- Modify: `src/integrate.js` (`:226-312`)
+- Modify: `src/state.js` (`:97`)
+- Modify: `bin/plo.js` (`:218-234`)
 - Test: `test/integrate.test.js`
 
 **Interfaces:**
@@ -614,9 +614,9 @@ git commit -m "feat(integrate): cada etapa grava o começo, e o Ctrl-C marca a e
 **Effort:** xhigh — processo em grupo próprio com saída pelo pipe do `plo`, e a suíte anterior morta antes de truncar o log
 
 **Files:**
-- Modify: `src/integrate.js:168-177`
-- Modify: `src/integrate.js:268-312`
-- Modify: `bin/plo.js:218-234`
+- Modify: `src/integrate.js` (`:168-177`)
+- Modify: `src/integrate.js` (`:268-312`)
+- Modify: `bin/plo.js` (`:218-234`)
 - Test: `test/integrate.test.js`
 
 **Interfaces:**
@@ -698,10 +698,10 @@ git commit -m "feat(integrate): suíte completa por spawn, ao vivo em full-suite
 **Effort:** high — liveness em tasks, subagentes e etapas, mais as duas flags do fim do run
 
 **Files:**
-- Modify: `src/monitor.js:335-384`
-- Modify: `src/monitor.js:391-457`
-- Modify: `src/monitor.js:494-552`
-- Modify: `src/monitor.js:645-756`
+- Modify: `src/monitor.js` (`:335-384`)
+- Modify: `src/monitor.js` (`:391-457`)
+- Modify: `src/monitor.js` (`:494-552`)
+- Modify: `src/monitor.js` (`:645-756`)
 - Test: `test/monitor.test.js`
 
 **Interfaces:**
@@ -947,7 +947,7 @@ git commit -m "feat(monitor): esforço, tentativas, último teste e custo nulo d
 - Create: `docs/superpowers/specs/2026-10-26-painel-operador/gerar/monta-sprite.js`
 - Modify: `docs/superpowers/specs/2026-10-26-painel-operador/gerar/README.md`
 - Create: `src/assets/operador.svg`
-- Modify: `src/serve.js:84-157`
+- Modify: `src/serve.js` (`:84-157`)
 - Test: `test/serve.test.js`
 
 **Interfaces:**
