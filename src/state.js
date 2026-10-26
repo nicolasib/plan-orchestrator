@@ -164,6 +164,18 @@ function updateTask(planPath, state, n, patch) {
 }
 
 /**
+ * Keep the agent's five-hour usage window, as its rate limit event reports it.
+ * An event without that window changes nothing and is not saved.
+ */
+function recordUsage(planPath, state, info) {
+  const w = info && info.unifiedWindows && info.unifiedWindows.five_hour;
+  if (!w) return false;
+  state.usage5h = { utilization: w.utilization, resetsAt: w.resetsAt, at: nowIso() };
+  save(planPath, state);
+  return true;
+}
+
+/**
  * Bring state back in line with reality after an unclean stop.
  *
  * - A task left `running` had its process killed: it is `interrupted`, and its
@@ -282,6 +294,6 @@ function summarize(state) {
 
 module.exports = {
   SCHEMA, STATUS, statePathFor, legacyStatePathFor, planSlug, hashPlan,
-  create, load, save, updateTask, reconcile, readyTasks, summarize,
+  create, load, save, updateTask, recordUsage, reconcile, readyTasks, summarize,
   isSettled, isResumable, MAX_ATTEMPTS,
 };

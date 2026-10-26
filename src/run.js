@@ -278,6 +278,7 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
       timeoutMs: opts.taskTimeoutMs,
       logFile,
       signal: opts.signal,
+      onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
     });
   } catch (e) {
     // Could not launch at all — a config problem, not a task failure.

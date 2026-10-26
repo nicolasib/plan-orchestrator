@@ -147,6 +147,7 @@ async function runBarriers(planPath, st, plan, opts = {}) {
       timeoutMs: opts.taskTimeoutMs,
       logFile,
       signal: opts.signal,
+      onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
     });
 
     const commits = wt.laneCommits(st.repoRoot, baseBefore, 'HEAD').map((c) => c.sha);
@@ -270,6 +271,7 @@ async function crossLaneReview(planPath, st, opts = {}) {
     timeoutMs: opts.reviewTimeoutMs || opts.taskTimeoutMs,
     logFile,
     signal: opts.signal,
+    onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
   });
 
   const text = outcome.result || '';

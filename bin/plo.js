@@ -188,6 +188,9 @@ async function cmdRun(args, { resuming = false } = {}) {
     return EXIT.OK;
   }
 
+  st.edges = dependencyEdges.map(({ from, to }) => ({ from, to }));
+  state.save(abs, st);
+
   prepareLanes(abs, st, { worktreeDir: args['worktree-dir'], extraSeed: args.seed ? String(args.seed).split(',') : [], log });
 
   const controller = new AbortController();

@@ -64,6 +64,9 @@ function parseEvent(line) {
   if (obj.type === 'assistant' || obj.type === 'user') {
     return { kind: 'turn', role: obj.type };
   }
+  if (obj.type === 'rate_limit_event') {
+    return { kind: 'rate_limit', info: obj.rate_limit_info };
+  }
   return null;
 }
 

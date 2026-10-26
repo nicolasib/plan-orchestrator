@@ -95,3 +95,8 @@ test('pool returns results in input order regardless of completion order', async
   ];
   assert.deepEqual(await pool(thunks, 2), ['slow', 'fast']);
 });
+
+const RATE = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1793138400, rateLimitType: 'seven_day', utilization: 0.38, unifiedWindows: { five_hour: { utilization: 0.16, resetsAt: 1792623600 }, seven_day: { utilization: 0.38, resetsAt: 1793138400 } } } };
+test('parseEvent hands the rate limit event over', () => {
+  assert.deepEqual(parseEvent(JSON.stringify(RATE)), { kind: 'rate_limit', info: RATE.rate_limit_info });
+});
