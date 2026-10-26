@@ -625,6 +625,21 @@ test('the test command of the plan counts, a test still running has ok null, and
   assert.equal(monitor.digestLog(plain, { testCommand: 'npm test' }).lastTest, null);
 });
 
+test("the view's lastTest outlives the task, and the plan's own test command counts", () => {
+  const { planPath, logFile } = fixture();
+  const st = state.load(planPath);
+  // Looks like none of the usual runners: only the plan says it is a test run.
+  st.testCommand = 'make check';
+  st.tasks['2'].status = state.STATUS.FAILED;
+  state.save(planPath, st);
+  fs.appendFileSync(logFile, assistantTool('Bash', { command: 'make check' }, 'tu_mk', '2026-08-19T12:01:00.000Z')
+    + toolResult('tu_mk', 'all checks passed', false, '2026-08-19T12:01:30.000Z'));
+
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.lastTest.command, 'make check', 'the newer run is the plan’s test command, not the earlier npm test');
+  assert.equal(t2.lastTest.ok, true);
+});
+
 test('effort: planned from the plan, used from the record, raised when used is above', () => {
   const { planPath } = fixture();
   fs.writeFileSync(planPath, PLAN.replace('### Task 2: POST /v1/requests\n\n', '### Task 2: POST /v1/requests\n\n**Effort:** medium — x\n\n'));
