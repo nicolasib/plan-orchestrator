@@ -720,7 +720,9 @@ const M0 = '2026-08-19T13:00:00.000Z';
 const M1 = '2026-08-19T13:01:00.000Z';
 const S0 = '2026-08-19T13:02:00.000Z';
 const S1 = '2026-08-19T13:05:00.000Z';
-const R0 = '2026-08-19T13:06:00.000Z';
+// After this process started, so a review stamped by the live integrate is not
+// mistaken for one left by an earlier integrate.
+const R0 = new Date().toISOString();
 
 const reviewing = (pid) => ({
   status: 'reviewing', mergedLanes: ['A'],
@@ -748,6 +750,16 @@ test('a review whose integrate died is interrupted, and the run is not over', ()
   assert.equal(s.integrationRunning, false);
   assert.equal(s.totals.active, false);
   assert.equal(s.runOver, false);
+});
+
+test('an open stage left by an earlier integrate is interrupted while a newer one is alive', () => {
+  const planPath = integrationFixture({
+    ...reviewing(process.pid),
+    stages: { merge: { startedAt: M0, endedAt: M1 }, suite: { startedAt: S0, endedAt: S1 }, review: { startedAt: '2020-01-01T00:00:00.000Z' } },
+  });
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.stages.find((x) => x.key === 'review').status, 'interrupted');
+  assert.equal(s.integrationRunning, false);
 });
 
 test('the run is over only when the integration finished', () => {

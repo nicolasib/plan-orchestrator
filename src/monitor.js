@@ -536,12 +536,18 @@ function buildStages(lanes, barriers, integration, { alive = processAlive } = {}
   };
   // An open stage belongs to the `plo integrate` that wrote it. Dead, it is
   // interrupted; with no pid it comes from an older plo and stays running.
+  // Stages have no pid of their own and a new integrate overwrites
+  // `integration.pid`, so an open stage that started before the live integrate
+  // did is a leftover from an earlier one: interrupted.
   const stageOf = (key, status) => {
     const rec = (i.stages || {})[key] || {};
     let out = status;
     if (rec.interrupted) out = S.INTERRUPTED;
     else if (rec.startedAt && !rec.endedAt) {
-      out = !i.pid || alive(i.pid, i.pidStartedAt) ? S.RUNNING : S.INTERRUPTED;
+      const stageAt = Date.parse(rec.startedAt);
+      const pidAt = Date.parse(i.pidStartedAt);
+      const stale = Number.isFinite(stageAt) && Number.isFinite(pidAt) && stageAt < pidAt;
+      out = !stale && (!i.pid || alive(i.pid, i.pidStartedAt)) ? S.RUNNING : S.INTERRUPTED;
     }
     return { status: out, startedAt: rec.startedAt || null, endedAt: rec.endedAt || null };
   };
