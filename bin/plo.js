@@ -8,7 +8,7 @@ const { buildDag } = require('../src/build-dag');
 const state = require('../src/state');
 const wt = require('../src/worktrees');
 const { runLanes, prepareLanes } = require('../src/run');
-const { integrate } = require('../src/integrate');
+const { integrate, markInterrupted } = require('../src/integrate');
 const { serve } = require('../src/serve');
 const render = require('../src/render');
 
@@ -230,7 +230,23 @@ async function cmdIntegrate(args) {
   const st = state.load(abs);
   if (!st) fail(`no state at ${state.statePathFor(abs)} — nothing to integrate.`, EXIT.USAGE);
 
+  // Unlike `run`, there is no graceful drain: the stage in flight is closed on
+  // disk as interrupted and the process leaves at once.
+  const controller = new AbortController();
+  const onSignal = () => {
+    controller.abort();
+    const stage = markInterrupted(abs, st);
+    const barriers = st.barriers.filter((n) => st.tasks[String(n)]?.status === state.STATUS.INTERRUPTED);
+    log(stage
+      ? `\ninterrupted — stage \`${stage}\` marked interrupted.`
+      : `\ninterrupted — ${barriers.length ? `barrier T${barriers.join(', T')} marked interrupted` : 'no stage was running'}.`);
+    process.exit(130);
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+
   const res = await integrate(abs, st, plan, {
+    signal: controller.signal,
     model: args.model,
     reviewModel: args['review-model'] || args.model,
     permissionMode: args['permission-mode'] || 'acceptEdits',

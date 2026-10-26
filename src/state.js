@@ -94,7 +94,7 @@ function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxL
     lanes: lanes.map((l) => ({ id: l.id, tasks: l.tasks, branch: null, worktree: null, weight: l.weight })),
     barriers,
     tasks,
-    integration: { status: STATUS.PENDING, mergedLanes: [], suite: null, review: null },
+    integration: { status: STATUS.PENDING, mergedLanes: [], suite: null, review: null, stages: {} },
   };
 }
 

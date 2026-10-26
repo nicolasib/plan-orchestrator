@@ -251,6 +251,15 @@ async function crossLaneReview(planPath, st, opts = {}) {
   const pkg = reviewPackage(st, planPath, { log });
   const logFile = path.join(path.dirname(planPath), '.plo-logs', 'cross-lane-review.jsonl');
 
+  // On disk before the reviewer starts, so a monitor (or an interrupt) sees the
+  // stage running. Overwrites the whole object: that is what redoes a stage
+  // a dead `plo integrate` left running.
+  const sessionId = newSessionId();
+  st.integration.stages = st.integration.stages || {};
+  st.integration.stages.review = { startedAt: new Date().toISOString(), logFile, sessionId };
+  st.integration.status = 'reviewing';
+  state.save(planPath, st);
+
   log('cross-lane review: dispatching');
   const outcome = await runAgent({
     cwd: st.repoRoot,
@@ -263,7 +272,7 @@ async function crossLaneReview(planPath, st, opts = {}) {
       testCommand: st.testCommand,
       suiteResult: st.integration.suite ? (st.integration.suite.ok ? 'PASS' : 'FAIL') : null,
     }),
-    sessionId: newSessionId(),
+    sessionId,
     // The review is a judgment task on a large diff — the one place worth the
     // most capable model available.
     model: opts.reviewModel || opts.model,
@@ -273,6 +282,13 @@ async function crossLaneReview(planPath, st, opts = {}) {
     signal: opts.signal,
     onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
   });
+
+  st.integration.stages.review = {
+    ...st.integration.stages.review,
+    endedAt: new Date().toISOString(),
+    costUsd: outcome.costUsd ?? null,
+    outputTokens: outcome.outputTokens ?? null,
+  };
 
   const text = outcome.result || '';
   const verdictMatch = text.match(/CROSS-LANE VERDICT:\s*(.+)/i);
@@ -285,15 +301,57 @@ async function crossLaneReview(planPath, st, opts = {}) {
     verdict: verdictMatch ? verdictMatch[1].trim() : null,
     reportFile,
     package: pkg,
+    costUsd: outcome.costUsd ?? null,
+    outputTokens: outcome.outputTokens ?? null,
   };
+}
+
+/**
+ * Close whatever an interrupt caught mid-flight: the open stage (started, not
+ * ended) and any barrier still `running`. Returns the closed stage's name, or
+ * null when only a barrier (or nothing) was open. Synchronous on purpose — it
+ * runs inside a signal handler that exits right after.
+ */
+function markInterrupted(planPath, st) {
+  const now = new Date().toISOString();
+  let closed = null;
+  for (const [name, s] of Object.entries(st.integration.stages || {})) {
+    if (s && s.startedAt && !s.endedAt) {
+      st.integration.stages[name] = { ...s, endedAt: now, interrupted: true };
+      closed = closed || name;
+    }
+  }
+  let barrier = false;
+  for (const n of st.barriers || []) {
+    const rec = st.tasks[String(n)];
+    if (rec && rec.status === state.STATUS.RUNNING) {
+      rec.status = state.STATUS.INTERRUPTED;
+      barrier = true;
+    }
+  }
+  if (closed || barrier) st.integration.status = 'interrupted';
+  state.save(planPath, st);
+  return closed;
 }
 
 /** The whole phase, in order, checkpointing after each stage. */
 async function integrate(planPath, st, plan, opts = {}) {
   const log = opts.log || (() => {});
 
+  // Stamped before the merge guard so the owner is on disk even when the merge
+  // is skipped. Old state files predate `stages`.
+  const stamp = processStamp();
+  st.integration.pid = stamp.pid;
+  st.integration.pidStartedAt = stamp.startedAt;
+  st.integration.stages = st.integration.stages || {};
+  state.save(planPath, st);
+
   if (st.integration.status !== 'merged' && st.integration.status !== state.STATUS.DONE) {
+    st.integration.stages.merge = { startedAt: new Date().toISOString() };
+    st.integration.status = 'merging';
+    state.save(planPath, st);
     const m = mergeLanes(st, { log, noFf: opts.noFf !== false });
+    st.integration.stages.merge.endedAt = new Date().toISOString();
     st.integration.mergedLanes = m.merged;
     st.integration.status = m.ok ? 'merged' : 'merge-failed';
     st.integration.mergeError = m.ok ? null : m.error;
@@ -335,4 +393,4 @@ async function integrate(planPath, st, plan, opts = {}) {
   return { ok: true, stage: 'complete', merged: st.integration.mergedLanes, suite, review };
 }
 
-module.exports = { integrate, mergeLanes, runBarriers, fullSuite, crossLaneReview, reviewPackage };
+module.exports = { integrate, markInterrupted,mergeLanes, runBarriers, fullSuite, crossLaneReview, reviewPackage };
