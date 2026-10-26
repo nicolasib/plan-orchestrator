@@ -94,7 +94,7 @@ function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxL
     lanes: lanes.map((l) => ({ id: l.id, tasks: l.tasks, branch: null, worktree: null, weight: l.weight })),
     barriers,
     tasks,
-    integration: { status: STATUS.PENDING, mergedLanes: [], suite: null, review: null },
+    integration: { status: STATUS.PENDING, mergedLanes: [], suite: null, review: null, stages: {} },
   };
 }
 
@@ -164,6 +164,18 @@ function updateTask(planPath, state, n, patch) {
 }
 
 /**
+ * Keep the agent's five-hour usage window, as its rate limit event reports it.
+ * An event without that window changes nothing and is not saved.
+ */
+function recordUsage(planPath, state, info) {
+  const w = info && info.unifiedWindows && info.unifiedWindows.five_hour;
+  if (!w) return false;
+  state.usage5h = { utilization: w.utilization, resetsAt: w.resetsAt, at: nowIso() };
+  save(planPath, state);
+  return true;
+}
+
+/**
  * Bring state back in line with reality after an unclean stop.
  *
  * - A task left `running` had its process killed: it is `interrupted`, and its
@@ -197,6 +209,10 @@ function reconcile(state, { gitCommitsFor, planContents } = {}) {
       });
       rec.attempts = 0;
     }
+    // The effort raise does not survive an invocation, unlike the attempt
+    // budget above, which only resets once spent: every run or resume starts
+    // each task back at the level its plan line asks for.
+    if (rec.raises) rec.raises = 0;
     if (rec.status === STATUS.RUNNING) {
       rec.status = STATUS.INTERRUPTED;
       notes.push({ level: 'info', message: `Task ${n} was running when the run stopped — marked interrupted.` });
@@ -278,6 +294,6 @@ function summarize(state) {
 
 module.exports = {
   SCHEMA, STATUS, statePathFor, legacyStatePathFor, planSlug, hashPlan,
-  create, load, save, updateTask, reconcile, readyTasks, summarize,
+  create, load, save, updateTask, recordUsage, reconcile, readyTasks, summarize,
   isSettled, isResumable, MAX_ATTEMPTS,
 };

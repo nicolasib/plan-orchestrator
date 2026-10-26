@@ -2,11 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, execSync } = require('child_process');
+const { execFileSync, execSync, spawn } = require('child_process');
 const state = require('./state');
 const wt = require('./worktrees');
 const { runAgent, newSessionId } = require('./spawn');
 const { barrierTaskPrompt, crossLaneReviewPrompt } = require('./prompts');
+const { effortFor, plannedEffort, shouldRaise } = require('./effort');
+const { processStamp, processAlive, killGroup } = require('./proc');
 
 /**
  * The integration phase — the part that only exists because execution was
@@ -113,9 +115,14 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     const sessionId = newSessionId();
     const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
     const baseBefore = wt.headCommit(st.repoRoot);
+    // A barrier obeys its own `**Effort:**` line and climbs like a lane task.
+    // `integrate` never reconciles, so a raise stands until the next run/resume.
+    const used = effortFor(plannedEffort(task), rec.raises || 0);
+    const stamp = processStamp();
 
     state.updateTask(planPath, st, n, {
-      status: state.STATUS.RUNNING, sessionId, logFile, baseBefore,
+      status: state.STATUS.RUNNING, sessionId, logFile, baseBefore, effort: used,
+      pid: stamp.pid, pidStartedAt: stamp.startedAt,
       attempts: (rec.attempts || 0) + 1, startedAt: new Date().toISOString(), error: null,
     });
     log(`T${n} (barrier): started — ${task ? task.title : ''}`);
@@ -134,11 +141,13 @@ async function runBarriers(planPath, st, plan, opts = {}) {
       }),
       sessionId,
       model: opts.model,
+      effort: used,
       permissionMode: opts.permissionMode || 'acceptEdits',
       maxTurns: opts.maxTurns,
       timeoutMs: opts.taskTimeoutMs,
       logFile,
       signal: opts.signal,
+      onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
     });
 
     const commits = wt.laneCommits(st.repoRoot, baseBefore, 'HEAD').map((c) => c.sha);
@@ -147,12 +156,26 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     // nothing to change), so commits are not required here the way they are for
     // an implementation task.
     const ok = outcome.ok && !blocked;
+    const status = ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
 
+    const endedAt = new Date().toISOString();
     state.updateTask(planPath, st, n, {
-      status: ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED,
-      endedAt: new Date().toISOString(),
+      status,
+      endedAt,
       commits,
       turns: outcome.turns,
+      // Summed across attempts; null only when no attempt reported.
+      costUsd: outcome.costUsd == null && rec.costUsd == null
+        ? null
+        : (rec.costUsd || 0) + (outcome.costUsd || 0),
+      outputTokens: outcome.outputTokens == null && rec.outputTokens == null
+        ? null
+        : (rec.outputTokens || 0) + (outcome.outputTokens || 0),
+      // An attempt interrupted by the operator is not a try of the task.
+      tries: opts.signal && opts.signal.aborted
+        ? rec.tries || []
+        : [...(rec.tries || []), { effort: used, status, at: endedAt }],
+      raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
       error: ok ? null : (outcome.result || outcome.stderr || '').slice(0, 500),
     });
 
@@ -164,16 +187,87 @@ async function runBarriers(planPath, st, plan, opts = {}) {
   return { ok: true, outcomes };
 }
 
-/** The full suite at the merge point. Not a lane's subset — the whole thing. */
-function fullSuite(st, { log = () => {} } = {}) {
+// The summary is the last 40 lines; this much of the output's tail holds them.
+const SUITE_TAIL_BYTES = 256 * 1024;
+
+/**
+ * The full suite at the merge point. Not a lane's subset — the whole thing.
+ *
+ * Streamed, not buffered: stdout and stderr land in `.plo-logs/full-suite.log`
+ * as they arrive, so a long suite can be followed while it runs. It runs in a
+ * process group of its own, which a signal to plo never reaches — so whoever
+ * stops plo kills that group (the abort signal here, the signal handler in
+ * `cmdIntegrate`), and the next integrate kills one a dead plo left behind.
+ */
+async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
+  // First, before the log is truncated under it: a suite still running from a
+  // dead integrate would keep appending to this run's log.
+  const prev = (st.integration.stages || {}).suite;
+  if (prev && prev.pid && processAlive(prev.pid, prev.pidStartedAt)) {
+    killGroup(prev.pid, 'SIGKILL');
+    log(`full suite: killed the suite a previous integrate left running (pid ${prev.pid})`);
+  }
+
   const cmd = st.testCommand;
   if (!cmd) {
     return { ok: false, skipped: true, summary: 'no test command known — set one in the plan Global Constraints or pass --test-command' };
   }
-  log(`full suite: running \`${cmd}\` in ${st.repoRoot}`);
-  const res = run(cmd, st.repoRoot);
-  const tail = res.out.split('\n').slice(-40).join('\n');
-  return { ok: res.ok, code: res.code, summary: tail, command: cmd };
+
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, `# ${new Date().toISOString()} $ ${cmd}\n`);
+  log(`full suite: running \`${cmd}\` in ${st.repoRoot} — output in ${logFile}`);
+
+  return new Promise((resolve) => {
+    const out = fs.createWriteStream(logFile, { flags: 'a' });
+    let tail = Buffer.alloc(0);
+    const keep = (chunk) => {
+      out.write(chunk);
+      tail = Buffer.concat([tail, chunk]);
+      if (tail.length > SUITE_TAIL_BYTES) tail = tail.subarray(tail.length - SUITE_TAIL_BYTES);
+    };
+
+    // detached: a group of its own, so killing the group takes the runner's workers too.
+    const child = spawn(cmd, { cwd: st.repoRoot, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // A spawn that hit EMFILE/ENFILE never got its pipes.
+    if (child.stdout) child.stdout.on('data', keep);
+    if (child.stderr) child.stderr.on('data', keep);
+
+    // A failed spawn has no pid, and processStamp() without one stamps plo itself.
+    const stamp = child.pid ? processStamp(child.pid) : { pid: null, startedAt: null };
+    st.integration.stages = st.integration.stages || {};
+    st.integration.stages.suite = {
+      startedAt: new Date().toISOString(), logFile, command: cmd, pid: stamp.pid, pidStartedAt: stamp.startedAt,
+    };
+    st.integration.status = 'suite-running';
+    state.save(planPath, st);
+
+    const onAbort = () => { if (child.pid) killGroup(child.pid, 'SIGTERM'); };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    // A failed spawn emits 'error' and then 'close'; only the first counts.
+    let settled = false;
+    const settle = (code) => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener('abort', onAbort);
+      st.integration.stages.suite = { ...st.integration.stages.suite, endedAt: new Date().toISOString() };
+      state.save(planPath, st);
+      const summary = tail.toString('utf8').split('\n').slice(-40).join('\n');
+      // Resolved once the log is flushed: the file is whole when the caller reads it.
+      out.end(() => resolve({ ok: code === 0, code, summary, command: cmd }));
+    };
+
+    child.on('error', (err) => {
+      keep(Buffer.from(`${err.message}\n`));
+      settle(1);
+    });
+    // Killed by a signal, the suite has no exit code.
+    child.on('close', (code) => settle(code ?? 1));
+  });
 }
 
 /**
@@ -228,6 +322,15 @@ async function crossLaneReview(planPath, st, opts = {}) {
   const pkg = reviewPackage(st, planPath, { log });
   const logFile = path.join(path.dirname(planPath), '.plo-logs', 'cross-lane-review.jsonl');
 
+  // On disk before the reviewer starts, so a monitor (or an interrupt) sees the
+  // stage running. Overwrites the whole object: that is what redoes a stage
+  // a dead `plo integrate` left running.
+  const sessionId = newSessionId();
+  st.integration.stages = st.integration.stages || {};
+  st.integration.stages.review = { startedAt: new Date().toISOString(), logFile, sessionId };
+  st.integration.status = 'reviewing';
+  state.save(planPath, st);
+
   log('cross-lane review: dispatching');
   const outcome = await runAgent({
     cwd: st.repoRoot,
@@ -240,7 +343,7 @@ async function crossLaneReview(planPath, st, opts = {}) {
       testCommand: st.testCommand,
       suiteResult: st.integration.suite ? (st.integration.suite.ok ? 'PASS' : 'FAIL') : null,
     }),
-    sessionId: newSessionId(),
+    sessionId,
     // The review is a judgment task on a large diff — the one place worth the
     // most capable model available.
     model: opts.reviewModel || opts.model,
@@ -248,7 +351,15 @@ async function crossLaneReview(planPath, st, opts = {}) {
     timeoutMs: opts.reviewTimeoutMs || opts.taskTimeoutMs,
     logFile,
     signal: opts.signal,
+    onEvent: (ev) => { if (ev.kind === 'rate_limit') state.recordUsage(planPath, st, ev.info); },
   });
+
+  st.integration.stages.review = {
+    ...st.integration.stages.review,
+    endedAt: new Date().toISOString(),
+    costUsd: outcome.costUsd ?? null,
+    outputTokens: outcome.outputTokens ?? null,
+  };
 
   const text = outcome.result || '';
   const verdictMatch = text.match(/CROSS-LANE VERDICT:\s*(.+)/i);
@@ -261,15 +372,57 @@ async function crossLaneReview(planPath, st, opts = {}) {
     verdict: verdictMatch ? verdictMatch[1].trim() : null,
     reportFile,
     package: pkg,
+    costUsd: outcome.costUsd ?? null,
+    outputTokens: outcome.outputTokens ?? null,
   };
+}
+
+/**
+ * Close whatever an interrupt caught mid-flight: the open stage (started, not
+ * ended) and any barrier still `running`. Returns the closed stage's name, or
+ * null when only a barrier (or nothing) was open; only a closed stage sets
+ * `integration.status` to `interrupted`. Synchronous on purpose — it
+ * runs inside a signal handler that exits right after.
+ */
+function markInterrupted(planPath, st) {
+  const now = new Date().toISOString();
+  let closed = null;
+  for (const [name, s] of Object.entries(st.integration.stages || {})) {
+    if (s && s.startedAt && !s.endedAt) {
+      st.integration.stages[name] = { ...s, endedAt: now, interrupted: true };
+      closed = closed || name;
+    }
+  }
+  for (const n of st.barriers || []) {
+    const rec = st.tasks[String(n)];
+    if (rec && rec.status === state.STATUS.RUNNING) rec.status = state.STATUS.INTERRUPTED;
+  }
+  // Only a closed stage flips the status. A barrier alone leaves it (e.g.
+  // `merged`) so the next `integrate` skips the merge — the barrier may have
+  // left edits behind, and `mergeLanes` refuses a dirty tree.
+  if (closed) st.integration.status = 'interrupted';
+  state.save(planPath, st);
+  return closed;
 }
 
 /** The whole phase, in order, checkpointing after each stage. */
 async function integrate(planPath, st, plan, opts = {}) {
   const log = opts.log || (() => {});
 
+  // Stamped before the merge guard so the owner is on disk even when the merge
+  // is skipped. Old state files predate `stages`.
+  const stamp = processStamp();
+  st.integration.pid = stamp.pid;
+  st.integration.pidStartedAt = stamp.startedAt;
+  st.integration.stages = st.integration.stages || {};
+  state.save(planPath, st);
+
   if (st.integration.status !== 'merged' && st.integration.status !== state.STATUS.DONE) {
+    st.integration.stages.merge = { startedAt: new Date().toISOString() };
+    st.integration.status = 'merging';
+    state.save(planPath, st);
     const m = mergeLanes(st, { log, noFf: opts.noFf !== false });
+    st.integration.stages.merge.endedAt = new Date().toISOString();
     st.integration.mergedLanes = m.merged;
     st.integration.status = m.ok ? 'merged' : 'merge-failed';
     st.integration.mergeError = m.ok ? null : m.error;
@@ -286,7 +439,7 @@ async function integrate(planPath, st, plan, opts = {}) {
     return { ok: false, stage: 'barriers', ...bar };
   }
 
-  const suite = fullSuite(st, { log });
+  const suite = await fullSuite(planPath, st, { log, signal: opts.signal });
   st.integration.suite = suite;
   st.integration.status = suite.ok ? 'suite-passed' : 'suite-failed';
   state.save(planPath, st);
@@ -311,4 +464,4 @@ async function integrate(planPath, st, plan, opts = {}) {
   return { ok: true, stage: 'complete', merged: st.integration.mergedLanes, suite, review };
 }
 
-module.exports = { integrate, mergeLanes, runBarriers, fullSuite, crossLaneReview, reviewPackage };
+module.exports = { integrate, markInterrupted,mergeLanes, runBarriers, fullSuite, crossLaneReview, reviewPackage };

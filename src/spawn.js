@@ -20,10 +20,12 @@ const AGENT_BIN = process.env.PLO_AGENT_BIN || 'claude';
  * Build the argv for a task run. Kept pure so tests can assert the command
  * without spawning anything.
  */
-function buildArgs({ prompt, sessionId, model, allowedTools, permissionMode, maxTurns, addDirs = [] }) {
+function buildArgs({ prompt, sessionId, model, effort, allowedTools, permissionMode, maxTurns, addDirs = [] }) {
   const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
   if (sessionId) args.push('--session-id', sessionId);
   if (model) args.push('--model', model);
+  // Unset means the agent's own default — a task with no `**Effort:**` line.
+  if (effort) args.push('--effort', effort);
   if (permissionMode) args.push('--permission-mode', permissionMode);
   if (maxTurns) args.push('--max-turns', String(maxTurns));
   if (allowedTools && allowedTools.length) args.push('--allowed-tools', ...allowedTools);
@@ -62,6 +64,9 @@ function parseEvent(line) {
   if (obj.type === 'assistant' || obj.type === 'user') {
     return { kind: 'turn', role: obj.type };
   }
+  if (obj.type === 'rate_limit_event') {
+    return { kind: 'rate_limit', info: obj.rate_limit_info };
+  }
   return null;
 }
 
@@ -71,9 +76,9 @@ function parseEvent(line) {
  * Never rejects on agent failure — a failed lane is data, not an exception.
  * It rejects only if the binary itself cannot be launched.
  */
-function runAgent({ cwd, prompt, sessionId, model, allowedTools, permissionMode, maxTurns, addDirs, logFile, onEvent, timeoutMs, signal }) {
+function runAgent({ cwd, prompt, sessionId, model, effort, allowedTools, permissionMode, maxTurns, addDirs, logFile, onEvent, timeoutMs, signal }) {
   return new Promise((resolve, reject) => {
-    const args = buildArgs({ prompt, sessionId, model, allowedTools, permissionMode, maxTurns, addDirs });
+    const args = buildArgs({ prompt, sessionId, model, effort, allowedTools, permissionMode, maxTurns, addDirs });
 
     let log = null;
     if (logFile) {
