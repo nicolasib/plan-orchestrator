@@ -5,10 +5,12 @@ const assert = require('node:assert/strict');
 // First: it points src/spawn at the fake agent before anything loads it.
 const { makeRepo, cleanup, initRun, useSpec, seen, runLanesIn } = require('./helpers/run-repo');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const state = require('../src/state');
-const { integrate, markInterrupted } = require('../src/integrate');
+const { integrate, markInterrupted, fullSuite } = require('../src/integrate');
+const { processStamp, processAlive, killGroup } = require('../src/proc');
 
 const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
 
@@ -194,4 +196,102 @@ test('SIGTERM stops plo integrate, marks the review interrupted and exits 130', 
   assert.equal(i.status, 'interrupted');
   assert.equal(i.stages.review.interrupted, true);
   assert.ok(i.stages.review.endedAt);
+});
+
+/** A checkpoint in a bare tmpdir, which is also the repo root: all `fullSuite` needs. */
+function suiteFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plo-suite-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const planPath = path.join(dir, 'plan.md');
+  fs.writeFileSync(planPath, '# Suite plan\n');
+  const st = state.create({
+    planPath,
+    planContents: '# Suite plan\n',
+    repoRoot: dir,
+    baseBranch: 'feature/x',
+    baseCommit: 'abc1234',
+    maxLanes: 1,
+    lanes: [],
+    barriers: [],
+    testCommand: null,
+  });
+  state.save(planPath, st);
+  return { planPath, st };
+}
+
+test('the suite output reaches full-suite.log while the suite runs', async (t) => {
+  const { planPath, st } = suiteFixture(t);
+  // The words are spelled in halves: the log's header line echoes the command,
+  // and must not already contain what the test waits for.
+  st.testCommand = `node -e "console.log('fi' + 'rst'); setTimeout(() => console.log('sec' + 'ond'), 600)"`;
+  const run = fullSuite(planPath, st, {});
+  const log = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  await waitFor(() => fs.existsSync(log) && fs.readFileSync(log, 'utf8').includes('first'));
+  const mid = fs.readFileSync(log, 'utf8');
+  assert.match(mid.split('\n')[0], /^# \d{4}-\d\d-\d\dT\S+ \$ node -e/);
+  assert.equal(mid.includes('second'), false);
+  const onDisk = state.load(planPath).integration;
+  assert.equal(onDisk.status, 'suite-running');
+  assert.equal(typeof onDisk.stages.suite.pid, 'number');
+  const res = await run;
+  assert.equal(res.ok, true);
+  assert.match(res.summary, /first\nsecond/);
+  assert.ok(state.load(planPath).integration.stages.suite.endedAt);
+});
+
+test('a test command that does not exist fails with 127, not a crash', async (t) => {
+  const { planPath, st } = suiteFixture(t);
+  st.testCommand = 'plo-no-such-command-xyz';
+  const res = await fullSuite(planPath, st, {});
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 127);
+});
+
+test('a suite still alive from a dead integrate is killed before the log is truncated', async (t) => {
+  const { planPath, st } = suiteFixture(t);
+  const stale = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  t.after(() => killGroup(stale.pid, 'SIGKILL'));
+  const stamp = processStamp(stale.pid);
+  st.integration.stages = { suite: { startedAt: new Date().toISOString(), pid: stamp.pid, pidStartedAt: stamp.startedAt } };
+  st.testCommand = 'node -e ""';
+  await fullSuite(planPath, st, {});
+  await waitFor(() => !processAlive(stamp.pid, null), 3000);
+});
+
+// BARRIER_PLAN without its barrier: `integrate` goes from the merge straight
+// to the suite.
+const LANES_ONLY_PLAN = [
+  '# Lanes-only plan', '',
+  '### Task 1: Alpha', '',
+  '**Files:**', '- Create: `src/a.js`', '', '- [ ] **Step 1: write a**', '',
+  '### Task 2: Beta', '',
+  '**Files:**', '- Create: `src/b.js`', '', '- [ ] **Step 1: write b**', '',
+].join('\n');
+
+test('SIGTERM to plo integrate kills the suite group and marks the stage interrupted', async (t) => {
+  const repo = makeRepo(LANES_ONLY_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  assert.deepEqual(st.barriers, [], 'fixture premise: no barrier');
+  useSpec(repo, { 1: LANE_SPEC[1], 2: LANE_SPEC[2] });
+  await runLanesIn(repo, st, plan, dag);
+  st.testCommand = `node -e "setInterval(() => console.log('tick'), 200)"`;
+  state.save(repo.planPath, st);
+
+  const child = spawn(process.execPath, [PLO, 'integrate', '--plan', repo.planPath], { stdio: 'ignore' });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  const exited = new Promise((resolve) => child.once('exit', (code) => resolve(code)));
+  // The suite is in its own group: killing plo does not kill it.
+  let suitePid = null;
+  t.after(() => { if (suitePid) killGroup(suitePid, 'SIGKILL'); });
+
+  await waitFor(() => {
+    const i = (state.load(repo.planPath) || {}).integration;
+    if (i && i.stages && i.stages.suite && i.stages.suite.pid) suitePid = i.stages.suite.pid;
+    return Boolean(i && i.status === 'suite-running' && suitePid);
+  });
+  child.kill('SIGTERM');
+
+  assert.equal(await exited, 130);
+  assert.equal(state.load(repo.planPath).integration.stages.suite.interrupted, true);
+  await waitFor(() => !processAlive(suitePid, null), 3000);
 });

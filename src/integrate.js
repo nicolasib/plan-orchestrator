@@ -2,13 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, execSync } = require('child_process');
+const { execFileSync, execSync, spawn } = require('child_process');
 const state = require('./state');
 const wt = require('./worktrees');
 const { runAgent, newSessionId } = require('./spawn');
 const { barrierTaskPrompt, crossLaneReviewPrompt } = require('./prompts');
 const { effortFor, plannedEffort, shouldRaise } = require('./effort');
-const { processStamp } = require('./proc');
+const { processStamp, processAlive, killGroup } = require('./proc');
 
 /**
  * The integration phase — the part that only exists because execution was
@@ -187,16 +187,87 @@ async function runBarriers(planPath, st, plan, opts = {}) {
   return { ok: true, outcomes };
 }
 
-/** The full suite at the merge point. Not a lane's subset — the whole thing. */
-function fullSuite(st, { log = () => {} } = {}) {
+// The summary is the last 40 lines; this much of the output's tail holds them.
+const SUITE_TAIL_BYTES = 256 * 1024;
+
+/**
+ * The full suite at the merge point. Not a lane's subset — the whole thing.
+ *
+ * Streamed, not buffered: stdout and stderr land in `.plo-logs/full-suite.log`
+ * as they arrive, so a long suite can be followed while it runs. It runs in a
+ * process group of its own, which a signal to plo never reaches — so whoever
+ * stops plo kills that group (the abort signal here, the signal handler in
+ * `cmdIntegrate`), and the next integrate kills one a dead plo left behind.
+ */
+async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
+  // First, before the log is truncated under it: a suite still running from a
+  // dead integrate would keep appending to this run's log.
+  const prev = (st.integration.stages || {}).suite;
+  if (prev && prev.pid && processAlive(prev.pid, prev.pidStartedAt)) {
+    killGroup(prev.pid, 'SIGKILL');
+    log(`full suite: killed the suite a previous integrate left running (pid ${prev.pid})`);
+  }
+
   const cmd = st.testCommand;
   if (!cmd) {
     return { ok: false, skipped: true, summary: 'no test command known — set one in the plan Global Constraints or pass --test-command' };
   }
-  log(`full suite: running \`${cmd}\` in ${st.repoRoot}`);
-  const res = run(cmd, st.repoRoot);
-  const tail = res.out.split('\n').slice(-40).join('\n');
-  return { ok: res.ok, code: res.code, summary: tail, command: cmd };
+
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, `# ${new Date().toISOString()} $ ${cmd}\n`);
+  log(`full suite: running \`${cmd}\` in ${st.repoRoot} — output in ${logFile}`);
+
+  return new Promise((resolve) => {
+    const out = fs.createWriteStream(logFile, { flags: 'a' });
+    let tail = Buffer.alloc(0);
+    const keep = (chunk) => {
+      out.write(chunk);
+      tail = Buffer.concat([tail, chunk]);
+      if (tail.length > SUITE_TAIL_BYTES) tail = tail.subarray(tail.length - SUITE_TAIL_BYTES);
+    };
+
+    // detached: a group of its own, so killing the group takes the runner's workers too.
+    const child = spawn(cmd, { cwd: st.repoRoot, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // A spawn that hit EMFILE/ENFILE never got its pipes.
+    if (child.stdout) child.stdout.on('data', keep);
+    if (child.stderr) child.stderr.on('data', keep);
+
+    // A failed spawn has no pid, and processStamp() without one stamps plo itself.
+    const stamp = child.pid ? processStamp(child.pid) : { pid: null, startedAt: null };
+    st.integration.stages = st.integration.stages || {};
+    st.integration.stages.suite = {
+      startedAt: new Date().toISOString(), logFile, command: cmd, pid: stamp.pid, pidStartedAt: stamp.startedAt,
+    };
+    st.integration.status = 'suite-running';
+    state.save(planPath, st);
+
+    const onAbort = () => { if (child.pid) killGroup(child.pid, 'SIGTERM'); };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    // A failed spawn emits 'error' and then 'close'; only the first counts.
+    let settled = false;
+    const settle = (code) => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener('abort', onAbort);
+      st.integration.stages.suite = { ...st.integration.stages.suite, endedAt: new Date().toISOString() };
+      state.save(planPath, st);
+      const summary = tail.toString('utf8').split('\n').slice(-40).join('\n');
+      // Resolved once the log is flushed: the file is whole when the caller reads it.
+      out.end(() => resolve({ ok: code === 0, code, summary, command: cmd }));
+    };
+
+    child.on('error', (err) => {
+      keep(Buffer.from(`${err.message}\n`));
+      settle(1);
+    });
+    // Killed by a signal, the suite has no exit code.
+    child.on('close', (code) => settle(code ?? 1));
+  });
 }
 
 /**
@@ -368,7 +439,7 @@ async function integrate(planPath, st, plan, opts = {}) {
     return { ok: false, stage: 'barriers', ...bar };
   }
 
-  const suite = fullSuite(st, { log });
+  const suite = await fullSuite(planPath, st, { log, signal: opts.signal });
   st.integration.suite = suite;
   st.integration.status = suite.ok ? 'suite-passed' : 'suite-failed';
   state.save(planPath, st);

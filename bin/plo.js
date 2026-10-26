@@ -9,6 +9,7 @@ const state = require('../src/state');
 const wt = require('../src/worktrees');
 const { runLanes, prepareLanes } = require('../src/run');
 const { integrate, markInterrupted } = require('../src/integrate');
+const { killGroup } = require('../src/proc');
 const { serve } = require('../src/serve');
 const render = require('../src/render');
 
@@ -235,6 +236,11 @@ async function cmdIntegrate(args) {
   const controller = new AbortController();
   const onSignal = () => {
     controller.abort();
+    // The suite runs in a process group of its own, out of this signal's
+    // reach. Killed before markInterrupted, which stamps the `endedAt` that
+    // tells an open suite from a finished one.
+    const suite = st.integration.stages && st.integration.stages.suite;
+    if (suite && suite.pid && !suite.endedAt) killGroup(suite.pid, 'SIGTERM');
     const stage = markInterrupted(abs, st);
     const barriers = st.barriers.filter((n) => st.tasks[String(n)]?.status === state.STATUS.INTERRUPTED);
     log(stage
