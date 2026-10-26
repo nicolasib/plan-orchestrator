@@ -22,6 +22,9 @@
  * the plan text belongs in the LLM pass, clearly labelled as a soft edge.
  */
 
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORT_LINE = /^\*\*Effort:\*\*\s*(\S+)(?:\s+[—–-]\s*(.*?))?\s*$/i;
+
 const KNOWN_EXTENSIONS = new Set([
   'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx',
   'json', 'yaml', 'yml', 'toml',
@@ -161,7 +164,23 @@ function parsePlan(markdown) {
     let block = null; // 'files' | 'interfaces'
     let ifaceKey = null;
 
-    for (const line of body) {
+    let effort = null;
+
+    for (let bi = 0; bi < body.length; bi += 1) {
+      const line = body[bi];
+      const eff = line.match(EFFORT_LINE);
+      if (eff) {
+        const level = eff[1].replace(/`/g, '').toLowerCase();
+        effort = {
+          level,
+          reason: eff[2] ? eff[2] : null,
+          line: from + bi + 1,
+          valid: EFFORT_LEVELS.includes(level),
+        };
+        block = null;
+        ifaceKey = null;
+        continue;
+      }
       if (/^\*\*Files:\*\*/i.test(line)) { block = 'files'; ifaceKey = null; continue; }
       if (/^\*\*Interfaces:\*\*/i.test(line)) { block = 'interfaces'; ifaceKey = null; continue; }
       if (/^\*\*[A-Z]/.test(line) && !/^\*\*Step/i.test(line)) { block = null; ifaceKey = null; }
@@ -224,6 +243,7 @@ function parsePlan(markdown) {
       consumesTasks: extractTaskRefs(interfaces.consumes).filter((r) => r !== head.n),
       producesForTasks: extractTaskRefs(interfaces.produces).filter((r) => r !== head.n),
       steps,
+      effort,
       done: steps.length > 0 && steps.every((s) => s.checked),
     };
   });
@@ -231,4 +251,11 @@ function parsePlan(markdown) {
   return { title, constraints: parseGlobalConstraints(lines), tasks };
 }
 
-module.exports = { parsePlan, extractPaths, extractTaskRefs, looksLikePath };
+/** Tasks whose **Effort:** names a level outside EFFORT_LEVELS. */
+function effortErrors(plan) {
+  return plan.tasks
+    .filter((t) => t.effort && !t.effort.valid)
+    .map((t) => ({ n: t.n, line: t.effort.line, value: t.effort.level }));
+}
+
+module.exports = { parsePlan, extractPaths, extractTaskRefs, looksLikePath, EFFORT_LEVELS, effortErrors };

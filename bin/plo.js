@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parsePlan } = require('../src/parse-plan');
+const { parsePlan, EFFORT_LEVELS, effortErrors } = require('../src/parse-plan');
 const { buildDag } = require('../src/build-dag');
 const state = require('../src/state');
 const wt = require('../src/worktrees');
@@ -39,7 +39,7 @@ function parseArgv(argv) {
 const log = (msg) => process.stderr.write(`${msg}\n`);
 const out = (msg) => process.stdout.write(`${msg}\n`);
 
-function loadPlan(planPath) {
+function loadPlan(planPath, { strictEffort = false } = {}) {
   if (!planPath) fail('no plan file given. Usage: plo <command> --plan <file>', EXIT.USAGE);
   const abs = path.resolve(planPath);
   if (!fs.existsSync(abs)) fail(`no such plan file: ${abs}`, EXIT.USAGE);
@@ -47,6 +47,12 @@ function loadPlan(planPath) {
   const plan = parsePlan(contents);
   if (!plan.tasks.length) {
     fail(`no tasks found in ${abs}. Expected headings like "### Task 1: ...".`, EXIT.ANALYSIS);
+  }
+  if (strictEffort) {
+    const bad = effortErrors(plan);
+    if (bad.length) {
+      fail(bad.map((e) => `invalid **Effort:** in T${e.n} (line ${e.line}): "${e.value}" — use one of ${EFFORT_LEVELS.join(', ')}`).join('\nplo: '), EXIT.ANALYSIS);
+    }
   }
   return { abs, contents, plan };
 }
@@ -94,22 +100,23 @@ function cmdAnalyze(args) {
   const maxLanes = Number(args['max-lanes'] || (existing && existing.maxLanes) || 3);
 
   const dag = buildDag(plan.tasks, { done, maxLanes, overrides, inferSemantic: args['no-infer'] !== true });
+  const badEffort = effortErrors(plan);
 
   if (dag.cycle && dag.cycle.length) {
     fail(`dependency cycle among tasks ${dag.cycle.join(', ')}. Correct it in ${ovFile || '.plan-lanes.json'} with a dropEdges entry.`, EXIT.ANALYSIS);
   }
 
   if (args.json) {
-    out(JSON.stringify({ plan: abs, title: plan.title, constraints: plan.constraints, ...dag }, null, 2));
-    return EXIT.OK;
+    out(JSON.stringify({ plan: abs, title: plan.title, constraints: plan.constraints, effortErrors: badEffort, ...dag }, null, 2));
+    return badEffort.length ? EXIT.ANALYSIS : EXIT.OK;
   }
 
   out(render.dag(plan, dag, { planPath: abs, overridesFile: ovFile }));
-  return EXIT.OK;
+  return badEffort.length ? EXIT.ANALYSIS : EXIT.OK;
 }
 
 function cmdInit(args) {
-  const { abs, contents, plan } = loadPlan(args.plan);
+  const { abs, contents, plan } = loadPlan(args.plan, { strictEffort: true });
   const existing = state.load(abs);
   if (existing && !args.force) {
     fail(`state already exists at ${state.statePathFor(abs)}. Use \`plo status\` or \`plo resume\`, or pass --force to recreate.`, EXIT.USAGE);
@@ -149,7 +156,7 @@ function cmdInit(args) {
 }
 
 async function cmdRun(args, { resuming = false } = {}) {
-  const { abs, contents, plan } = loadPlan(args.plan);
+  const { abs, contents, plan } = loadPlan(args.plan, { strictEffort: true });
   let st = state.load(abs);
   if (!st) {
     if (!resuming) { cmdInit(args); st = state.load(abs); } else fail(`no state at ${state.statePathFor(abs)} — run \`plo init\` first.`, EXIT.USAGE);
@@ -216,7 +223,7 @@ async function cmdRun(args, { resuming = false } = {}) {
 }
 
 async function cmdIntegrate(args) {
-  const { abs, contents, plan } = loadPlan(args.plan);
+  const { abs, contents, plan } = loadPlan(args.plan, { strictEffort: true });
   const st = state.load(abs);
   if (!st) fail(`no state at ${state.statePathFor(abs)} — nothing to integrate.`, EXIT.USAGE);
 
