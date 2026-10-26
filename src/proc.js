@@ -12,9 +12,9 @@ const PS_TTL_MS = 30 * 1000;
 const psCache = new Map();
 
 /** Start time of a pid as an ISO string, `null` when `ps` cannot find it. */
-function startedAtOf(pid) {
+function startedAtOf(pid, { fresh = false } = {}) {
   const hit = psCache.get(pid);
-  if (hit && Date.now() - hit.at < PS_TTL_MS) return hit.startedAt;
+  if (!fresh && hit && Date.now() - hit.at < PS_TTL_MS) return hit.startedAt;
   let startedAt = null;
   try {
     // lstart is locale-dependent on macOS; only the C locale parses with Date.parse.
@@ -32,8 +32,10 @@ function startedAtOf(pid) {
 let ownStamp = null;
 
 function processStamp(pid = process.pid) {
-  if (pid !== process.pid) return { pid, startedAt: startedAtOf(pid) };
-  if (!ownStamp) ownStamp = { pid, startedAt: startedAtOf(pid) };
+  // A stamp is taken right after a spawn, when the pid may have been cached
+  // under an earlier owner: it always asks `ps`, and feeds the cache.
+  if (pid !== process.pid) return { pid, startedAt: startedAtOf(pid, { fresh: true }) };
+  if (!ownStamp) ownStamp = { pid, startedAt: startedAtOf(pid, { fresh: true }) };
   return ownStamp;
 }
 
