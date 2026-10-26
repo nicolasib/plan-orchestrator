@@ -8,6 +8,7 @@ const wt = require('./worktrees');
 const { runAgent, newSessionId } = require('./spawn');
 const { barrierTaskPrompt, crossLaneReviewPrompt } = require('./prompts');
 const { effortFor, plannedEffort, shouldRaise } = require('./effort');
+const { processStamp } = require('./proc');
 
 /**
  * The integration phase — the part that only exists because execution was
@@ -117,9 +118,11 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     // A barrier obeys its own `**Effort:**` line and climbs like a lane task.
     // `integrate` never reconciles, so a raise stands until the next run/resume.
     const used = effortFor(plannedEffort(task), rec.raises || 0);
+    const stamp = processStamp();
 
     state.updateTask(planPath, st, n, {
       status: state.STATUS.RUNNING, sessionId, logFile, baseBefore, effort: used,
+      pid: stamp.pid, pidStartedAt: stamp.startedAt,
       attempts: (rec.attempts || 0) + 1, startedAt: new Date().toISOString(), error: null,
     });
     log(`T${n} (barrier): started — ${task ? task.title : ''}`);
@@ -154,11 +157,23 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     const ok = outcome.ok && !blocked;
     const status = ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
 
+    const endedAt = new Date().toISOString();
     state.updateTask(planPath, st, n, {
       status,
-      endedAt: new Date().toISOString(),
+      endedAt,
       commits,
       turns: outcome.turns,
+      // Summed across attempts; null only when no attempt reported.
+      costUsd: outcome.costUsd == null && rec.costUsd == null
+        ? null
+        : (rec.costUsd || 0) + (outcome.costUsd || 0),
+      outputTokens: outcome.outputTokens == null && rec.outputTokens == null
+        ? null
+        : (rec.outputTokens || 0) + (outcome.outputTokens || 0),
+      // An attempt interrupted by the operator is not a try of the task.
+      tries: opts.signal && opts.signal.aborted
+        ? rec.tries || []
+        : [...(rec.tries || []), { effort: used, status, at: endedAt }],
       raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
       error: ok ? null : (outcome.result || outcome.stderr || '').slice(0, 500),
     });

@@ -7,6 +7,7 @@ const wt = require('./worktrees');
 const { runAgent, newSessionId, pool } = require('./spawn');
 const { laneTaskPrompt } = require('./prompts');
 const { effortFor, plannedEffort, shouldRaise } = require('./effort');
+const { processStamp } = require('./proc');
 
 /**
  * The lane scheduler.
@@ -247,6 +248,7 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
   // The plan's level for this task, one step up for each time it stopped on
   // its own result in this invocation. Null leaves the agent's default.
   const used = effortFor(plannedEffort(plan.tasks.find((t) => t.n === n)), rec.raises || 0);
+  const stamp = processStamp();
 
   state.updateTask(planPath, st, n, {
     status: state.STATUS.RUNNING,
@@ -257,6 +259,8 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     logFile,
     baseBefore,
     effort: used,
+    pid: stamp.pid,
+    pidStartedAt: stamp.startedAt,
     error: null,
   });
   opts.log(`T${n} (lane ${laneId}): ${verifying ? 'verifying' : 'started'} — session ${sessionId.slice(0, 8)} — log ${logFile}`);
@@ -305,19 +309,26 @@ async function runTask(planPath, st, plan, { n, lane: laneId }, opts) {
     else if (!commits.length) error = 'agent reported success but produced no commits';
   }
 
+  const endedAt = new Date().toISOString();
   state.updateTask(planPath, st, n, {
     status,
-    endedAt: new Date().toISOString(),
+    endedAt,
     commits,
     turns: outcome.turns,
-    costUsd: outcome.costUsd,
-    // Summed across attempts, unlike `costUsd` beside it: a task the fix loop
-    // ran five times spent five spawns' worth, and this is the number the page
-    // reports as what the run consumed. Stays null when nothing reported, so
-    // "not measured" never renders as zero.
+    // Both summed across attempts: a task the fix loop ran five times spent
+    // five spawns' worth, and these are the numbers the page reports as what
+    // the run consumed. Stay null when nothing reported, so "not measured"
+    // never renders as zero.
+    costUsd: outcome.costUsd == null && rec.costUsd == null
+      ? null
+      : (rec.costUsd || 0) + (outcome.costUsd || 0),
     outputTokens: outcome.outputTokens == null && rec.outputTokens == null
       ? null
       : (rec.outputTokens || 0) + (outcome.outputTokens || 0),
+    // An attempt interrupted by the operator is not a try of the task.
+    tries: opts.signal && opts.signal.aborted
+      ? rec.tries || []
+      : [...(rec.tries || []), { effort: used, status, at: endedAt }],
     // Counted only here, where the agent ran to the end: a lane that could not
     // be prepared or a binary that never opened above leave it as it was.
     raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
