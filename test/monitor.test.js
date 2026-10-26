@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
+const { processStamp } = require('../src/proc');
 const state = require('../src/state');
 const monitor = require('../src/monitor');
 
@@ -673,4 +675,93 @@ test('taskDetail returns full history for a finished task', () => {
 test('taskDetail returns null for a task that is not in the plan', () => {
   const { planPath } = fixture();
   assert.equal(monitor.taskDetail(planPath, 99), null);
+});
+
+// ---------------------------------------------------------------- liveness
+
+const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+
+test('a running task whose plo died is interrupted, and so are its open subagents', () => {
+  const { planPath, logFile } = fixture();
+  fs.appendFileSync(logFile, assistantTool('Task', { subagent_type: 'implementer', description: 'build' }, 'tu_sub', '2026-08-19T12:01:00.000Z'));
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: deadPid(), pidStartedAt: null });
+  state.save(planPath, st);
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.status, 'interrupted');
+  assert.equal(t2.children.find((c) => c.id === 'tu_sub').status, 'interrupted');
+});
+
+test('a running task with no pid comes from an older plo, and stays running', () => {
+  const { planPath } = fixture();
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].status, 'running');
+});
+
+test('a running task whose plo is alive stays running', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: process.pid, pidStartedAt: processStamp().startedAt });
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].status, 'running');
+});
+
+/** All tasks settled, then an integration record on top. */
+function integrationFixture(integration, { t3 = state.STATUS.DONE } = {}) {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.tasks['3'].status = t3;
+  st.integration = integration;
+  state.save(planPath, st);
+  return planPath;
+}
+
+const M0 = '2026-08-19T13:00:00.000Z';
+const M1 = '2026-08-19T13:01:00.000Z';
+const S0 = '2026-08-19T13:02:00.000Z';
+const S1 = '2026-08-19T13:05:00.000Z';
+const R0 = '2026-08-19T13:06:00.000Z';
+
+const reviewing = (pid) => ({
+  status: 'reviewing', mergedLanes: ['A'],
+  suite: { ok: true, code: 0, summary: '', command: 'npm test' }, review: null,
+  pid, pidStartedAt: pid === process.pid ? processStamp().startedAt : null,
+  stages: { merge: { startedAt: M0, endedAt: M1 }, suite: { startedAt: S0, endedAt: S1 }, review: { startedAt: R0 } },
+});
+
+test('stages carry their clock, and a review in flight keeps the run open', () => {
+  const planPath = integrationFixture(reviewing(process.pid));
+  const s = monitor.snapshot(planPath);
+  const review = s.stages.find((x) => x.key === 'review');
+  assert.equal(review.status, 'running');
+  assert.equal(review.startedAt, R0);
+  assert.equal(review.endedAt, null);
+  assert.equal(s.integrationRunning, true);
+  assert.equal(s.totals.active, true);
+  assert.equal(s.runOver, false);
+});
+
+test('a review whose integrate died is interrupted, and the run is not over', () => {
+  const planPath = integrationFixture(reviewing(deadPid()));
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.stages.find((x) => x.key === 'review').status, 'interrupted');
+  assert.equal(s.integrationRunning, false);
+  assert.equal(s.totals.active, false);
+  assert.equal(s.runOver, false);
+});
+
+test('the run is over only when the integration finished', () => {
+  const over = (status, opts) => monitor.snapshot(integrationFixture({ status, mergedLanes: ['A'], suite: null, review: null }, opts)).runOver;
+  assert.equal(over('done'), true);
+  assert.equal(over('review-findings'), true);
+  assert.equal(over('barrier-failed', { t3: state.STATUS.FAILED }), true);
+  assert.equal(over('merged'), false);
+});
+
+test('taskDetail applies the same liveness', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: process.pid, pidStartedAt: processStamp().startedAt });
+  state.save(planPath, st);
+  assert.equal(monitor.taskDetail(planPath, 2, { alive: () => false }).status, 'interrupted');
 });

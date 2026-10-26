@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const state = require('./state');
 const { parsePlan } = require('./parse-plan');
+const { processAlive } = require('./proc');
 
 /**
  * A read-only view of a run, assembled from the two things the CLI already
@@ -332,7 +333,7 @@ function readTaskLog(logFile, opts = {}) {
  * node, built from its events alone. Dropping it would hide a subagent that
  * is running right now for the sole reason that it started a while ago.
  */
-function buildChildren(activity, subs = {}, { activityLimit = 0 } = {}) {
+function buildChildren(activity, subs = {}, { activityLimit = 0, parentRunning = true } = {}) {
   const byId = new Map();
   const order = [];
   const node = (id) => {
@@ -371,6 +372,9 @@ function buildChildren(activity, subs = {}, { activityLimit = 0 } = {}) {
   }
 
   for (const n of order) {
+    // A subagent cannot outlive the task that dispatched it. With the parent
+    // dead, a dispatch that never got its result is an interrupted one.
+    if (!parentRunning && n.status === state.STATUS.RUNNING) n.status = state.STATUS.INTERRUPTED;
     const acc = subs[n.id];
     if (acc) {
       n.turns = acc.turns || 0;
@@ -388,7 +392,7 @@ const laneLabel = (id) => String(id).toUpperCase();
 /** Stopped, but not settled the way `done` is: the run needs a human. */
 const STOPPED = new Set([state.STATUS.FAILED, state.STATUS.BLOCKED, state.STATUS.INTERRUPTED, state.STATUS.NEEDS_VERIFY]);
 
-function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true } = {}) {
+function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit = 0, logs = true, alive = processAlive } = {}) {
   const rec = st.tasks[String(n)] || {};
   const task = plan.tasks.find((t) => t.n === Number(n));
   // One read serves both granularities. The card wants the last few events of
@@ -400,18 +404,24 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
 
   // The checkpoint is authoritative for status; the log is authoritative for
   // what is happening inside a task that is still running.
-  const live = rec.status === state.STATUS.RUNNING ? digest : null;
+  //
+  // A task still marked running whose plo is gone is interrupted, whatever the
+  // checkpoint says. A record with no pid comes from an older plo and is left
+  // as it was.
+  const status = rec.status === state.STATUS.RUNNING && rec.pid && !alive(rec.pid, rec.pidStartedAt)
+    ? state.STATUS.INTERRUPTED : rec.status;
+  const live = status === state.STATUS.RUNNING ? digest : null;
   const lastTool = live && [...live.activity].reverse().find((a) => a.kind === 'tool');
   // What it was doing outlives it. A task that failed eleven minutes ago is
   // the one row on the page anybody is going to open, and its last calls are
   // the answer to why — the same reason its report is kept. A task that is
   // simply `done` keeps nothing: it collapses to a chip and nobody opens it.
-  const shown = live || (STOPPED.has(rec.status) ? digest : null);
+  const shown = live || (STOPPED.has(status) ? digest : null);
 
   const view = {
     n: Number(n),
     title: task ? task.title.replace(/`/g, '') : `Task ${n}`,
-    status: rec.status || state.STATUS.PENDING,
+    status: status || state.STATUS.PENDING,
     lane: rec.lane || null,
     barrier,
     attempts: rec.attempts || 0,
@@ -447,7 +457,7 @@ function taskView(plan, st, n, { barrier = false, activityLimit = 8, feedLimit =
     // The task's own calls. What a subagent did belongs to the subagent, and
     // hangs off `children` instead of being flattened into its parent's tail.
     activity: shown ? shown.activity.filter((a) => !a.sub).slice(-activityLimit) : [],
-    children: shown ? buildChildren(shown.activity, shown.subs, { activityLimit }) : [],
+    children: shown ? buildChildren(shown.activity, shown.subs, { activityLimit, parentRunning: status === state.STATUS.RUNNING }) : [],
   };
 
   // Scaffolding for the run feed, not payload: `snapshot` merges these and
@@ -491,7 +501,7 @@ const isTerminal = (s) => s === state.STATUS.DONE;
  * `barrier-failed` inside a key-value row, the reader has to already know
  * that order to place the failure in it.
  */
-function buildStages(lanes, barriers, integration) {
+function buildStages(lanes, barriers, integration, { alive = processAlive } = {}) {
   const i = integration || {};
   const S = state.STATUS;
 
@@ -514,12 +524,35 @@ function buildStages(lanes, barriers, integration) {
   // Every integration status other than these two means the merge is behind us.
   const mergeDone = Boolean(i.status) && i.status !== S.PENDING && i.status !== 'merge-failed';
 
+  // A task group's clock is its tasks': the first start, and the last end once
+  // every one of them is done.
+  const clock = (tasks, status) => {
+    const starts = tasks.map((t) => t.startedAt).filter(Boolean).sort();
+    const ends = tasks.map((t) => t.endedAt).filter(Boolean).sort();
+    return {
+      startedAt: starts[0] || null,
+      endedAt: status === S.DONE ? ends[ends.length - 1] || null : null,
+    };
+  };
+  // An open stage belongs to the `plo integrate` that wrote it. Dead, it is
+  // interrupted; with no pid it comes from an older plo and stays running.
+  const stageOf = (key, status) => {
+    const rec = (i.stages || {})[key] || {};
+    let out = status;
+    if (rec.interrupted) out = S.INTERRUPTED;
+    else if (rec.startedAt && !rec.endedAt) {
+      out = !i.pid || alive(i.pid, i.pidStartedAt) ? S.RUNNING : S.INTERRUPTED;
+    }
+    return { status: out, startedAt: rec.startedAt || null, endedAt: rec.endedAt || null };
+  };
+
+  const runStatus = fold(laneTasks);
   const stages = [
-    { key: 'run', label: 'Run', status: fold(laneTasks), detail: `${count(laneTasks)} tasks` },
+    { key: 'run', label: 'Run', status: runStatus, ...clock(laneTasks, runStatus), detail: `${count(laneTasks)} tasks` },
     {
       key: 'merge',
       label: 'Merge',
-      status: i.status === 'merge-failed' ? S.FAILED : mergeDone ? S.DONE : S.PENDING,
+      ...stageOf('merge', i.status === 'merge-failed' ? S.FAILED : mergeDone ? S.DONE : S.PENDING),
       detail: merged.length ? `lanes ${merged.join(', ')}` : `${lanes.length} lanes`,
     },
   ];
@@ -527,10 +560,12 @@ function buildStages(lanes, barriers, integration) {
   // A plan with no barrier tasks has four stages — not a fifth that is
   // permanently done, which reads as work that happened.
   if (barriers.length) {
+    const barrierStatus = i.status === 'barrier-failed' ? S.FAILED : fold(barriers);
     stages.push({
       key: 'barriers',
       label: 'Barriers',
-      status: i.status === 'barrier-failed' ? S.FAILED : fold(barriers),
+      status: barrierStatus,
+      ...clock(barriers, barrierStatus),
       detail: `${count(barriers)} tasks`,
     });
   }
@@ -538,13 +573,13 @@ function buildStages(lanes, barriers, integration) {
   stages.push({
     key: 'suite',
     label: 'Full suite',
-    status: i.suite ? (i.suite.ok ? S.DONE : S.FAILED) : S.PENDING,
+    ...stageOf('suite', i.suite ? (i.suite.ok ? S.DONE : S.FAILED) : S.PENDING),
     detail: i.suite ? (i.suite.skipped ? 'no test command' : i.suite.ok ? 'pass' : 'fail') : '',
   });
   stages.push({
     key: 'review',
     label: 'Cross-lane review',
-    status: i.review ? (i.review.clean ? S.DONE : S.FAILED) : S.PENDING,
+    ...stageOf('review', i.review ? (i.review.clean ? S.DONE : S.FAILED) : S.PENDING),
     detail: i.review ? (i.review.verdict || (i.review.clean ? 'clean' : 'findings')) : '',
   });
 
@@ -642,7 +677,7 @@ function buildTimeline(lanes, barriers) {
  * differs on every tick, which would defeat the change detection the stream
  * uses to stay quiet.
  */
-function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = true } = {}) {
+function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = true, alive = processAlive } = {}) {
   const abs = path.resolve(planPath);
   const contents = fs.readFileSync(abs, 'utf8');
   const plan = parsePlan(contents);
@@ -659,7 +694,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
   }
 
   const lanes = st.lanes.map((lane) => {
-    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, feedLimit, logs }));
+    const tasks = lane.tasks.map((n) => taskView(plan, st, n, { activityLimit, feedLimit, logs, alive }));
     return {
       id: lane.id,
       label: laneLabel(lane.id),
@@ -672,7 +707,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
       tasks,
     };
   });
-  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, feedLimit, logs }));
+  const barriers = st.barriers.map((n) => taskView(plan, st, n, { barrier: true, activityLimit, feedLimit, logs, alive }));
 
   // During integration every lane is finished and the only live work is a
   // barrier. Naming it lets the page give it a lane's worth of attention
@@ -691,6 +726,15 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
   // Any lane reporting a non-"allowed" limit is the single fact most likely to
   // explain a stalled run, so it is hoisted to the top level.
   const limited = all.map((t) => t.rateLimit).filter((r) => r && r.status && r.status !== 'allowed');
+
+  const stages = buildStages(lanes, barriers, st.integration, { alive });
+  // Merge, suite, review or a barrier with a live process behind it. An open
+  // stage whose process died is not work in progress.
+  const integrationRunning = stages.some((x) => ['merge', 'suite', 'review'].includes(x.key) && x.status === state.STATUS.RUNNING)
+    || barriers.some((t) => t.status === state.STATUS.RUNNING);
+  const active = (counts[state.STATUS.RUNNING] || 0) > 0 || integrationRunning;
+  const runOver = !active
+    && ['done', 'review-findings', 'merge-failed', 'barrier-failed', 'suite-failed'].includes((st.integration || {}).status);
 
   return {
     ...head,
@@ -713,11 +757,13 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
       costUsd,
       outputTokens,
       firstStartedAt: startedAts[0] || null,
-      active: (counts[state.STATUS.RUNNING] || 0) > 0,
+      active,
     },
+    integrationRunning,
+    runOver,
     rateLimit: limited[0] || null,
     activeBarrier: activeBarrier ? activeBarrier.n : null,
-    stages: buildStages(lanes, barriers, st.integration),
+    stages,
     timeline: buildTimeline(lanes, barriers),
     feed,
     lanes,
@@ -727,7 +773,7 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
 }
 
 /** One task in full: the drawer's payload, with a much longer activity list. */
-function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
+function taskDetail(planPath, n, { activityLimit = 200, alive = processAlive } = {}) {
   const abs = path.resolve(planPath);
   const plan = parsePlan(fs.readFileSync(abs, 'utf8'));
   const st = state.load(abs);
@@ -735,7 +781,7 @@ function taskDetail(planPath, n, { activityLimit = 200 } = {}) {
   const rec = st.tasks[String(n)];
   if (!rec) return null;
 
-  const view = taskView(plan, st, n, { barrier: st.barriers.includes(Number(n)), activityLimit });
+  const view = taskView(plan, st, n, { barrier: st.barriers.includes(Number(n)), activityLimit, alive });
   const digest = rec.logFile ? readTaskLog(rec.logFile, { activityLimit }) : null;
   const task = plan.tasks.find((t) => t.n === Number(n));
 
