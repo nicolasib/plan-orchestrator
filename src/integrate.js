@@ -309,7 +309,8 @@ async function crossLaneReview(planPath, st, opts = {}) {
 /**
  * Close whatever an interrupt caught mid-flight: the open stage (started, not
  * ended) and any barrier still `running`. Returns the closed stage's name, or
- * null when only a barrier (or nothing) was open. Synchronous on purpose — it
+ * null when only a barrier (or nothing) was open; only a closed stage sets
+ * `integration.status` to `interrupted`. Synchronous on purpose — it
  * runs inside a signal handler that exits right after.
  */
 function markInterrupted(planPath, st) {
@@ -321,15 +322,14 @@ function markInterrupted(planPath, st) {
       closed = closed || name;
     }
   }
-  let barrier = false;
   for (const n of st.barriers || []) {
     const rec = st.tasks[String(n)];
-    if (rec && rec.status === state.STATUS.RUNNING) {
-      rec.status = state.STATUS.INTERRUPTED;
-      barrier = true;
-    }
+    if (rec && rec.status === state.STATUS.RUNNING) rec.status = state.STATUS.INTERRUPTED;
   }
-  if (closed || barrier) st.integration.status = 'interrupted';
+  // Only a closed stage flips the status. A barrier alone leaves it (e.g.
+  // `merged`) so the next `integrate` skips the merge — the barrier may have
+  // left edits behind, and `mergeLanes` refuses a dirty tree.
+  if (closed) st.integration.status = 'interrupted';
   state.save(planPath, st);
   return closed;
 }

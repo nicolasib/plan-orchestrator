@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 // First: it points src/spawn at the fake agent before anything loads it.
 const { makeRepo, cleanup, initRun, useSpec, seen, runLanesIn } = require('./helpers/run-repo');
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const state = require('../src/state');
@@ -111,7 +112,48 @@ test('markInterrupted closes the open stage and the running barrier', (t) => {
   assert.equal(state.load(repo.planPath).integration.status, 'interrupted', 'saved');
 });
 
-test('a new integrate redoes a stage left running', async (t) => {
+test('markInterrupted on a running barrier alone leaves the integration status', (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  st.integration.status = 'merged';
+  state.updateTask(repo.planPath, st, 3, { status: state.STATUS.RUNNING });
+
+  assert.equal(markInterrupted(repo.planPath, st), null);
+  assert.equal(st.tasks['3'].status, 'interrupted');
+  assert.equal(st.integration.status, 'merged');
+});
+
+test('integrate after an interrupted barrier skips the merge and redoes the barrier', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  // The second attempt writes a different body: an identical rewrite would
+  // leave nothing to commit.
+  useSpec(repo, {
+    ...LANE_SPEC,
+    3: [{ writes: { 'src/c.js': '3' } }, { writes: { 'src/c.js': '3 again' } }],
+    review: { result: { text: CLEAN } },
+  });
+  await runLanesIn(repo, st, plan, dag);
+
+  // The merge is done and the barrier died mid-edit, leaving a half-written
+  // file (untracked) that its next attempt overwrites.
+  const first = await integrate(repo.planPath, st, plan, { log() {} });
+  assert.equal(first.ok, true);
+  fs.writeFileSync(path.join(repo.root, 'src', 'c.js'), 'half');
+  st.integration.status = 'merged';
+  state.updateTask(repo.planPath, st, 3, { status: state.STATUS.RUNNING });
+  markInterrupted(repo.planPath, st);
+
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.notEqual(res.stage, 'merge');
+  assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+  assert.equal(st.tasks['3'].status, 'done');
+  assert.equal(st.tasks['3'].attempts, 2);
+  assert.equal(state.load(repo.planPath).integration.status, 'done');
+});
+
+test('a new integrate redoes a stage left running',async (t) => {
   const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
   const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
   useSpec(repo, { ...LANE_SPEC, review: { result: { text: CLEAN } } });
