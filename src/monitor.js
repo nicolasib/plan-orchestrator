@@ -953,9 +953,9 @@ function taskDetail(planPath, n, { activityLimit = 200, alive = processAlive } =
     lastText: digest ? digest.lastText : null,
     result: digest ? digest.result : null,
     model: digest ? digest.model : null,
-    // Null while it runs, as in the view: a result in the log before the
-    // checkpoint moves is not yet the task's figure.
-    outputTokens: view.status === state.STATUS.RUNNING ? null : (digest ? digest.reportedTokens : null),
+    // The view's figure: summed across attempts like the cost beside it, and
+    // null while it runs. The log's last result is one attempt's alone.
+    outputTokens: view.outputTokens,
     truncated: digest ? digest.truncated : false,
     files: task ? { writes: task.writes || [], excluded: task.excludedPaths || [] } : null,
     steps: task ? task.steps : [],

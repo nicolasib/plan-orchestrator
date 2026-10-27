@@ -788,6 +788,24 @@ test('taskDetail returns full history for a finished task', () => {
   assert.equal(detail.model, 'claude-opus-5');
 });
 
+test('taskDetail reports the tokens of every attempt, as the table does', () => {
+  const { planPath, logFile } = fixture();
+  fs.writeFileSync(logFile, [
+    '\n=== 2026-08-19T12:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    ev({ type: 'result', subtype: 'success', is_error: true, result: 'attempt 1', total_cost_usd: 1, usage: { output_tokens: 35000 } }),
+    '\n=== 2026-08-19T12:10:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    ev({ type: 'result', subtype: 'success', is_error: true, result: 'attempt 2', total_cost_usd: 1, usage: { output_tokens: 17000 } }),
+  ].join(''));
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { status: state.STATUS.FAILED, attempts: 2, costUsd: 2, outputTokens: 52000 });
+  state.save(planPath, st);
+
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 52000);
+  const detail = monitor.taskDetail(planPath, 2);
+  assert.equal(detail.costUsd, 2);
+  assert.equal(detail.outputTokens, 52000);
+});
+
 test('taskDetail returns null for a task that is not in the plan', () => {
   const { planPath } = fixture();
   assert.equal(monitor.taskDetail(planPath, 99), null);
