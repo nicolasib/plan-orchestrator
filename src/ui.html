@@ -114,6 +114,17 @@ body { margin: 0; background: var(--ink); }
 .hero { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center; }
 .hero .who { font-size:24px; font-weight:700; letter-spacing:.4px; }
 .hero .now { font-size:18px; max-width:330px; min-height:44px; }
+/* agents: a row is a button. A button does not stretch on its own, and
+   `.screen button` outranks `.li` and drops its padding: both put back. */
+button.li { width:100%; box-sizing:border-box; text-align:left; padding:2px 10px 2px 24px; }
+button.li > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.li .tg { flex:none; }
+.note .tx { white-space:pre-line; overflow-wrap:anywhere; }
+.note .cmd { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:6px; }
+.note .cmd code { overflow-wrap:anywhere; }
+.li.alert { cursor:default; }
+.li.alert .go { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; text-align:left; }
+.li.alert .act { display:flex; align-items:center; gap:8px; }
 
 /* ---------- the operator: two frames, one shown at a time */
 .vb { position:relative; display:inline-block; line-height:0; filter: drop-shadow(0 0 5px var(--gd)); }
@@ -851,6 +862,455 @@ function renderEmpty(view, s) {
   keyed(view, [{ key: 'empty', sig: html, html }]);
 }
 
+// ------------------------------------------------------------------- STAT
+
+// The attempt cap a lane task resumes against (src/state.js MAX_ATTEMPTS).
+// A barrier has none: `integrate` has no cap (B §6.2).
+const MAX_TRIES = 3;
+
+/** A task that has not reported did not spend nothing, so nothing is `—`. */
+const tokens = (v) => {
+  if (typeof v !== 'number' || v <= 0) return '—';
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
+};
+
+/** HH:MM:SS of an ISO instant, for a row of actions. */
+function hms(iso) {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? new Date(ms).toLocaleTimeString('en-GB', { hour12: false }) : '';
+}
+
+const clipText = (t, max = 140) => (t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t);
+
+const svgIcon = (body) => `<svg viewBox="0 0 18 18" width="20" height="20" aria-hidden="true" focusable="false">${body}</svg>`;
+const ICON = {
+  eff: '<svg viewBox="0 0 16 18" width="16" height="20" aria-hidden="true" focusable="false"><path d="M9.5 1 L3 10.5 H8 L6 17 L13.5 7 H8.7 Z" fill="currentColor"/></svg>',
+  tries: svgIcon('<path d="M3 9a6 6 0 0 1 10-4.5M15 9a6 6 0 0 1-10 4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 1v4h-4M5 17v-4h4" fill="none" stroke="currentColor" stroke-width="2"/>'),
+  turns: svgIcon('<path d="M15 9a6 6 0 1 1-2-4.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M13.5 1.5 V5.5 H9.5" fill="none" stroke="currentColor" stroke-width="2.2"/>'),
+  time: svgIcon('<circle cx="9" cy="9" r="7.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 4.5v4.8l3.2 2" fill="none" stroke="currentColor" stroke-width="2"/>'),
+  cost: svgIcon('<circle cx="9" cy="9" r="7.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11.6 6.4c-1-1.1-5.2-1.1-5.2 1 0 2 5.2 1 5.2 3.2 0 2.1-4.2 2.1-5.2 1M9 3.8v10.4" fill="none" stroke="currentColor" stroke-width="1.6"/>'),
+  out: svgIcon('<path d="M3 4h12M3 9h12M3 14h8" stroke="currentColor" stroke-width="2.4"/>'),
+  type: svgIcon('<path d="M2 3h7l7 7-6 6-7-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="7" r="1.4" fill="currentColor"/>'),
+  cmd: svgIcon('<path d="M2.5 4.5 7 9l-4.5 4.5M9 14h6.5" fill="none" stroke="currentColor" stroke-width="2.2"/>'),
+  exit: svgIcon('<path d="M8 3H3v12h5M7 9h9M12.5 5.5 16 9l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="2"/>'),
+};
+
+const TAG_BAD = new Set(['failed', 'blocked', 'needs-verify']);
+const TAG_WARN = new Set(['nosignal', 'interrupted']);
+/** A state as its tag: solid amber when it broke, dashed amber when it went
+ *  quiet or was cut off (B §8.1). */
+function stateTag(status, testid) {
+  const cls = TAG_BAD.has(status) ? ' bad' : TAG_WARN.has(status) ? ' warn' : '';
+  return `<span class="tg${cls}"${testid ? ` data-testid="${E(testid)}"` : ''}>${E(WORD[status] || String(status || '').toUpperCase())}</span>`;
+}
+
+/*
+ * LINES of the full suite (B §6.2): the lines the page has seen for this suite
+ * run, keyed by its start. The snapshot carries only the last SUITE_WINDOW
+ * cleaned lines and no total (src/monitor.js SUITE_LINES), so each window is
+ * laid over the one before and only what comes past the overlap counts. The
+ * longest overlap wins, so a log that repeats lines is undercounted, never
+ * overcounted, and the same snapshot read twice adds nothing. A first window
+ * that is already full means lines scrolled out before the page connected:
+ * the figure then carries a `+`.
+ */
+const SUITE_WINDOW = 40;
+const suiteSeen = { startedAt: null, lines: [], count: 0, partial: false };
+
+function countSuiteLines(s) {
+  const live = s && s.ready ? s.suiteLive : null;
+  if (!live || !Array.isArray(live.lines)) return;
+  const cur = live.lines;
+  if (suiteSeen.startedAt !== live.startedAt) {
+    Object.assign(suiteSeen, { startedAt: live.startedAt, lines: cur, count: cur.length, partial: cur.length >= SUITE_WINDOW });
+    return;
+  }
+  const old = suiteSeen.lines;
+  suiteSeen.lines = cur;
+  if (!old.length) { suiteSeen.count += cur.length; return; }
+  // The old window's last line may have been half written, so it is laid over
+  // again instead of trusted. It was counted once already.
+  const head = old.slice(0, -1);
+  const fits = (k) => {
+    for (let j = 0; j < k; j += 1) if (head[head.length - k + j] !== cur[j]) return false;
+    return true;
+  };
+  let k = Math.min(head.length, cur.length);
+  while (k > 0 && !fits(k)) k -= 1;
+  suiteSeen.count += Math.max(0, cur.length - k - 1);
+}
+
+function suiteLinesFigure(a) {
+  const startedAt = (a.src.live && a.src.live.startedAt) || (a.src.rec && a.src.rec.startedAt) || null;
+  if (startedAt == null || suiteSeen.startedAt !== startedAt) return '—';
+  return `${suiteSeen.count}${suiteSeen.partial ? '+' : ''}`;
+}
+
+const suiteCommand = (a) => (a.src.live && a.src.live.command) || (a.src.rec && a.src.rec.command) || (S.snap && S.snap.testCommand) || '—';
+
+/** What holds the run up while nobody works: the first stage not done. */
+function idleLine(s) {
+  const next = (s.stages || []).find((x) => x.status !== 'done');
+  return next ? `nobody working — waiting on ${String(next.label).toLowerCase()}` : 'nobody working — run over';
+}
+
+/**
+ * Who STAT › AGENTS lists, in groups (B §6.2): each lane task that is working
+ * or stopped under its own header (the old crew filter, plus NO SIGNAL), the
+ * barriers that are, then END OF RUN. A listed task brings every subagent it
+ * dispatched, whatever its state. END OF RUN shows once the suite or the
+ * review has started and stays until the run is over with nothing left that
+ * needs a human; while it shows, it holds both and the reviewer's subagents.
+ */
+function crewGroups(all, items) {
+  const s = S.snap;
+  const listed = (a) => a.status === 'running' || a.status === 'nosignal' || STOPPED.has(a.status);
+  const withSubs = (a) => [a, ...all.filter((x) => x.kind === 'sub' && x.parent === a.id)];
+  const groups = [];
+  for (const a of all) {
+    if (a.kind === 'task' && listed(a)) {
+      groups.push({ key: a.id, head: `LANE ${String(a.lane || '').toUpperCase()} · T${a.n} ${a.name}`, members: withSubs(a) });
+    }
+  }
+  const barriers = all.filter((a) => a.kind === 'barrier' && listed(a));
+  if (barriers.length) groups.push({ key: 'barriers', head: 'BARRIERS', members: barriers.flatMap(withSubs) });
+  const end = all.filter((a) => a.kind === 'suite' || a.kind === 'review');
+  if (end.length && !(s.runOver && !items.length)) {
+    groups.push({ key: 'end', head: 'END OF RUN', members: end.flatMap((a) => (a.kind === 'review' ? withSubs(a) : [a])) });
+  }
+  return groups;
+}
+
+/**
+ * The agent in the hero. A pick (a click, the hash, a link) is looked up in
+ * the whole run, so a pinned agent that finishes stays on screen. With none,
+ * the first that needs you, else the first at work, else the first listed —
+ * worked out on every render and never written back, so the default follows
+ * the run instead of pinning an alert that has since cleared.
+ */
+function heroAgent(all, shown, items) {
+  const id = S.sel.agent;
+  const picked = id != null ? all.find((a) => a.id === id) : null;
+  if (picked) return { agent: picked, picked: true };
+  const need = items.find((it) => it.agentId && all.some((a) => a.id === it.agentId));
+  const agent = (need && all.find((a) => a.id === need.agentId))
+    || shown.find((a) => a.status === 'running' || a.status === 'nosignal') || shown[0] || null;
+  return { agent, picked: false };
+}
+
+function heroTitle(a) {
+  const type = () => String((a.src && a.src.agentType) || 'subagent').toUpperCase();
+  switch (a.kind) {
+    case 'suite': return 'FULL SUITE';
+    case 'review': return 'CROSS-LANE REVIEW';
+    case 'sub': return a.parent === 'review' ? `REVIEW · ${type()}` : `T${a.n} · ${type()}`;
+    default: return `T${a.n} · CONTROLLER`;
+  }
+}
+
+/** What it is doing now: the last event, as the old crew row said it. */
+function doing(a) {
+  if (a.kind === 'suite') {
+    const r = a.src.result;
+    if (a.status === 'running') return `running ${suiteCommand(a)}`;
+    if (r) return r.skipped ? 'not run — no test command' : r.ok ? 'passed' : 'failed';
+    return String(WORD[a.status] || a.status || '').toLowerCase();
+  }
+  if (a.status === 'pending') return a.kind === 'sub' ? 'queued' : `queued — ${queueAfter(a.src, S.snap)}`;
+  if (a.status === 'done') return 'finished';
+  if (STOPPED.has(a.status)) return `stopped — last: ${lastAction(a)}`;
+  return lastAction(a);
+}
+
+/** B §6.2's five numbers, by kind of agent: [icon, label, value as HTML]. */
+function heroNumbers(a) {
+  const src = a.src || {};
+  const live = a.status === 'running' || a.status === 'nosignal';
+  // A running clock is a `data-since` for paintTimes: text only, so the
+  // markup, and the signature with it, stays the same every second.
+  const time = (from, to) => (live && from ? `<span data-since="${E(from)}"></span>`
+    : from && to ? E(dur(Date.parse(to) - Date.parse(from))) : '—');
+  const turns = () => (a.status === 'pending' || typeof src.turns !== 'number' ? '—' : String(src.turns));
+  const noTry = [ICON.tries, 'TRY', '—'];
+  switch (a.kind) {
+    case 'task': case 'barrier': {
+      const e = src.effort;
+      const effort = e ? `${e.used ?? e.planned}${e.raised ? ' ↑' : ''}` : 'inherited';
+      const tries = src.attempts ? (a.kind === 'task' ? `${src.attempts}/${MAX_TRIES}` : String(src.attempts)) : '—';
+      return [[ICON.eff, 'EFFORT', E(effort)], [ICON.tries, 'TRY', E(tries)], [ICON.turns, 'TURNS', turns()],
+        [ICON.time, 'TIME', time(src.startedAt, src.endedAt)], [ICON.cost, 'COST', E(money(src.costUsd))]];
+    }
+    case 'sub':
+      return [[ICON.type, 'TYPE', E(src.agentType || '—')], noTry, [ICON.turns, 'TURNS', turns()],
+        [ICON.time, 'TIME', time(src.startedAt, src.endedAt)], [ICON.out, 'OUTPUT', E(tokens(src.outputTokens))]];
+    case 'review':
+      return [[ICON.eff, 'EFFORT', 'inherited'], noTry, [ICON.turns, 'TURNS', turns()],
+        [ICON.time, 'TIME', time(src.startedAt, src.endedAt)], [ICON.cost, 'COST', E(money(src.costUsd))]];
+    default: {
+      const rec = src.rec || {};
+      const r = src.result;
+      return [[ICON.cmd, 'COMMAND', E(suiteCommand(a))], noTry, [ICON.out, 'LINES', E(suiteLinesFigure(a))],
+        [ICON.time, 'TIME', time(rec.startedAt, rec.endedAt)], [ICON.exit, 'EXIT', r && typeof r.code === 'number' ? String(r.code) : '—']];
+    }
+  }
+}
+
+function heroItems(a) {
+  const name = heroTitle(a);
+  const now = `<div class="now">${E(clipText(doing(a)))}${a.status === 'running' ? '<span class="blink">_</span>' : ''}</div>`;
+  const tagHtml = stateTag(a.status, 'hero-tag');
+  return [
+    // Its own child, signed by what it looks like only: the numbers beside it
+    // change every second, and repainting it would restart its animation.
+    { key: 'fig', sig: `${a.id}|${a.pose}|${a.alert}`, html: fig(a.pose, 240, a.alert, a.id) || '<span></span>' },
+    { key: 'name', sig: name, html: `<div class="who" data-testid="hero-name">${E(name)}</div>` },
+    { key: 'tag', sig: tagHtml, html: tagHtml },
+    { key: 'now', sig: now, html: now },
+    { key: 'icons', sig: 'icons', html: '<div class="icons"></div>' },
+  ];
+}
+
+// The label and the value sit apart in the markup, so the cell reads
+// "EFFORT high" and not "EFFORThigh"; the flex column hides the space.
+const heroCell = ([icon, label, value]) => `<div class="ic">${icon}<div><small>${label}</small> ${value}</div></div>`;
+
+function actRow(x) {
+  const [what, obj] = x.kind === 'text' ? ['think', x.text]
+    : x.kind === 'run' ? ['start', x.label]
+      : x.kind === 'result' ? ['result', x.text]
+        : [x.name, x.target || x.preview];
+  return `<div class="ac${x.ok === false ? ' bad' : ''}"><span>${E(hms(x.at))}</span><span>${E(what || '')}</span>`
+    + `<span class="o" title="${E(obj || '')}">${E(obj || '')}</span></div>`;
+}
+
+function detailItems(a, all) {
+  const out = [];
+  const todo = whatToDo(a);
+  if (todo) {
+    // The heading sits outside `whattodo`: the block starts with the advice.
+    out.push({
+      key: 'todo',
+      html: `<div class="pn"><h4>WHAT TO DO</h4><div class="note${a.alert ? ' bad' : ''}" data-testid="whattodo"><span class="tx">${E(todo.text)}</span>`
+        + (todo.copy ? `<div class="cmd"><code>${E(todo.copy)}</code>${copyBtn(todo.copy, 'copy-cmd')}</div>` : '')
+        + '</div></div>',
+    });
+  }
+  if (a.kind !== 'suite') {
+    const acts = ((a.src && a.src.activity) || []).slice(-8).reverse();
+    out.push({
+      key: 'acts',
+      html: `<div class="pn"><h4>LAST ACTIONS</h4>${acts.length ? acts.map(actRow).join('') : '<div class="kv dim"><span>nothing recorded</span></div>'}</div>`,
+    });
+  }
+  const subs = all.filter((x) => x.kind === 'sub' && x.parent === a.id);
+  if (subs.length) {
+    out.push({
+      key: 'subs',
+      html: '<div class="pn"><h4>SUBAGENTS</h4>' + subs.map((k) => `<button type="button" class="li${k.status === 'running' ? ' run' : ''}" data-go="${E(`agent=${encodeURIComponent(k.id)}`)}">`
+        + `<span>${E(k.role)}</span>${stateTag(k.status)}</button>`).join('') + '</div>',
+    });
+  }
+  const owner = a.kind === 'sub' ? all.find((x) => x.id === a.parent) : a;
+  if (owner && (owner.kind === 'task' || owner.kind === 'barrier')) {
+    const commits = ((owner.src && owner.src.commits) || []).length;
+    out.push({
+      key: 'card',
+      html: '<div class="pn"><h4>TASK</h4>'
+        + `<div class="kv"><span>T${owner.n}</span><span>${E(owner.name)}</span></div>`
+        + `<div class="kv"><span>${owner.kind === 'barrier' ? 'barrier' : `lane ${E(String(owner.lane || '').toUpperCase())}`} · commits</span><span>${commits}</span></div>`
+        + `<button type="button" class="lnk" data-go="${E(`tab=INV&task=${owner.n}`)}">open in INV ▸</button> &nbsp; `
+        + `<button type="button" class="lnk" data-go="${E(`tab=DATA&sub=QUESTS&quest=${owner.n}`)}">see quest ▸</button></div>`,
+    });
+  }
+  if (a.kind === 'suite') {
+    const live = a.src.live;
+    // As many as the box shows: it is repainted every snapshot, and the
+    // newest line must not sit below a scroll that resets to the top.
+    const lines = live ? (live.lines || []).slice(-8) : (a.src.result ? lastLines(a.src.result.summary, 8).split('\n') : []);
+    out.push({
+      key: 'live',
+      html: `<div class="pn"><h4>${live ? 'LIVE OUTPUT' : 'OUTPUT'}</h4>`
+        + `<pre class="out" data-testid="live-output" style="height:auto;max-height:170px;margin:0">${E(lines.join('\n'))}</pre>`
+        + `<button type="button" class="lnk" data-go="${E('tab=RADIO&station=suite')}">listen on RADIO ▸</button></div>`,
+    });
+  }
+  return out.map((it) => ({ ...it, sig: it.html }));
+}
+
+function crewRow(a, selId) {
+  const label = a.kind === 'barrier' ? `T${a.n} · ${a.role}` : a.role;
+  const run = a.status === 'running' || a.status === 'nosignal';
+  return `<button type="button" class="li${a.kind === 'sub' ? ' kid' : ''}${run ? ' run' : ''}${a.id === selId ? ' sel' : ''}"`
+    + ` data-testid="agent-${E(a.id)}" data-go="${E(`agent=${encodeURIComponent(a.id)}`)}"><span>${E(label)}</span>${stateTag(a.status)}</button>`;
+}
+
+const AGENT_COLS = '<div class="cols" style="grid-template-columns: 270px 1fr 300px; height:calc(100% - 24px)">'
+  + '<div class="col"></div><div class="hero"></div><div class="col"></div></div>';
+
+/** STAT › AGENTS (B §6.2): the crew, the selected agent, its details. */
+function viewAgents(view) {
+  const s = S.snap;
+  const all = agents();
+  const items = needYou();
+  const groups = crewGroups(all, items);
+  const shown = groups.flatMap((g) => g.members);
+  const { agent, picked } = heroAgent(all, shown, items);
+  const title = { key: 'title', sig: 'AGENTS', html: viewTitle('AGENTS') };
+
+  if (!shown.length && !picked) {
+    const todo = whatToDo(null);
+    const copy = (todo && todo.copy) || (items[0] && items[0].copy) || null;
+    const html = '<div class="empty" style="min-height:calc(100% - 24px)">'
+      + fig('dormindo', 200, false, 'agents-empty')
+      + `<div class="msg"><p>${E(idleLine(s))}</p></div>`
+      + (copy ? `<div class="cmdrow"><code>${E(copy)}</code>${copyBtn(copy, 'copy-cmd')}</div>` : '')
+      + '</div>';
+    keyed(view, [title, { key: 'idle', sig: html, html }]);
+    return;
+  }
+
+  // The skeleton is kept from render to render; only its columns' children
+  // are keyed, so nothing the stream did not change is rebuilt.
+  keyed(view, [title, { key: 'cols', sig: 'cols', html: AGENT_COLS }]);
+  const [list, hero, details] = view.querySelector(':scope > [data-key="cols"]').children;
+
+  const rows = [];
+  for (const g of groups) {
+    rows.push({ key: `gh:${g.key}`, sig: g.head, html: `<div class="gh">${E(g.head)}</div>` });
+    // Signed without the selection, which is a class toggled below: a row the
+    // reader just clicked keeps its node, and the focus with it.
+    for (const a of g.members) rows.push({ key: `a:${a.id}`, sig: crewRow(a, null), html: crewRow(a, agent.id) });
+  }
+  if (!rows.length) {
+    const line = `<div class="kv dim"><span>${E(idleLine(s))}</span></div>`;
+    rows.push({ key: 'idle', sig: line, html: line });
+  }
+  keyed(list, rows);
+  for (const el of list.children) if (el.matches('button.li')) el.classList.toggle('sel', el.getAttribute('data-key') === `a:${agent.id}`);
+
+  keyed(hero, heroItems(agent));
+  keyed(hero.querySelector(':scope > [data-key="icons"]'), heroNumbers(agent).map((c, i) => {
+    const html = heroCell(c);
+    return { key: i, sig: html, html };
+  }));
+
+  keyed(details, detailItems(agent, all));
+}
+
+const COND_HTML = '<div class="cond" style="height:calc(100% - 24px)"><div class="stage"></div><div class="pn" style="margin:6px 0 0"></div></div>';
+
+/** The top of the stage: the end of the run, by the stage that is going. */
+function endOfRunDash(s) {
+  const keys = new Set(['merge', 'barriers', 'suite', 'review']);
+  const stages = (s.stages || []).filter((x) => keys.has(x.key));
+  const done = stages.filter((x) => x.status === 'done').length;
+  const i = s.integration || {};
+  // A suite skipped for want of a test command is `failed` in the stages and
+  // is not a stop (B §8.2).
+  const stopped = stages.find((x) => x.status === 'interrupted'
+    || (x.status === 'failed' && !(x.key === 'suite' && i.suite && i.suite.skipped)));
+  let text;
+  if (s.integrationRunning) {
+    const at = endOfRun(s);
+    text = `<span class="blink">${E(at.label)} <span data-since="${E(at.since || '')}"></span></span>`;
+  } else if (stopped) {
+    text = E(`${String(stopped.label).toUpperCase()} ${stopped.key === 'review' && stopped.status === 'failed' ? 'FINDINGS' : WORD[stopped.status]}`);
+  } else {
+    text = `${done}/${stages.length}`;
+  }
+  const width = Math.max(8, Math.round((70 * done) / Math.max(1, stages.length)));
+  return {
+    key: 'end',
+    html: `<button type="button" class="dash${stopped ? ' bad' : ''}" data-go="${E('tab=MAP')}" style="left:50%;top:2%;transform:translateX(-50%);align-items:center">`
+      + `<span>END OF RUN · ${text}</span><i style="width:${width}px"></i></button>`,
+  };
+}
+
+/** One lane, on its side of the operator. Its click opens the lane's current
+ *  task: the first that stopped or went quiet, else the one running, else the
+ *  next not done, else the last. */
+function laneDash(lane, index, rows, all) {
+  const tasks = (lane.tasks || []).map((t) => all.find((a) => a.id === `T${t.n}`)).filter(Boolean);
+  const done = tasks.filter((a) => a.status === 'done').length;
+  const hurt = tasks.find((a) => a.alert);
+  const current = hurt || tasks.find((a) => a.status === 'running') || tasks.find((a) => a.status !== 'done') || tasks[tasks.length - 1];
+  const row = Math.floor(index / 2);
+  const [from, to] = rows <= 2 ? [24, 62] : [16, 76];
+  const top = rows === 1 ? 43 : from + (row * (to - from)) / (rows - 1);
+  const side = index % 2 === 0 ? 'right:calc(50% + 120px);align-items:flex-end' : 'left:calc(50% + 120px)';
+  const label = `LANE ${lane.label || String(lane.id).toUpperCase()} · ${hurt ? `${WORD[hurt.status]} T${hurt.n}` : `${done}/${tasks.length}`}`;
+  const width = Math.max(8, Math.round((70 * done) / Math.max(1, tasks.length)));
+  const go = current ? ` data-go="${E(`sub=AGENTS&agent=${encodeURIComponent(current.id)}`)}"` : '';
+  return {
+    key: `lane:${lane.id}`,
+    html: `<button type="button" class="dash${hurt ? ' bad' : ''}" data-testid="cond-lane-${E(lane.id)}"${go} style="${side};top:${top.toFixed(1)}%">`
+      + `<span>${E(label)}</span><i style="width:${width}px"></i></button>`,
+  };
+}
+
+/** The bottom of the stage: the next barrier, or the last one once all ran. */
+function barrierDash(s, all) {
+  const pos = 'left:50%;bottom:0;transform:translateX(-50%);align-items:center';
+  const bars = (s.barriers || []).map((t) => all.find((a) => a.id === `T${t.n}`)).filter(Boolean);
+  const next = bars.find((a) => a.status !== 'done') || bars[bars.length - 1];
+  if (!next) return { key: 'barrier', html: `<div class="dash" style="${pos};cursor:default"><span>no barrier</span></div>` };
+  return {
+    key: 'barrier',
+    html: `<button type="button" class="dash${next.alert ? ' bad' : ''}" data-go="${E(`tab=INV&task=${next.n}`)}" style="${pos}">`
+      + `<i style="width:${next.status === 'done' ? 70 : 8}px"></i><span>BARRIER T${next.n} · ${E(WORD[next.status] || next.status)}</span></button>`,
+  };
+}
+
+/** B §8.2 as rows: what happened, the tag, and the COPY that resolves it —
+ *  the command, or the report's path for review findings (B §8.3). */
+function alertItems(items) {
+  const head = { key: 'head', sig: 'head', html: '<h4>ALERTS</h4>' };
+  if (!items.length) return [head, { key: 'none', sig: 'none', html: '<div class="kv"><span>none</span><span>nothing needs you</span></div>' }];
+  return [head, ...items.map((it, i) => {
+    const warn = /^(NO SIGNAL|INTERRUPTED|FINDINGS|CHANGED)$/.test(it.tag);
+    const what = `${E(it.label)} — ${E(gist(it.text, 200))}`;
+    const html = `<div class="li alert" data-testid="alert-${i}">`
+      + (it.agentId
+        ? `<button type="button" class="go" data-go="${E(`sub=AGENTS&agent=${encodeURIComponent(it.agentId)}`)}">${what}</button>`
+        : `<span class="go">${what}</span>`)
+      + `<span class="act"><span class="tg ${warn ? 'warn' : 'bad'}">${E(it.tag)}</span>${it.copy ? copyBtn(it.copy, `copy-alert-${i}`) : ''}</span></div>`;
+    return { key: it.key, sig: html, html };
+  })];
+}
+
+/** STAT › CONDITION (B §6.2): the operator, the lanes around it, the end of
+ *  the run above, the next barrier below, and the alerts. */
+function viewCondition(view) {
+  const s = S.snap;
+  const all = agents();
+  const items = needYou();
+  keyed(view, [{ key: 'title', sig: 'CONDITION', html: viewTitle('CONDITION') }, { key: 'cond', sig: 'cond', html: COND_HTML }]);
+  const [stage, alerts] = view.querySelector(':scope > [data-key="cond"]').children;
+
+  const lanes = s.lanes || [];
+  const rows = Math.ceil(lanes.length / 2);
+  // Any number of lanes: past what the screen holds, the stage grows and the
+  // view scrolls instead of stacking lanes on each other.
+  const minHeight = `${Math.max(330, rows * 56 + 140)}px`;
+  if (stage.style.minHeight !== minHeight) stage.style.minHeight = minHeight;
+
+  const pose = items.length ? 'travado' : 'orgulho';
+  const parts = [
+    endOfRunDash(s),
+    ...lanes.map((lane, i) => laneDash(lane, i, rows, all)),
+    barrierDash(s, all),
+    { key: 'fig', html: `<div class="fig">${fig(pose, 280, items.length > 0, 'condition')}</div>` },
+  ];
+  keyed(stage, parts.map((p) => ({ ...p, sig: p.html })));
+  keyed(alerts, alertItems(items));
+}
+
+VIEWS.STAT.AGENTS = viewAgents;
+VIEWS.STAT.CONDITION = viewCondition;
+
 // ------------------------------------------------------------------ frame
 
 let lastSnapAt = 0;
@@ -1082,6 +1542,7 @@ function connect() {
     try { payload = JSON.parse(e.data); } catch { return; }
     S.skew = typeof payload.now === 'number' ? payload.now - Date.now() : 0;
     S.snap = payload.snapshot || null;
+    countSuiteLines(S.snap);
     lastSnapAt = Date.now();
     S.stream = 'live';
     S.frozen = false;
