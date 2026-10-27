@@ -8,7 +8,7 @@ const wt = require('./worktrees');
 const { runAgent, newSessionId } = require('./spawn');
 const { barrierTaskPrompt, crossLaneReviewPrompt } = require('./prompts');
 const { effortFor, plannedEffort, shouldRaise } = require('./effort');
-const { processStamp, processAlive, killGroup } = require('./proc');
+const { processStamp, processAlive, orphanedGroup, killGroup } = require('./proc');
 
 /**
  * The integration phase — the part that only exists because execution was
@@ -202,8 +202,11 @@ const SUITE_TAIL_BYTES = 256 * 1024;
 async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
   // First, before the log is truncated under it: a suite still running from a
   // dead integrate would keep appending to this run's log.
+  // A leader still in use must match its stamp: one that fails it is a reused
+  // pid, never signalled. A leader gone while its group lives on, for a stage
+  // still open, is the runner dead and its workers still running.
   const prev = (st.integration.stages || {}).suite;
-  if (prev && prev.pid && processAlive(prev.pid, prev.pidStartedAt)) {
+  if (prev && prev.pid && (processAlive(prev.pid, prev.pidStartedAt) || (!prev.endedAt && orphanedGroup(prev.pid)))) {
     killGroup(prev.pid, 'SIGKILL');
     log(`full suite: killed the suite a previous integrate left running (pid ${prev.pid})`);
   }

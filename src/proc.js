@@ -56,6 +56,27 @@ function sameStart(pid, startedAt) {
   return Math.abs(Date.parse(now) - Date.parse(startedAt)) <= 5000;
 }
 
+/**
+ * A process group that outlived its leader: no process holds the pid, yet a
+ * group with that id still has members — the workers a dead runner left. A
+ * pgid cannot be reused as a pid while its group has members, so the group
+ * can only be the leader's. `false` for a pid in use, whoever holds it.
+ */
+function orphanedGroup(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    if (e.code !== 'ESRCH') return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Signal a whole process group; `false` when the group no longer exists. */
 function killGroup(pid, signal) {
   try {
@@ -67,4 +88,4 @@ function killGroup(pid, signal) {
   }
 }
 
-module.exports = { processStamp, processAlive, killGroup };
+module.exports = { processStamp, processAlive, orphanedGroup, killGroup };

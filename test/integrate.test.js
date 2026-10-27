@@ -282,6 +282,47 @@ test('a suite still alive from a dead integrate is killed before the log is trun
   await waitFor(() => !processAlive(stamp.pid, null), 3000);
 });
 
+const groupGone = (pid) => {
+  try { process.kill(-pid, 0); return false; } catch { return true; }
+};
+
+test('a dead suite whose leader exited while its workers run on is killed as a group', async (t) => {
+  const { planPath, st } = suiteFixture(t);
+  // Spawned the way fullSuite spawns; the leader leaves a worker behind and
+  // exits, as a runner killed by SIGPIPE does while its workers stay quiet.
+  const old = spawn('sleep 30 & exit 0', { shell: true, detached: true, stdio: 'ignore' });
+  t.after(() => { if (!groupGone(old.pid)) killGroup(old.pid, 'SIGKILL'); });
+  const stamp = processStamp(old.pid);
+  await new Promise((resolve) => old.once('exit', resolve));
+  assert.equal(processAlive(old.pid, null), false, 'premise: the leader is gone');
+  assert.equal(groupGone(old.pid), false, 'premise: its group lives on');
+  // What a SIGKILLed integrate leaves: the suite stage open, with its pid.
+  st.integration.status = 'suite-running';
+  st.integration.stages = { suite: { startedAt: new Date().toISOString(), pid: stamp.pid, pidStartedAt: stamp.startedAt } };
+  st.testCommand = 'node -e ""';
+
+  const lines = [];
+  await fullSuite(planPath, st, { log: (m) => lines.push(m) });
+
+  assert.ok(lines.some((l) => l.includes('killed the suite')), lines.join('\n'));
+  await waitFor(() => groupGone(old.pid), 3000);
+});
+
+test('a live pid that fails the stamp was reused: its group is never killed', async (t) => {
+  const { planPath, st } = suiteFixture(t);
+  const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  t.after(() => killGroup(other.pid, 'SIGKILL'));
+  const stamp = processStamp(other.pid);
+  // The same pid with an earlier start: the suite that held it is gone.
+  const before = new Date(Date.parse(stamp.startedAt) - 10 * 60 * 1000).toISOString();
+  st.integration.stages = { suite: { startedAt: before, pid: other.pid, pidStartedAt: before } };
+  st.testCommand = 'node -e ""';
+
+  await fullSuite(planPath, st, {});
+
+  assert.equal(processAlive(other.pid, stamp.startedAt), true);
+});
+
 // BARRIER_PLAN without its barrier: `integrate` goes from the merge straight
 // to the suite.
 const LANES_ONLY_PLAN = [

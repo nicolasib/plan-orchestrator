@@ -7,7 +7,7 @@ const { once } = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { processStamp, processAlive, killGroup } = require('../src/proc');
+const { processStamp, processAlive, killGroup, orphanedGroup } = require('../src/proc');
 
 test('processStamp reads this process start, and processAlive accepts it', () => {
   const me = processStamp();
@@ -43,4 +43,21 @@ test('killGroup kills a detached process group', async () => {
   assert.equal(killGroup(child.pid, 'SIGKILL'), true);
   await once(child, 'exit');
   assert.equal(processAlive(child.pid, null), false);
+});
+test('a group whose leader exited is still found while a worker lives in it', async (t) => {
+  // The leader backgrounds a worker and exits, the way a runner dies and
+  // leaves the workers of its group running.
+  const leader = spawn('sleep 30 & exit 0', { shell: true, detached: true, stdio: 'ignore' });
+  t.after(() => { try { killGroup(leader.pid, 'SIGKILL'); } catch { /* gone */ } });
+  await once(leader, 'exit');
+  assert.equal(processAlive(leader.pid, null), false, 'premise: the leader is gone');
+  assert.equal(orphanedGroup(leader.pid), true);
+
+  killGroup(leader.pid, 'SIGKILL');
+  const until = Date.now() + 3000;
+  while (orphanedGroup(leader.pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(orphanedGroup(leader.pid), false, 'no group once its last member is gone');
+});
+test('a pid in use is never an orphaned group, whoever holds it', () => {
+  assert.equal(orphanedGroup(process.pid), false);
 });
