@@ -179,12 +179,31 @@ body.frozen .vb .q1 { opacity:1 !important; }
 /* wrapped: every cell breaks onto lines instead of clipping */
 .loglist.wrap .ac.lr > span { white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
 
-/* map and radio */
-.map { position:relative; border:2px solid var(--gd); aspect-ratio: 640 / 300; width:100%;
+/* map: px geometry that never scales with the screen; a wide run scrolls */
+.map { position:relative; border:2px solid var(--gd); overflow-x:auto; }
+.map .mapd { position:relative; min-width:100%;
   background-image: linear-gradient(color-mix(in srgb, var(--g) 6%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--g) 6%, transparent) 1px, transparent 1px); background-size: 32px 32px; }
-.map svg.route { position:absolute; inset:0; width:100%; height:100%; }
-.map .node { cursor:pointer; }
-.map .pin { position:absolute; transform: translate(-50%, -100%); pointer-events:none; }
+.map svg.route { position:absolute; left:0; top:0; pointer-events:none; }
+.map .trk { fill:none; stroke:var(--g); stroke-width:2; opacity:.3; }
+.map .ctr { fill:none; stroke:var(--g); stroke-width:3; opacity:.35; }
+.map .xe { fill:none; stroke:var(--g); stroke-width:1.6; stroke-dasharray:6 5; opacity:.8; }
+.map .ml { position:absolute; left:8px; transform:translateY(-50%); font-size:16px; font-weight:700; opacity:.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* A node's box is its square and its name; the operator hangs above it, out
+   of the flow, so a column's left edge never moves. */
+.map .mn { position:absolute; width:64px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:14px; font-weight:700; letter-spacing:.5px; line-height:1.2; }
+.map div.mn { cursor:default; }
+.map .mn > i { display:block; box-sizing:border-box; width:14px; height:14px; border:2px solid var(--g); background:var(--ink); }
+.map .mn.done > i { background:var(--g); box-shadow:0 0 8px var(--gd); }
+.map .mn.al { color:var(--al); text-shadow:0 0 6px color-mix(in srgb, var(--al) 40%, transparent); }
+.map .mn.al > i { border-color:var(--al); }
+.map .mn.pend { opacity:.55; }
+.map .mn small { max-width:74px; font-size:12px; font-weight:500; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.map .mn .op { position:absolute; left:50%; bottom:100%; transform:translateX(-50%); margin-bottom:3px; line-height:0; }
+.lg { display:flex; align-items:flex-end; gap:10px; margin:2px 0; }
+.lg .lgf { width:36px; display:flex; justify-content:center; }
+.lg > span:last-child { padding-bottom:4px; }
+
+/* radio */
 .scope { position:relative; height:160px; }
 .scope svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--g) 55%, transparent)); }
 .scope .ax { fill:none; stroke:var(--g); stroke-width:2.5; }
@@ -1816,6 +1835,210 @@ function viewNumbers(view) {
 VIEWS.DATA.QUESTS = viewQuests;
 VIEWS.DATA.LOG = viewLog;
 VIEWS.DATA.NUMBERS = viewNumbers;
+
+// -------------------------------------------------------------------- MAP
+
+/** The map's geometry, in px. It never scales with the screen: a run wider
+ *  than the view scrolls sideways (B §6.5). `top` leaves room above the first
+ *  track for an operator; `row` keeps one track's names clear of the next
+ *  track's operators. */
+const MAP_GRID = { left: 56, top: 58, row: 82, col: 78, gap: 44, node: 64, sq: 14, right: 24, bottom: 44 };
+
+/**
+ * Every lane task's column (B §6.5): the longest path to it, over the plan's
+ * edges between lane tasks plus an implicit edge from each task to the next
+ * in its lane, which runs in sequence. An edge naming a task outside the
+ * lanes is dropped. One that would close a cycle is ignored, lane order going
+ * in first, so a bad graph still draws. Returns the columns, each task's lane
+ * index, and the kept edges between two lanes, the only ones drawn.
+ */
+function mapColumns(lanes, edges) {
+  const laneIx = new Map();
+  lanes.forEach((lane, i) => { for (const t of lane.tasks || []) if (!laneIx.has(t.n)) laneIx.set(t.n, i); });
+  const out = new Map([...laneIx.keys()].map((n) => [n, new Set()]));
+  const reaches = (from, to) => {
+    const seen = new Set([from]);
+    const stack = [from];
+    while (stack.length) {
+      const v = stack.pop();
+      if (v === to) return true;
+      for (const w of out.get(v)) if (!seen.has(w)) { seen.add(w); stack.push(w); }
+    }
+    return false;
+  };
+  const link = (from, to) => {
+    if (from === to || out.get(from).has(to) || reaches(to, from)) return false;
+    out.get(from).add(to);
+    return true;
+  };
+  lanes.forEach((lane, i) => {
+    const ns = (lane.tasks || []).map((t) => t.n).filter((n) => laneIx.get(n) === i);
+    for (let k = 1; k < ns.length; k += 1) link(ns[k - 1], ns[k]);
+  });
+  const cross = [];
+  for (const e of edges || []) {
+    const from = Number(e && e.from);
+    const to = Number(e && e.to);
+    if (!laneIx.has(from) || !laneIx.has(to)) continue;
+    if (link(from, to) && laneIx.get(from) !== laneIx.get(to)) cross.push({ from, to });
+  }
+  // Longest path in topological order; the graph is acyclic by construction.
+  const col = new Map([...out.keys()].map((n) => [n, 0]));
+  const indeg = new Map([...out.keys()].map((n) => [n, 0]));
+  for (const ws of out.values()) for (const w of ws) indeg.set(w, indeg.get(w) + 1);
+  const queue = [...out.keys()].filter((n) => indeg.get(n) === 0);
+  for (let q = 0; q < queue.length; q += 1) {
+    for (const w of out.get(queue[q])) {
+      col.set(w, Math.max(col.get(w), col.get(queue[q]) + 1));
+      indeg.set(w, indeg.get(w) - 1);
+      if (indeg.get(w) === 0) queue.push(w);
+    }
+  }
+  return { col, laneIx, cross };
+}
+
+/** A task's node (B §6.5): full when done, blinking while it runs, amber once
+ *  it stopped or went quiet, dim while it waits. */
+const nodeClass = (a) => (a.status === 'done' ? 'done' : a.status === 'running' ? 'run' : a.alert ? 'al' : 'pend');
+
+/** The same four for a stage at the end of the run. A suite skipped for want
+ *  of a test command is `failed` in the stages and is no stop (B §8.2). */
+function stageClass(key) {
+  const st = stageOf(key);
+  const status = st ? st.status : 'pending';
+  if (status === 'done') return 'done';
+  if (status === 'running') return 'run';
+  if (status === 'interrupted') return 'al';
+  if (status === 'failed') {
+    const i = S.snap.integration || {};
+    return key === 'suite' && i.suite && i.suite.skipped ? 'pend' : 'al';
+  }
+  return 'pend';
+}
+
+/** One node: a button when a click opens something, its operator above it. */
+function mapNode(n) {
+  const tag = n.go ? 'button' : 'div';
+  const go = n.go ? ` type="button" data-go="${E(n.go)}"` : '';
+  return `<${tag} class="mn ${n.cls}" data-testid="node-${E(n.id)}"${go} title="${E(n.title)}" style="left:${n.x}px;top:${n.y}px">`
+    + (n.op ? `<span class="op">${n.op}</span>` : '')
+    + `<i${n.cls === 'run' ? ' class="blink"' : ''}></i><span>${E(n.label)}</span>`
+    + (n.detail ? `<small>${E(n.detail)}</small>` : '')
+    + `</${tag}>`;
+}
+
+/** The drawing as keyed children: the routes, the lane names, the nodes. A
+ *  node's signature is its markup, so one that did not change keeps its
+ *  operator, and the operator its animation. */
+function mapItems(s, all) {
+  const G = MAP_GRID;
+  const lanes = s.lanes || [];
+  const byId = new Map(all.map((a) => [a.id, a]));
+  const { col, laneIx, cross } = mapColumns(lanes, s.edges);
+  const last = Math.max(-1, ...col.values());
+  const rowY = (i) => G.top + i * G.row;
+  const cy = lanes.length ? (rowY(0) + rowY(lanes.length - 1)) / 2 : G.top;
+  const colX = (c) => G.left + c * G.col;
+  const endX = (k) => colX(last + 1) + (last >= 0 ? G.gap : 0) + k * G.col;
+  const mid = (x) => x + G.node / 2;
+  const top = (y) => y - G.sq / 2;
+  const seen = new Set();
+  const nodes = [];
+
+  const taskNode = (a, x, y, barrier) => {
+    const cls = nodeClass(a);
+    nodes.push({
+      id: a.id, label: a.id, cls, x, y: top(y), go: `tab=INV&task=${a.n}`,
+      op: cls === 'run' || cls === 'al' ? fig(a.pose, 44, a.alert, a.id) : '',
+      title: [a.id, a.name, barrier && 'barrier', WORD[a.status] || a.status].filter(Boolean).join(' · '),
+    });
+  };
+  // MERGE has no click and no operator; SUITE and REVIEW open their station,
+  // and carry their agent's operator while their stage runs.
+  const stageNode = (key, id, x, go, crew) => {
+    const st = stageOf(key);
+    const a = crew ? byId.get(crew) : null;
+    const pose = (a && a.pose) || poseFor({ kind: crew, status: 'running' });
+    nodes.push({
+      id, label: id, cls: stageClass(key), x, y: top(cy), go,
+      op: crew && st && st.status === 'running' ? fig(pose, 44, Boolean(a && a.alert), crew) : '',
+      title: st ? [st.label, st.detail].filter(Boolean).join(' · ') : id,
+      detail: st ? st.detail : '',
+    });
+  };
+
+  lanes.forEach((lane, i) => {
+    for (const t of lane.tasks || []) {
+      const a = byId.get(`T${t.n}`);
+      if (!a || laneIx.get(t.n) !== i || seen.has(t.n)) continue;
+      seen.add(t.n);
+      taskNode(a, colX(col.get(t.n)), rowY(i), false);
+    }
+  });
+  let k = 0;
+  stageNode('merge', 'MERGE', endX(k++), null, null);
+  for (const t of s.barriers || []) {
+    const a = byId.get(`T${t.n}`);
+    if (!a || seen.has(t.n)) continue;
+    seen.add(t.n);
+    taskNode(a, endX(k++), cy, true);
+  }
+  stageNode('suite', 'SUITE', endX(k++), 'tab=RADIO&station=suite', 'suite');
+  stageNode('review', 'REVIEW', endX(k), 'tab=RADIO&station=review', 'review');
+
+  const width = endX(k) + G.node + G.right;
+  const height = Math.max(rowY(Math.max(0, lanes.length - 1)), cy) + G.bottom;
+  const mergeX = mid(endX(0));
+  const runEnd = mid(colX(Math.max(0, last)));
+  const bend = (mergeX - runEnd) / 2;
+  // Each lane is a track that runs to the last column and bends into MERGE;
+  // the end of the run is one line; an edge between lanes is dashed.
+  let svg = `<svg class="route" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true" focusable="false">`;
+  lanes.forEach((lane, i) => {
+    const y = rowY(i);
+    svg += `<path class="trk" d="M${G.left} ${y} H${runEnd} C${runEnd + bend} ${y} ${mergeX - bend} ${cy} ${mergeX} ${cy}"/>`;
+  });
+  svg += `<path class="ctr" d="M${mergeX} ${cy} H${mid(endX(k))}"/>`;
+  for (const e of cross) {
+    const x1 = mid(colX(col.get(e.from)));
+    const y1 = rowY(laneIx.get(e.from));
+    const x2 = mid(colX(col.get(e.to)));
+    const y2 = rowY(laneIx.get(e.to));
+    const mx = (x1 + x2) / 2;
+    svg += `<path class="xe" data-testid="map-edge" data-from="${e.from}" data-to="${e.to}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"/>`;
+  }
+  svg += '</svg>';
+
+  const names = lanes.map((lane, i) => {
+    const name = lane.label || String(lane.id).toUpperCase();
+    return { key: `lane:${i}`, html: `<span class="ml" title="${E(`LANE ${name}`)}" style="top:${rowY(i)}px;width:${G.left - 14}px">${E(name)}</span>` };
+  });
+  const items = [{ key: 'svg', html: svg }, ...names, ...nodes.map((n) => ({ key: `node:${n.id}`, html: mapNode(n) }))];
+  return { items: items.map((it) => ({ ...it, sig: it.html })), width, height };
+}
+
+const MAP_LEGEND = '<div class="pn" data-testid="map-legend"><h4>LEGEND</h4>'
+  + [['trabalhando', 'running', false], ['travado', 'stuck · needs you', true], ['falhou', 'failed', true], ['dormindo', 'no signal', true], ['orgulho', 'done', false]]
+    .map(([pose, text, al]) => `<div class="lg"><span class="lgf">${fig(pose, 44, al, `legend-${pose}`)}</span><span>${text}</span></div>`).join('')
+  + '</div><div class="note">Click a task to open it in INV; SUITE or REVIEW to listen on RADIO. A dashed line is a task waiting on one in another lane.</div>';
+
+const MAP_COLS = '<div class="cols" style="grid-template-columns: 1fr 220px; height:calc(100% - 24px)">'
+  + '<div class="col"><div class="map" data-testid="map"><div class="mapd"></div></div></div><div class="col"></div></div>';
+
+/** MAP › LANES (B §6.5): one track per lane, in the order of `lanes`, that
+ *  converge in MERGE, then the barriers in order, SUITE and REVIEW. */
+function viewMap(view) {
+  keyed(view, [{ key: 'title', sig: 'LANES', html: viewTitle('LANES') }, { key: 'cols', sig: 'cols', html: MAP_COLS }]);
+  const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
+  const draw = left.querySelector('.mapd');
+  const { items, width, height } = mapItems(S.snap, agents());
+  if (draw.style.width !== `${width}px`) draw.style.width = `${width}px`;
+  if (draw.style.height !== `${height}px`) draw.style.height = `${height}px`;
+  keyed(draw, items);
+  keyed(right, [{ key: 'legend', sig: 'legend', html: MAP_LEGEND }]);
+}
+
+VIEWS.MAP.LANES = viewMap;
 
 // ------------------------------------------------------------------ frame
 
