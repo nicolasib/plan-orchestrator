@@ -146,13 +146,14 @@ await assertClickable(page, '[data-testid=node-T5]', async () => {
 await page.locator('[data-testid=tab-MAP]').click();
 await sleep(300);
 await until(page, () => Boolean(document.querySelector('[data-testid=node-SUITE]')), null, 3000);
-// Task 17 adds the `[data-testid=station-suite]` aria-pressed="true" check here.
 await assertClickable(page, '[data-testid=node-SUITE]', () => page.evaluate(() => {
   const tab = document.querySelector('[data-testid=tab-RADIO]');
   const station = /(^#|&)station=suite(&|$)/.test(location.hash);
+  const suite = document.querySelector('[data-testid=station-suite]');
   return `tab-RADIO aria-selected ${tab ? tab.getAttribute('aria-selected') : '(no tab)'}`
-    + ` · hash ${station ? 'has station=suite' : location.hash || '(empty)'}`;
-}), 'tab-RADIO aria-selected true · hash has station=suite', 'S16-5', 'node-SUITE opens the suite station in RADIO');
+    + ` · hash ${station ? 'has station=suite' : location.hash || '(empty)'}`
+    + ` · station-suite aria-pressed ${suite ? suite.getAttribute('aria-pressed') : '(no station-suite)'}`;
+}), 'tab-RADIO aria-selected true · hash has station=suite · station-suite aria-pressed true', 'S16-5', 'node-SUITE opens the suite station in RADIO');
 
 await assertConsole(page, 'S16-8', 'console 7411 #tab=MAP');
 

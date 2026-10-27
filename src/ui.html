@@ -211,6 +211,8 @@ body.frozen .vb .q1 { opacity:1 !important; }
 .scope #wv { fill:none; stroke:var(--g); stroke-width:2.2; stroke-linejoin:round; }
 pre.out { margin:10px 0 0; font-family:'Roboto Condensed', sans-serif; font-size:16px; line-height:1.25; white-space:pre-wrap; overflow:auto; height:calc(100% - 200px); }
 .onair { background:var(--g); color:var(--ink); text-shadow:none; padding:0 6px; font-size:14px; font-weight:700; }
+.rhead { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; font-size:22px; font-weight:700; }
+.rhead > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bars div { display:grid; grid-template-columns: 120px 1fr 90px; gap:10px; align-items:center; margin:4px 0; }
 .bars i { display:block; height:11px; background:var(--g); }
 
@@ -2040,6 +2042,254 @@ function viewMap(view) {
 
 VIEWS.MAP.LANES = viewMap;
 
+// ------------------------------------------------------------------ RADIO
+
+/*
+ * RADIO › STATIONS (B §6.6): every source of live output is a station. The
+ * suite and the review are always on the list; a lane task or barrier is while
+ * it runs and has a test run on record, and leaves the list when it stops.
+ */
+
+/** The L axis: a base with ticks pointing up and a ruler on the right with
+ *  ticks pointing left. No box, no grid. */
+const SCOPE_AXES = (() => {
+  let d = '';
+  for (let x = 16; x < 390; x += 8) d += `M${x} 152 V${x % 40 ? 148.5 : 145}`;
+  for (let y = 140; y > 6; y -= 11) d += `M392 ${y} H${(152 - y) % 44 ? 388 : 383}`;
+  return '<path class="ax" vector-effect="non-scaling-stroke" d="M4 152 H392 M392 4 V152"/>'
+    + `<path class="tk" vector-effect="non-scaling-stroke" d="${d}"/>`;
+})();
+const WAVE_FLAT = '8,110 388,110';
+const SCOPE_HTML = '<div class="scope"><svg viewBox="0 0 400 160" preserveAspectRatio="none" aria-hidden="true" focusable="false">'
+  + `${SCOPE_AXES}<polyline id="wv" vector-effect="non-scaling-stroke" points="${WAVE_FLAT}"/></svg></div>`;
+
+/**
+ * A terminal's output as the lines a person saw, cleaned exactly as
+ * src/monitor.js `cleanTermLines` does (the page has no build step to share
+ * it): colour codes out, the last `\r` segment of each line, plo's own
+ * `# <iso> $ <command>` header dropped. The suite's live lines arrive clean;
+ * its finished summary is the raw tail of the output.
+ */
+function cleanTermLines(text) {
+  const lines = String(text == null ? '' : text)
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')
+    .split('\n')
+    .map((l) => l.replace(/\r+$/, '').split('\r').pop())
+    .filter((l) => !/^# \d{4}-\d\d-\d\dT\S+ \$ /.test(l));
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+const offAir = (text) => `<span class="tg dim">${E(text)}</span>`;
+
+/*
+ * A station: `lines` for radio-out, `onAir`, `tag` (the header's word when it
+ * is off air) and `mark`, whose change while on air is "a new line" (B §6.6):
+ * it bursts the wave.
+ */
+
+function suiteStation(s) {
+  const base = { id: 'suite', label: 'FULL SUITE', onAir: false, tag: '', mark: null };
+  const live = s.suiteLive;
+  // A live run first, always: a re-run is never shadowed by an older result.
+  // Its "new line" is the page's running count, not the window's length,
+  // which stops growing once the window is full.
+  if (live) return { ...base, onAir: true, lines: live.lines || [], mark: `${live.startedAt}|${suiteSeen.count}` };
+  const result = (s.integration || {}).suite || null;
+  if (result) {
+    const lines = cleanTermLines(result.summary);
+    const verdict = result.skipped ? 'not run — no test command' : result.ok ? 'pass' : 'fail';
+    return {
+      ...base,
+      lines: lines.length ? [...lines, '', verdict] : [verdict],
+      tag: result.skipped ? offAir('NOT RUN') : stateTag(result.ok ? 'done' : 'failed'),
+    };
+  }
+  const stage = stageOf('suite');
+  if (stage && (stage.status === 'interrupted' || stage.status === 'failed')) {
+    return { ...base, lines: [stage.status], tag: stateTag(stage.status) };
+  }
+  return { ...base, lines: ['no signal — starts after the merge'], tag: offAir('OFF AIR') };
+}
+
+/** One line per event of the reviewer and of its subagents, oldest first. */
+function reviewStation(s) {
+  const base = { id: 'review', label: 'CROSS-LANE REVIEW', onAir: false, tag: '', mark: null };
+  const r = s.reviewer;
+  if (!r) return { ...base, lines: ['no signal — starts after the full suite'], tag: offAir('OFF AIR') };
+  const events = [
+    ...(r.activity || []).map((a) => ({ a, who: 'reviewer' })),
+    ...(r.children || []).flatMap((k) => (k.activity || []).map((a) => ({ a, who: k.title || k.agentType || 'subagent' }))),
+  ];
+  const at = (e) => { const ms = Date.parse(e.a.at); return Number.isFinite(ms) ? ms : 0; };
+  events.sort((x, y) => at(x) - at(y));
+  const lines = events.map(({ a, who }) => {
+    const h = humanize(a);
+    return [hms(a.at), who, [h.verb, h.obj].filter(Boolean).join(' ')].filter(Boolean).join('  ');
+  });
+  const newest = events[events.length - 1];
+  const onAir = r.status === 'running';
+  return {
+    ...base,
+    onAir,
+    lines: lines.length ? lines : ['no events yet'],
+    tag: onAir ? '' : stateTag(r.status),
+    mark: newest ? `${newest.a.at}|${newest.a.text || newest.a.target || ''}` : null,
+  };
+}
+
+/** The last test the task's agents ran: always on air while listed. */
+function taskStation(t) {
+  const lt = t.lastTest;
+  const done = lt.ok === true || lt.ok === false;
+  const tail = lt.tail ? String(lt.tail).split('\n') : [];
+  return {
+    id: `T${t.n}`, label: `T${t.n} · LANE TESTS`, onAir: true, tag: '',
+    lines: [`$ ${lt.command || ''}`, done ? (lt.ok ? 'pass' : 'fail') : 'running', ...(tail.length ? ['', ...tail] : [])],
+    mark: `${lt.at}|${done}`,
+  };
+}
+
+/** The suite, the review, then one station per running lane task or barrier
+ *  with a test run, by task number. A silent task is still running. */
+function stations(s) {
+  const tasks = [...(s.lanes || []).flatMap((l) => l.tasks || []), ...(s.barriers || [])]
+    .filter((t) => t.status === 'running' && t.lastTest)
+    .sort((a, b) => a.n - b.n);
+  return [suiteStation(s), reviewStation(s), ...tasks.map(taskStation)];
+}
+
+// The wave (B §6.6; the algorithm is prototipo.html's 50 ms loop).
+const WAVE_MS = 50;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const wave = { t: 0, burst: 0, spikes: [], station: null, live: false, mark: null, timer: null };
+
+function flatWave() {
+  const wv = $('wv');
+  if (wv && wv.getAttribute('points') !== WAVE_FLAT) wv.setAttribute('points', WAVE_FLAT);
+}
+
+/** One frame. On air, a mix of sines with spikes born on the left that travel
+ *  right and fade; off air, flat with a hiss under one unit. */
+function waveFrame() {
+  const wv = $('wv');
+  if (!wv) return;
+  const w = wave;
+  const live = w.live;
+  w.t += 1;
+  w.burst *= 0.94;
+  // Any station on air but the suite crackles now and then on its own.
+  if (live && w.station !== 'suite' && Math.random() < 0.015) w.burst = Math.max(w.burst, 0.6);
+  const loud = live ? 0.5 + 0.18 * Math.sin(w.t / 23) + 0.1 * Math.sin(w.t / 7) + 0.7 * w.burst : 0;
+  if (live && Math.random() < 0.1 + 0.5 * w.burst) {
+    w.spikes.push({ x: 8, h: (16 + Math.random() * 30) * (loud + 0.2) * (Math.random() < 0.6 ? 1 : -0.6) });
+  }
+  for (const k of w.spikes) { k.x += 3.2; k.h *= 0.975; }
+  w.spikes = w.spikes.filter((k) => k.x < 320 && Math.abs(k.h) > 1);
+  const pts = [];
+  for (let x = 8; x <= 388; x += 2) {
+    const env = Math.exp(-(x - 8) / 110);
+    const t = w.t;
+    const music = 0.5 * Math.sin(x / 6 - t * 0.55) + 0.25 * Math.sin(x / 2.7 - t * 1.1) + 0.35 * Math.sin(x / 15 - t * 0.25);
+    let y = 110 - loud * (30 * env * music + 2 * (1 - env) * Math.sin(x / 20 - t * 0.2));
+    for (const k of w.spikes) { const d = Math.abs(x - k.x); if (d < 4) y -= k.h * (1 - d / 4); }
+    if (!live) y += (Math.random() - 0.5) * 0.8;
+    pts.push(`${x},${Math.max(8, Math.min(146, y)).toFixed(1)}`);
+  }
+  wv.setAttribute('points', pts.join(' '));
+}
+
+/** Follow the station on screen. A new station, a fresh view or a station
+ *  that went off air starts over flat, so nothing lingers from before; a new
+ *  line on air is a burst. */
+function tuneWave(cur, fresh) {
+  const w = wave;
+  const restart = fresh || w.station !== cur.id || (w.live && !cur.onAir);
+  const fired = !restart && cur.onAir && cur.mark !== w.mark;
+  Object.assign(w, { station: cur.id, live: cur.onAir, mark: cur.mark });
+  if (restart) {
+    Object.assign(w, { t: 0, burst: 0, spikes: [] });
+    flatWave();
+    return;
+  }
+  if (!fired) return;
+  w.burst = 1;
+  // With less motion there is no loop: one frame per new line.
+  if (reduceMotion.matches && !S.frozen) waveFrame();
+}
+
+/** The loop runs only while it can be seen and means something: RADIO open,
+ *  the document visible, the stream up, motion allowed. With the stream down
+ *  the wave lies flat. Called after every render, on `visibilitychange` and
+ *  when the stream drops. */
+function syncWave() {
+  const run = S.tab === 'RADIO' && Boolean($('wv')) && document.visibilityState === 'visible'
+    && !S.frozen && !reduceMotion.matches;
+  if (run && !wave.timer) wave.timer = setInterval(waveFrame, WAVE_MS);
+  else if (!run && wave.timer) { clearInterval(wave.timer); wave.timer = null; }
+  if (S.frozen) flatWave();
+}
+
+document.addEventListener('visibilitychange', syncWave);
+
+/** radio-out keeps its node per station, so a snapshot never resets the
+ *  reader's scroll; it follows the newest line unless the reader scrolled up. */
+function paintOut(pre, html) {
+  if (pre.painted === html) return;
+  const follow = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;
+  pre.painted = html;
+  pre.innerHTML = html;
+  if (follow) pre.scrollTop = pre.scrollHeight;
+}
+
+function stationRow(x, selId) {
+  const on = x.id === selId;
+  return `<button type="button" class="li${x.onAir ? ' run' : ''}${on ? ' sel' : ''}" aria-pressed="${on}"`
+    + ` data-testid="station-${E(x.id)}" data-go="${E(`station=${x.id}`)}"><span>${E(x.label)}</span>`
+    + `${x.onAir ? '<span class="tg">ON AIR</span>' : ''}</button>`;
+}
+
+const RADIO_COLS = '<div class="cols" style="grid-template-columns: 290px 1fr; height:calc(100% - 24px)">'
+  + '<div class="col"></div><div class="col" style="overflow:hidden"></div></div>';
+const RADIO_NOTE = '<div class="note" style="margin-top:14px">ON AIR = output arriving right now. The full suite is the one plo runs'
+  + ' at the end of the run; a lane\'s is the last test its agents ran inside the task.</div>';
+
+/** RADIO › STATIONS: the stations, and the selected one's wave and output. */
+function viewRadio(view) {
+  const fresh = !view.querySelector(':scope > [data-key="cols"]');
+  keyed(view, [{ key: 'title', sig: 'STATIONS', html: viewTitle('STATIONS') }, { key: 'cols', sig: 'cols', html: RADIO_COLS }]);
+  const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
+  const list = stations(S.snap);
+  // A station that is not on the list (its task stopped) shows the suite;
+  // the address keeps what the reader asked for.
+  const cur = list.find((x) => x.id === S.sel.station) || list[0];
+
+  // Signed without the selection, which is toggled below: the station just
+  // clicked keeps its node, and the focus with it.
+  keyed(left, [
+    ...list.map((x) => ({ key: `st:${x.id}`, sig: stationRow(x, null), html: stationRow(x, cur.id) })),
+    { key: 'note', sig: 'note', html: RADIO_NOTE },
+  ]);
+  for (const el of left.querySelectorAll(':scope > button.li')) {
+    const on = el.getAttribute('data-key') === `st:${cur.id}`;
+    el.classList.toggle('sel', on);
+    el.setAttribute('aria-pressed', String(on));
+  }
+
+  const head = `<div class="rhead"><span>${E(cur.label)}</span>${cur.onAir ? '<span class="onair">ON AIR</span>' : cur.tag}</div>`;
+  keyed(right, [
+    { key: 'head', sig: head, html: head },
+    // Constant per station: a snapshot never redraws the wave under the loop.
+    { key: 'scope', sig: `scope:${cur.id}`, html: SCOPE_HTML },
+    { key: 'out', sig: `out:${cur.id}`, html: '<pre class="out" data-testid="radio-out"></pre>' },
+  ]);
+  paintOut(right.querySelector(':scope > [data-key="out"]'),
+    E(cur.lines.join('\n')) + (cur.onAir ? '<span class="blink">_</span>' : ''));
+  tuneWave(cur, fresh);
+}
+
+VIEWS.RADIO.STATIONS = viewRadio;
+
 // ------------------------------------------------------------------ frame
 
 let lastSnapAt = 0;
@@ -2174,7 +2424,7 @@ function render() {
   renderTabs();
   renderHead(items);
   renderFoot(items);
-  if (!s) return;
+  if (!s) { syncWave(); return; }
   const view = $('view');
   if (!s.ready) {
     document.title = s.title ? `plo · ${s.title}` : 'plo';
@@ -2185,6 +2435,7 @@ function render() {
     if (view.dataset.view !== want) { view.innerHTML = ''; view.dataset.view = want; }
     VIEWS[S.tab][S.sub[S.tab]](view);
   }
+  syncWave();
   if (!S.frozen) paintTimes();
 }
 
@@ -2295,6 +2546,7 @@ function connect() {
     S.stream = 'reconnecting';
     S.frozen = true;
     renderSignal();
+    syncWave();
     if (es.readyState === EventSource.CLOSED && !reopenTimer) reopenTimer = setTimeout(connect, REOPEN_MS);
   });
 }
