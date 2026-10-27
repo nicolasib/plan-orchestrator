@@ -963,6 +963,32 @@ test('the reviewer is one more agent: running, with its subagents, its cost null
   assert.equal(s.totals.costUsd, 1.5 + 0.42);
 });
 
+test('a reviewer subagent that made more calls than the card shows keeps its type, title and verdict', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'review.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const sub = (o) => ev({ ...o, parent_tool_use_id: 'tu_sub' });
+  const calls = Array.from({ length: 9 }, (_, k) => [
+    sub({ type: 'assistant', timestamp: R0, message: { role: 'assistant', content: [{ type: 'tool_use', id: `tu_r${k}`, name: 'Read', input: { file_path: `/repo/src/f${k}.js` } }] } }),
+    sub({ type: 'user', timestamp: R0, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `tu_r${k}`, content: 'ok' }] } }),
+  ].join('')).join('');
+  fs.writeFileSync(logFile, [
+    ev({ type: 'system', subtype: 'init', session_id: 'sess-rv', model: 'claude-opus-5' }),
+    assistantTool('Agent', { subagent_type: 'code-reviewer', description: 'check lane seams' }, 'tu_sub', R0),
+    calls,
+    toolResult('tu_sub', 'no findings', false, R0),
+    ev({ type: 'result', subtype: 'success', result: 'CROSS-LANE VERDICT: CLEAN', usage: { output_tokens: 900 } }),
+  ].join(''));
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ review: { startedAt: R0, endedAt: R0, logFile, sessionId: 'sess-rv' } }, 'done')));
+
+  const r = monitor.snapshot(planPath).reviewer;
+  assert.equal(r.children.length, 1);
+  assert.equal(r.children[0].agentType, 'code-reviewer');
+  assert.equal(r.children[0].title, 'check lane seams');
+  assert.equal(r.children[0].status, 'done');
+  assert.ok(r.children[0].activity.length <= 8, 'the card still shows only the last few calls');
+});
+
 test('the reviewer is null before the review starts', () => {
   const { planPath } = fixture();
   assert.equal(monitor.snapshot(planPath).reviewer, null);

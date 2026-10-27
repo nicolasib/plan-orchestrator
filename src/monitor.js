@@ -845,7 +845,11 @@ function snapshot(planPath, { activityLimit = 8, feedLimit = FEED_LIMIT, logs = 
       : reviewStatus === state.STATUS.RUNNING ? state.STATUS.RUNNING
         : reviewRec.endedAt ? state.STATUS.DONE : reviewStatus;
     const running = status === state.STATUS.RUNNING;
-    const digest = logs && reviewRec.logFile ? readTaskLog(reviewRec.logFile, { activityLimit }) : null;
+    // Read as wide as a task's (see taskView): a subagent whose calls outnumber
+    // the card would lose its dispatch event, and with it its type, its title
+    // and its result. What is shown is still cut to `activityLimit` below.
+    const digest = logs && reviewRec.logFile
+      ? readTaskLog(reviewRec.logFile, { activityLimit: Math.max(activityLimit, FEED_LIMIT) }) : null;
     const lastTool = running && digest && [...digest.activity].reverse().find((a) => a.kind === 'tool');
     reviewer = {
       id: 'review',
