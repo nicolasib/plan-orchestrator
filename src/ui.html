@@ -914,8 +914,10 @@ function stateTag(status, testid) {
  * laid over the one before and only what comes past the overlap counts. The
  * longest overlap wins, so a log that repeats lines is undercounted, never
  * overcounted, and the same snapshot read twice adds nothing. A first window
- * that is already full means lines scrolled out before the page connected:
- * the figure then carries a `+`.
+ * that is already full means lines scrolled out before the page connected,
+ * and a full window that shares nothing with the one before means lines
+ * scrolled out between two snapshots (a fast suite, a dropped stream): either
+ * way the figure carries a `+` from then on.
  */
 const SUITE_WINDOW = 40;
 const suiteSeen = { startedAt: null, lines: [], count: 0, partial: false };
@@ -940,6 +942,9 @@ function countSuiteLines(s) {
   };
   let k = Math.min(head.length, cur.length);
   while (k > 0 && !fits(k)) k -= 1;
+  // No overlap and a full window: more lines came than the window holds, and
+  // the ones in between were never seen.
+  if (k === 0 && head.length && cur.length >= SUITE_WINDOW) suiteSeen.partial = true;
   suiteSeen.count += Math.max(0, cur.length - k - 1);
 }
 
