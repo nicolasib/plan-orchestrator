@@ -7,7 +7,7 @@ const { makeRepo, cleanup, initRun, useSpec, seen, runLanesIn } = require('./hel
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const state = require('../src/state');
 const { integrate, markInterrupted, fullSuite } = require('../src/integrate');
 const { processStamp, processAlive, killGroup } = require('../src/proc');
@@ -245,6 +245,30 @@ test('a test command that does not exist fails with 127, not a crash', async (t)
   const res = await fullSuite(planPath, st, {});
   assert.equal(res.ok, false);
   assert.equal(res.code, 127);
+});
+
+test('a write error on full-suite.log stops the log, not plo: the suite settles and the summary says why', (t) => {
+  const { planPath, st } = suiteFixture(t);
+  // More than the 16-block file-size limit below, then one last line.
+  st.testCommand = `node -e "process.stdout.write('x'.repeat(200000) + '\\n'); console.log('la' + 'st')"`;
+  state.save(planPath, st);
+  // `ulimit -f` turns the log's writes into EFBIG, the same 'error' path as
+  // ENOSPC or EIO. It needs a process of its own: the limit cannot be lifted.
+  const driver = [
+    `const state = require(${JSON.stringify(require.resolve('../src/state'))});`,
+    `const { fullSuite } = require(${JSON.stringify(require.resolve('../src/integrate'))});`,
+    'const planPath = process.argv[1];',
+    'fullSuite(planPath, state.load(planPath), {}).then((r) => process.stdout.write(JSON.stringify(r)));',
+  ].join('\n');
+  const run = spawnSync('bash', ['-c', 'ulimit -f 16; exec "$@"', 'bash', process.execPath, '-e', driver, planPath], { encoding: 'utf8' });
+
+  assert.equal(run.status, 0, run.stderr);
+  const res = JSON.parse(run.stdout);
+  assert.equal(res.ok, true);
+  assert.equal(res.code, 0);
+  assert.match(res.summary, /\nlast\n/, 'the tail in memory outlives the log');
+  assert.match(res.summary, /full-suite\.log.*EFBIG/);
+  assert.ok(state.load(planPath).integration.stages.suite.endedAt, 'the stage closed');
 });
 
 test('a suite still alive from a dead integrate is killed before the log is truncated', async (t) => {

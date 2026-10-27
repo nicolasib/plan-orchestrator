@@ -220,18 +220,25 @@ async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
 
   return new Promise((resolve) => {
     const out = fs.createWriteStream(logFile, { flags: 'a' });
+    // A full disk (ENOSPC), a file-size limit (EFBIG) or EIO on the log must
+    // not take plo down with the suite still running: the log stops, the tail
+    // in memory carries on, and the summary says why the file is short.
+    let logError = null;
+    out.on('error', (err) => { logError = logError || err; });
     let tail = Buffer.alloc(0);
     const keep = (chunk) => {
-      out.write(chunk);
+      if (!logError) out.write(chunk);
       tail = Buffer.concat([tail, chunk]);
       if (tail.length > SUITE_TAIL_BYTES) tail = tail.subarray(tail.length - SUITE_TAIL_BYTES);
     };
+    // A read error on a pipe ends that pipe, not the suite.
+    const pipeError = (err) => keep(Buffer.from(`${err.message}\n`));
 
     // detached: a group of its own, so killing the group takes the runner's workers too.
     const child = spawn(cmd, { cwd: st.repoRoot, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     // A spawn that hit EMFILE/ENFILE never got its pipes.
-    if (child.stdout) child.stdout.on('data', keep);
-    if (child.stderr) child.stderr.on('data', keep);
+    if (child.stdout) child.stdout.on('data', keep).on('error', pipeError);
+    if (child.stderr) child.stderr.on('data', keep).on('error', pipeError);
 
     // A failed spawn has no pid, and processStamp() without one stamps plo itself.
     const stamp = child.pid ? processStamp(child.pid) : { pid: null, startedAt: null };
@@ -258,7 +265,16 @@ async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
       state.save(planPath, st);
       const summary = tail.toString('utf8').split('\n').slice(-40).join('\n');
       // Resolved once the log is flushed: the file is whole when the caller reads it.
-      out.end(() => resolve({ ok: code === 0, code, summary, command: cmd }));
+      // A write that fails during that flush reaches this callback too.
+      out.end((err) => {
+        const failed = logError || err;
+        resolve({
+          ok: code === 0,
+          code,
+          summary: failed ? `${summary}\n[plo] ${logFile} stopped: ${failed.message}` : summary,
+          command: cmd,
+        });
+      });
     };
 
     child.on('error', (err) => {
