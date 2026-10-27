@@ -190,6 +190,18 @@ async function runBarriers(planPath, st, plan, opts = {}) {
 // The summary is the last 40 lines; this much of the output's tail holds them.
 const SUITE_TAIL_BYTES = 256 * 1024;
 
+/** Kill the suite a dead integrate left running, if its stage names one. */
+function killStaleSuite(st, log) {
+  // A leader still in use must match its stamp: one that fails it is a reused
+  // pid, never signalled. A leader gone while its group lives on, for a stage
+  // still open, is the runner dead and its workers still running.
+  const prev = (st.integration.stages || {}).suite;
+  if (prev && prev.pid && (processAlive(prev.pid, prev.pidStartedAt) || (!prev.endedAt && orphanedGroup(prev.pid)))) {
+    killGroup(prev.pid, 'SIGKILL');
+    log(`full suite: killed the suite a previous integrate left running (pid ${prev.pid})`);
+  }
+}
+
 /**
  * The full suite at the merge point. Not a lane's subset — the whole thing.
  *
@@ -201,15 +213,9 @@ const SUITE_TAIL_BYTES = 256 * 1024;
  */
 async function fullSuite(planPath, st, { log = () => {}, signal } = {}) {
   // First, before the log is truncated under it: a suite still running from a
-  // dead integrate would keep appending to this run's log.
-  // A leader still in use must match its stamp: one that fails it is a reused
-  // pid, never signalled. A leader gone while its group lives on, for a stage
-  // still open, is the runner dead and its workers still running.
-  const prev = (st.integration.stages || {}).suite;
-  if (prev && prev.pid && (processAlive(prev.pid, prev.pidStartedAt) || (!prev.endedAt && orphanedGroup(prev.pid)))) {
-    killGroup(prev.pid, 'SIGKILL');
-    log(`full suite: killed the suite a previous integrate left running (pid ${prev.pid})`);
-  }
+  // dead integrate would keep appending to this run's log. `integrate` has
+  // already done this before dropping the stage; a direct call has not.
+  killStaleSuite(st, log);
 
   const cmd = st.testCommand;
   if (!cmd) {
@@ -434,6 +440,18 @@ async function integrate(planPath, st, plan, opts = {}) {
   st.integration.pid = stamp.pid;
   st.integration.pidStartedAt = stamp.startedAt;
   st.integration.stages = st.integration.stages || {};
+  // While its stage still names it: the record goes next.
+  killStaleSuite(st, log);
+  // A stage an earlier integrate left open (it died) or interrupted (Ctrl-C)
+  // is redone by this one: an open or interrupted merge leaves the status
+  // short of `merged`, so the merge runs again, and the suite and the review
+  // run whenever this integrate reaches them. Kept, the old record reads as
+  // this run's — a review "interrupted" while this one is in its suite — and
+  // a Ctrl-C here would close it again and name it. A closed, finished record
+  // stays: the merge this run skips is still done.
+  for (const [name, s] of Object.entries(st.integration.stages)) {
+    if (s && (s.interrupted || (s.startedAt && !s.endedAt))) delete st.integration.stages[name];
+  }
   state.save(planPath, st);
 
   if (st.integration.status !== 'merged' && st.integration.status !== state.STATUS.DONE) {

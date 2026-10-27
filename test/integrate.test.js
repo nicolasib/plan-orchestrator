@@ -198,6 +198,87 @@ test('SIGTERM stops plo integrate, marks the review interrupted and exits 130', 
   assert.ok(i.stages.review.endedAt);
 });
 
+test('Ctrl-C in a barrier signals no group an older suite record names, and interrupts only the barrier', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, { ...LANE_SPEC, 3: { sleepMs: 10000, writes: { 'src/c.js': '3' } }, review: { result: { text: CLEAN } } });
+  await runLanesIn(repo, st, plan, dag);
+
+  // The suite stage an integrate that died left open. Its pid now belongs to
+  // an unrelated process leading its own group: same pid, a later start.
+  const victim = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  t.after(() => killGroup(victim.pid, 'SIGKILL'));
+  const stamp = processStamp(victim.pid);
+  const before = new Date(Date.parse(stamp.startedAt) - 10 * 60 * 1000).toISOString();
+  st.integration.stages = { suite: { startedAt: before, command: 'npm test', pid: victim.pid, pidStartedAt: before } };
+  state.save(repo.planPath, st);
+
+  const child = spawn(process.execPath, [PLO, 'integrate', '--plan', repo.planPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let err = '';
+  child.stderr.on('data', (c) => { err += c; });
+  const exited = new Promise((resolve) => child.once('exit', (code) => resolve(code)));
+  await waitFor(() => {
+    const s = state.load(repo.planPath);
+    return Boolean(s && s.tasks['3'] && s.tasks['3'].status === 'running');
+  });
+  child.kill('SIGINT');
+
+  assert.equal(await exited, 130);
+  assert.match(err, /barrier T3 marked interrupted/);
+  assert.equal(processAlive(victim.pid, stamp.startedAt), true, 'the reused pid was left alone');
+  const s = state.load(repo.planPath);
+  assert.equal(s.tasks['3'].status, 'interrupted');
+  assert.equal(s.integration.status, 'merged', 'a barrier alone leaves the status');
+  assert.equal(s.integration.stages.suite, undefined);
+});
+
+for (const left of ['interrupted', 'open']) {
+  test(`a new integrate drops the review an earlier one left ${left}, and runs its suite without it`, async (t) => {
+    const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+    const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+    useSpec(repo, { ...LANE_SPEC, review: { result: { text: CLEAN } } });
+    await runLanesIn(repo, st, plan, dag);
+    assert.equal((await integrate(repo.planPath, st, plan, { log() {} })).ok, true);
+
+    // An integrate stopped in its review: by Ctrl-C (closed as interrupted)
+    // or killed outright (left open).
+    const OLD = '2000-01-01T00:00:00.000Z';
+    st.integration.stages.review = { startedAt: OLD, logFile: st.integration.stages.review.logFile, sessionId: 'old' };
+    st.integration.status = 'reviewing';
+    if (left === 'interrupted') markInterrupted(repo.planPath, st);
+    // The next suite copies the checkpoint as it stands while the suite runs.
+    const during = path.join(path.dirname(repo.planPath), '.plo-logs', 'state-during-suite.json');
+    st.testCommand = `node -e "require('fs').copyFileSync(process.argv[1], process.argv[2])" ${JSON.stringify(repo.statePath)} ${JSON.stringify(during)}`;
+    state.save(repo.planPath, st);
+
+    const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+    assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+    const seenThen = JSON.parse(fs.readFileSync(during, 'utf8')).integration;
+    assert.equal(seenThen.status, 'suite-running');
+    assert.equal(seenThen.stages.review, undefined, 'no review from an earlier integrate while this one runs its suite');
+    const i = state.load(repo.planPath).integration;
+    assert.notEqual(i.stages.review.startedAt, OLD);
+    assert.equal(i.stages.review.interrupted, undefined);
+    assert.equal(i.status, 'done');
+  });
+}
+
+test('a new integrate keeps the record of the merge it skips', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, { ...LANE_SPEC, review: { result: { text: CLEAN } } });
+  await runLanesIn(repo, st, plan, dag);
+  assert.equal((await integrate(repo.planPath, st, plan, { log() {} })).ok, true);
+  const merge = { ...st.integration.stages.merge };
+
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(state.load(repo.planPath).integration.stages.merge, merge);
+});
+
 /** A checkpoint in a bare tmpdir, which is also the repo root: all `fullSuite` needs. */
 function suiteFixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plo-suite-'));
