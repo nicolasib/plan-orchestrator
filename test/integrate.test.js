@@ -441,3 +441,32 @@ test('SIGTERM to plo integrate kills the suite group and marks the stage interru
   assert.equal(state.load(repo.planPath).integration.stages.suite.interrupted, true);
   await waitFor(() => !processAlive(suitePid, null), 3000);
 });
+
+test('a closed terminal (SIGHUP) stops plo integrate the way Ctrl-C does', async (t) => {
+  const repo = makeRepo(LANES_ONLY_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, { 1: LANE_SPEC[1], 2: LANE_SPEC[2] });
+  await runLanesIn(repo, st, plan, dag);
+  // Quiet until it ends: no write, so no SIGPIPE ends it once plo is gone.
+  st.testCommand = `node -e "setTimeout(() => console.log('end'), 15000)"`;
+  state.save(repo.planPath, st);
+
+  const child = spawn(process.execPath, [PLO, 'integrate', '--plan', repo.planPath], { stdio: 'ignore' });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve(code ?? signal)));
+  let suitePid = null;
+  t.after(() => { if (suitePid) killGroup(suitePid, 'SIGKILL'); });
+
+  await waitFor(() => {
+    const i = (state.load(repo.planPath) || {}).integration;
+    if (i && i.stages && i.stages.suite && i.stages.suite.pid) suitePid = i.stages.suite.pid;
+    return Boolean(i && i.status === 'suite-running' && suitePid);
+  });
+  child.kill('SIGHUP');
+
+  assert.equal(await exited, 130);
+  const i = state.load(repo.planPath).integration;
+  assert.equal(i.status, 'interrupted');
+  assert.equal(i.stages.suite.interrupted, true);
+  await waitFor(() => !processAlive(suitePid, null), 3000);
+});

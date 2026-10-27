@@ -254,6 +254,9 @@ async function cmdIntegrate(args) {
   };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
+  // A closed terminal: unhandled, plo dies and the suite, in a session of its
+  // own, runs on with its stage open.
+  process.once('SIGHUP', onSignal);
 
   const res = await integrate(abs, st, plan, {
     signal: controller.signal,
