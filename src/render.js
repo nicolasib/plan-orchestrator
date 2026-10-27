@@ -1,6 +1,7 @@
 'use strict';
 
 const state = require('./state');
+const { EFFORT_LEVELS, effortErrors } = require('./parse-plan');
 
 /**
  * Human-facing output.
@@ -35,6 +36,15 @@ function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
     return t ? t.title.replace(/`/g, '') : '';
   };
 
+  // `[level]` plus the reason cut to 60 characters; `inherited` when unmarked.
+  const effortOf = (n) => {
+    const t = plan.tasks.find((x) => x.n === n);
+    const e = t && t.effort;
+    if (!e) return '[inherited]';
+    const reason = e.reason && e.reason.length > 60 ? `${e.reason.slice(0, 59)}…` : e.reason;
+    return `[${e.level}]${reason ? `  ${reason}` : ''}`;
+  };
+
   lines.push(`Plan:  ${plan.title}`);
   lines.push(`File:  ${planPath}`);
   lines.push(`Lanes: max ${d.maxLanes}${dryRun ? '   (DRY RUN — nothing will be spawned)' : ''}`);
@@ -53,7 +63,7 @@ function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
     for (const n of lane.tasks) {
       const rec = st && st.tasks[String(n)];
       const mark = rec ? STATUS_MARK[rec.status] || '·' : ' ';
-      lines.push(`    ${mark} T${n}  ${titleOf(n)}`);
+      lines.push(`    ${mark} T${n}  ${titleOf(n)}  ${effortOf(n)}`);
     }
   }
 
@@ -62,7 +72,25 @@ function dag(plan, d, { planPath, overridesFile, state: st, dryRun } = {}) {
     for (const n of d.barriers) {
       const rec = st && st.tasks[String(n)];
       const mark = rec ? STATUS_MARK[rec.status] || '·' : ' ';
-      lines.push(`    ${mark} T${n}  ${titleOf(n)}`);
+      lines.push(`    ${mark} T${n}  ${titleOf(n)}  ${effortOf(n)}`);
+    }
+  }
+
+  // Tally over the tasks listed above, in EFFORT_LEVELS order, inherited last.
+  const counts = new Map();
+  for (const n of [...d.lanes.flatMap((l) => l.tasks), ...d.barriers]) {
+    const t = plan.tasks.find((x) => x.n === n);
+    const key = t && t.effort ? t.effort.level : 'inherited';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const tally = [...EFFORT_LEVELS, 'inherited'].filter((k) => counts.has(k)).map((k) => `${counts.get(k)} ${k}`);
+  if (tally.length) lines.push(`Effort: ${tally.join(' · ')}`);
+
+  const badEffort = effortErrors(plan);
+  if (badEffort.length) {
+    lines.push(rule('EFFORT ERRORS'));
+    for (const e of badEffort) {
+      lines.push(`  T${e.n} (line ${e.line}): "${e.value}" — use one of ${EFFORT_LEVELS.join(', ')}`);
     }
   }
 

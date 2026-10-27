@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parsePlan, looksLikePath, extractPaths, extractTaskRefs } = require('../src/parse-plan');
+const { parsePlan, looksLikePath, extractPaths, extractTaskRefs, effortErrors } = require('../src/parse-plan');
 
 test('looksLikePath: accepts sources, rejects symbols and route literals', () => {
   assert.equal(looksLikePath('src/routes/external/requests.js'), true);
@@ -125,4 +125,36 @@ test('parsePlan: tolerates a plan with no Global Constraints section', () => {
   assert.equal(plan.constraints.testCommand, null);
   assert.equal(plan.tasks.length, 1);
   assert.deepEqual(plan.tasks[0].writes, ['src/x.js']);
+});
+
+// Built as an array of lines so its headings never start a line in this file.
+const EFFORT_PLAN = [
+  '# Effort plan', '',
+  '### Task 1: Alpha', '', '**Effort:** medium — troca mecânica', '',
+  '**Files:**', '- Create: `src/a.js`', '', '- [ ] step', '',
+  '### Task 2: Beta', '', '**Effort:**  HIGH', '', '- [ ] step', '',
+  '### Task 3: Gamma', '', '- [ ] step', '',
+  '### Task 4: Delta', '', '**Effort:** altissimo — demais', '', '- [ ] step', '',
+  '### Task 5: Epsilon', '', '**Effort:** `xhigh`', '', '- [ ] step', '',
+].join('\n');
+const lineOf = (s) => EFFORT_PLAN.split('\n').findIndex((l) => l.includes(s)) + 1;
+
+test('parsePlan: reads the Effort line, level lowercased, reason optional', () => {
+  const t = parsePlan(EFFORT_PLAN).tasks;
+  assert.deepEqual(t[0].effort, { level: 'medium', reason: 'troca mecânica', line: lineOf('troca mecânica'), valid: true });
+  assert.deepEqual(t[1].effort, { level: 'high', reason: null, line: lineOf('HIGH'), valid: true });
+  assert.equal(t[2].effort, null);
+  assert.equal(t[4].effort.level, 'xhigh');
+});
+
+test('parsePlan: the Effort line leaves Files and steps as they were', () => {
+  const t = parsePlan(EFFORT_PLAN).tasks[0];
+  assert.deepEqual(t.writes, ['src/a.js']);
+  assert.equal(t.steps.length, 1);
+});
+
+test('parsePlan: an unknown level is kept raw and flagged, never dropped', () => {
+  const plan = parsePlan(EFFORT_PLAN);
+  assert.equal(plan.tasks[3].effort.valid, false);
+  assert.deepEqual(effortErrors(plan), [{ n: 4, line: lineOf('altissimo'), value: 'altissimo' }]);
 });

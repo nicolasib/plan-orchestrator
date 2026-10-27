@@ -24,6 +24,15 @@ test('buildArgs omits every optional flag when unset', () => {
   assert.deepEqual(buildArgs({ prompt: 'x' }), ['-p', 'x', '--output-format', 'stream-json', '--verbose']);
 });
 
+test('buildArgs passes --effort right after --model', () => {
+  const a = buildArgs({ prompt: 'x', model: 'opus', effort: 'medium' });
+  const i = a.indexOf('--model');
+  assert.deepEqual(a.slice(i, i + 4), ['--model', 'opus', '--effort', 'medium']);
+});
+test('buildArgs without effort is the argv of today', () => {
+  assert.equal(buildArgs({ prompt: 'x', model: 'opus' }).includes('--effort'), false);
+});
+
 test('parseEvent reads a successful result', () => {
   const ev = parseEvent(JSON.stringify({
     type: 'result', subtype: 'success', is_error: false,
@@ -85,4 +94,9 @@ test('pool returns results in input order regardless of completion order', async
     async () => 'fast',
   ];
   assert.deepEqual(await pool(thunks, 2), ['slow', 'fast']);
+});
+
+const RATE = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1793138400, rateLimitType: 'seven_day', utilization: 0.38, unifiedWindows: { five_hour: { utilization: 0.16, resetsAt: 1792623600 }, seven_day: { utilization: 0.38, resetsAt: 1793138400 } } } };
+test('parseEvent hands the rate limit event over', () => {
+  assert.deepEqual(parseEvent(JSON.stringify(RATE)), { kind: 'rate_limit', info: RATE.rate_limit_info });
 });

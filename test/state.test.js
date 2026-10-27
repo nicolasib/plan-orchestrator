@@ -27,6 +27,22 @@ const mkState = (planPath, over = {}) => state.create({
   ...over,
 });
 
+test('recordUsage keeps the five-hour window, and ignores an event without one', () => {
+  const p = tmpPlan();
+  const st = mkState(p);
+  const info = { status: 'allowed_warning', unifiedWindows: { five_hour: { utilization: 0.16, resetsAt: 1792623600 } } };
+  assert.equal(state.recordUsage(p, st, info), true);
+  assert.equal(st.usage5h.utilization, 0.16);
+  assert.equal(st.usage5h.resetsAt, 1792623600);
+  assert.ok(!Number.isNaN(Date.parse(st.usage5h.at)));
+  assert.equal(state.load(p).usage5h.utilization, 0.16);
+
+  const before = { ...st.usage5h };
+  assert.equal(state.recordUsage(p, st, { status: 'allowed', rateLimitType: 'five_hour' }), false);
+  assert.equal(state.recordUsage(p, st, undefined), false);
+  assert.deepEqual(st.usage5h, before);
+});
+
 test('create seeds every lane task and barrier as pending', () => {
   const st = mkState(tmpPlan());
   assert.deepEqual(Object.keys(st.tasks).sort(), ['1', '2', '3', '4']);
@@ -199,6 +215,14 @@ test('reconcile: a task with attempts left keeps its count', () => {
   Object.assign(st.tasks['1'], { status: state.STATUS.FAILED, attempts: 1 });
   state.reconcile(st, {});
   assert.equal(st.tasks['1'].attempts, 1, 'only an exhausted budget is reset');
+});
+
+test('reconcile: every run or resume starts each task back at its planned level', () => {
+  const p = tmpPlan();
+  const st = mkState(p);
+  st.tasks['1'].raises = 2;
+  state.reconcile(st);
+  assert.equal(st.tasks['1'].raises, 0);
 });
 
 test('readyTasks: a failed task is offered again on resume', () => {

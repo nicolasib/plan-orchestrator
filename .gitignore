@@ -1,3 +1,6 @@
 node_modules/
 *.log
 .DS_Store
+.plan-state-*.json
+.plo-logs/
+smoke/.artifacts/

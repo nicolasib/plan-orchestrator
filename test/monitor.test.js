@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
+const { processStamp } = require('../src/proc');
 const state = require('../src/state');
 const monitor = require('../src/monitor');
 
@@ -555,6 +557,10 @@ test('a plan with no barrier tasks has four stages, not a fifth that is always d
 
 test('a token count comes from what the agent reported, never from a running sum', () => {
   const { planPath, logFile } = fixture();
+  // Stopped: a task still running reports no count at all until it ends.
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.FAILED;
+  state.save(planPath, st);
 
   // The sample log accumulates 52 output tokens across its assistant
   // messages and never closes with a result event — exactly the shape of a
@@ -568,7 +574,7 @@ test('a token count comes from what the agent reported, never from a running sum
     type: 'result', subtype: 'success', total_cost_usd: 1.25,
     usage: { output_tokens: 12864, input_tokens: 60, cache_read_input_tokens: 2219083 },
   }));
-  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'the spawn reports its own total');
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 12864, 'a task that stopped shows what its spawn reported');
 });
 
 test('the checkpoint outranks the log, and the totals add up the run', () => {
@@ -577,6 +583,7 @@ test('the checkpoint outranks the log, and the totals add up the run', () => {
   // What `run.js` writes: summed across attempts, so a retried task counts
   // every spawn it took.
   st.tasks['1'].outputTokens = 40000;
+  st.tasks['2'].status = state.STATUS.FAILED;
   st.tasks['2'].outputTokens = 17760;
   state.save(planPath, st);
 
@@ -585,6 +592,117 @@ test('the checkpoint outranks the log, and the totals add up the run', () => {
   assert.equal(s.lanes[0].tasks[1].outputTokens, 17760, 'the checkpoint wins over anything read from the log');
   assert.equal(s.totals.outputTokens, 57760);
   assert.equal(s.barriers[0].outputTokens, null, 'a task that never ran reported nothing');
+});
+
+// ------------------------------------------------- effort, tries, last test
+
+const subCall = (id, command, at) => ev({ type: 'assistant', timestamp: at, parent_tool_use_id: 'tu_impl', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }], usage: { output_tokens: 5 } } });
+
+test('lastTest is the last test call of the task or of a subagent, with the tail of its output', () => {
+  const out = `${Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')}\nTests 12 passed`;
+  const log = SAMPLE_LOG + subCall('tu_t', 'npx vitest run src/panel.test.ts', '2026-08-19T12:01:00.000Z') + toolResult('tu_t', out, false, '2026-08-19T12:01:20.000Z');
+  const d = monitor.digestLog(log, { testCommand: 'npm test' });
+  assert.equal(d.lastTest.command, 'npx vitest run src/panel.test.ts');
+  assert.equal(d.lastTest.at, '2026-08-19T12:01:00.000Z');
+  assert.equal(d.lastTest.ok, true);
+  assert.deepEqual(d.lastTest.tail.split('\n'), [...Array.from({ length: 9 }, (_, i) => `line ${i + 22}`), 'Tests 12 passed']);
+});
+
+test('the test command of the plan counts, a test still running has ok null, and a plain Bash call is no test', () => {
+  const failed = monitor.digestLog(SAMPLE_LOG, { testCommand: 'npm test' }).lastTest;
+  assert.equal(failed.command, 'npm test -- requests');
+  assert.equal(failed.ok, false, 'an is_error result is a failed test');
+
+  const T = '2026-08-19T12:02:00.000Z';
+  const open = monitor.digestLog(SAMPLE_LOG + subCall('tu_u', 'npm test', T), { testCommand: 'npm test' }).lastTest;
+  assert.deepEqual(open, { command: 'npm test', at: T, ok: null, tail: null }, 'no result yet: still running, nothing to show');
+
+  const plain = [
+    '\n=== 2026-08-19T12:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    assistantTool('Bash', { command: 'ls -la' }, 'tu_l', '2026-08-19T12:00:10.000Z'),
+    toolResult('tu_l', 'total 0', false, '2026-08-19T12:00:11.000Z'),
+  ].join('');
+  assert.equal(monitor.digestLog(plain, { testCommand: 'npm test' }).lastTest, null);
+});
+
+test('a test sent to the background has no verdict yet: its immediate reply is not the result', () => {
+  const T = '2026-08-19T12:02:00.000Z';
+  const log = SAMPLE_LOG
+    + assistantTool('Bash', { command: 'npm test', run_in_background: true }, 'tu_bg', T)
+    + toolResult('tu_bg', 'Command running in background with ID: bash_1', false, '2026-08-19T12:02:01.000Z');
+  assert.deepEqual(monitor.digestLog(log, { testCommand: 'npm test' }).lastTest, { command: 'npm test', at: T, ok: null, tail: null });
+});
+
+test("the view's lastTest outlives the task, and the plan's own test command counts", () => {
+  const { planPath, logFile } = fixture();
+  const st = state.load(planPath);
+  // Looks like none of the usual runners: only the plan says it is a test run.
+  st.testCommand = 'make check';
+  st.tasks['2'].status = state.STATUS.FAILED;
+  state.save(planPath, st);
+  fs.appendFileSync(logFile, assistantTool('Bash', { command: 'make check' }, 'tu_mk', '2026-08-19T12:01:00.000Z')
+    + toolResult('tu_mk', 'all checks passed', false, '2026-08-19T12:01:30.000Z'));
+
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.lastTest.command, 'make check', 'the newer run is the plan’s test command, not the earlier npm test');
+  assert.equal(t2.lastTest.ok, true);
+});
+
+test('effort: planned from the plan, used from the record, raised when used is above', () => {
+  const { planPath } = fixture();
+  fs.writeFileSync(planPath, PLAN.replace('### Task 2: POST /v1/requests\n\n', '### Task 2: POST /v1/requests\n\n**Effort:** medium — x\n\n'));
+  const st = state.load(planPath);
+  st.tasks['2'].effort = 'high';
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.deepEqual(s.lanes[0].tasks[1].effort, { planned: 'medium', used: 'high', raised: true, reason: 'x' });
+  assert.equal(s.lanes[0].tasks[0].effort, null, 'no planned level and none used: nothing to say');
+  assert.equal(s.barriers[0].effort, null);
+});
+
+test('tries pass through as recorded', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  const tries = [{ effort: 'medium', status: 'done', at: '2026-08-19T11:20:00.000Z' }];
+  st.tasks['1'].tries = tries;
+  state.save(planPath, st);
+
+  const s = monitor.snapshot(planPath);
+  assert.deepEqual(s.lanes[0].tasks[0].tries, tries);
+  assert.deepEqual(s.lanes[0].tasks[1].tries, [], 'a record from before tries were kept has none');
+});
+
+test('a running task reports no cost and no output yet', () => {
+  const { planPath, logFile } = fixture();
+  const st = state.load(planPath);
+  // An earlier attempt's figures, summed into the record.
+  st.tasks['2'].costUsd = 1.2;
+  st.tasks['2'].outputTokens = 500;
+  state.save(planPath, st);
+  // A result already in the log, so the drawer's own source has a number too.
+  fs.appendFileSync(logFile, ev({ type: 'result', subtype: 'success', total_cost_usd: 0.3, usage: { output_tokens: 300 } }));
+
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.status, state.STATUS.RUNNING);
+  assert.equal(t2.costUsd, null, 'a run that has not ended has not reported its cost');
+  assert.equal(t2.outputTokens, null);
+  assert.equal(monitor.taskDetail(planPath, 2).outputTokens, null);
+});
+
+test('usage5h and edges come from the state, empty for an older state', () => {
+  const { planPath } = fixture();
+  let s = monitor.snapshot(planPath);
+  assert.equal(s.usage5h, null);
+  assert.deepEqual(s.edges, []);
+
+  const st = state.load(planPath);
+  st.usage5h = { utilization: 0.42, resetsAt: 1787211000, at: '2026-08-19T12:00:00.000Z' };
+  st.edges = [{ from: 1, to: 2 }];
+  state.save(planPath, st);
+  s = monitor.snapshot(planPath);
+  assert.deepEqual(s.usage5h, st.usage5h);
+  assert.deepEqual(s.edges, [{ from: 1, to: 2 }]);
 });
 
 // -------------------------------------------------------------- timeline
@@ -670,7 +788,234 @@ test('taskDetail returns full history for a finished task', () => {
   assert.equal(detail.model, 'claude-opus-5');
 });
 
+test('taskDetail reports the tokens of every attempt, as the table does', () => {
+  const { planPath, logFile } = fixture();
+  fs.writeFileSync(logFile, [
+    '\n=== 2026-08-19T12:00:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    ev({ type: 'result', subtype: 'success', is_error: true, result: 'attempt 1', total_cost_usd: 1, usage: { output_tokens: 35000 } }),
+    '\n=== 2026-08-19T12:10:00.000Z :: claude -p … (cwd=/wt/lane-a)\n',
+    ev({ type: 'result', subtype: 'success', is_error: true, result: 'attempt 2', total_cost_usd: 1, usage: { output_tokens: 17000 } }),
+  ].join(''));
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { status: state.STATUS.FAILED, attempts: 2, costUsd: 2, outputTokens: 52000 });
+  state.save(planPath, st);
+
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].outputTokens, 52000);
+  const detail = monitor.taskDetail(planPath, 2);
+  assert.equal(detail.costUsd, 2);
+  assert.equal(detail.outputTokens, 52000);
+});
+
 test('taskDetail returns null for a task that is not in the plan', () => {
   const { planPath } = fixture();
   assert.equal(monitor.taskDetail(planPath, 99), null);
+});
+
+// ---------------------------------------------------------------- liveness
+
+const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+
+test('a running task whose plo died is interrupted, and so are its open subagents', () => {
+  const { planPath, logFile } = fixture();
+  fs.appendFileSync(logFile, assistantTool('Task', { subagent_type: 'implementer', description: 'build' }, 'tu_sub', '2026-08-19T12:01:00.000Z'));
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: deadPid(), pidStartedAt: null });
+  state.save(planPath, st);
+  const t2 = monitor.snapshot(planPath).lanes[0].tasks[1];
+  assert.equal(t2.status, 'interrupted');
+  assert.equal(t2.children.find((c) => c.id === 'tu_sub').status, 'interrupted');
+});
+
+test('a running task with no pid comes from an older plo, and stays running', () => {
+  const { planPath } = fixture();
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].status, 'running');
+});
+
+test('a running task whose plo is alive stays running', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: process.pid, pidStartedAt: processStamp().startedAt });
+  state.save(planPath, st);
+  assert.equal(monitor.snapshot(planPath).lanes[0].tasks[1].status, 'running');
+});
+
+/** All tasks settled, then an integration record on top. */
+function integrationFixture(integration, { t3 = state.STATUS.DONE } = {}) {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  st.tasks['2'].status = state.STATUS.DONE;
+  st.tasks['3'].status = t3;
+  st.integration = integration;
+  state.save(planPath, st);
+  return planPath;
+}
+
+const M0 = '2026-08-19T13:00:00.000Z';
+const M1 = '2026-08-19T13:01:00.000Z';
+const S0 = '2026-08-19T13:02:00.000Z';
+const S1 = '2026-08-19T13:05:00.000Z';
+// After this process started, so a review stamped by the live integrate is not
+// mistaken for one left by an earlier integrate.
+const R0 = new Date().toISOString();
+
+const reviewing = (pid) => ({
+  status: 'reviewing', mergedLanes: ['A'],
+  suite: { ok: true, code: 0, summary: '', command: 'npm test' }, review: null,
+  pid, pidStartedAt: pid === process.pid ? processStamp().startedAt : null,
+  stages: { merge: { startedAt: M0, endedAt: M1 }, suite: { startedAt: S0, endedAt: S1 }, review: { startedAt: R0 } },
+});
+
+test('stages carry their clock, and a review in flight keeps the run open', () => {
+  const planPath = integrationFixture(reviewing(process.pid));
+  const s = monitor.snapshot(planPath);
+  const review = s.stages.find((x) => x.key === 'review');
+  assert.equal(review.status, 'running');
+  assert.equal(review.startedAt, R0);
+  assert.equal(review.endedAt, null);
+  assert.equal(s.integrationRunning, true);
+  assert.equal(s.totals.active, true);
+  assert.equal(s.runOver, false);
+});
+
+test('a review whose integrate died is interrupted, and the run is not over', () => {
+  const planPath = integrationFixture(reviewing(deadPid()));
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.stages.find((x) => x.key === 'review').status, 'interrupted');
+  assert.equal(s.integrationRunning, false);
+  assert.equal(s.totals.active, false);
+  assert.equal(s.runOver, false);
+});
+
+test('an open stage left by an earlier integrate is interrupted while a newer one is alive', () => {
+  const planPath = integrationFixture({
+    ...reviewing(process.pid),
+    stages: { merge: { startedAt: M0, endedAt: M1 }, suite: { startedAt: S0, endedAt: S1 }, review: { startedAt: '2020-01-01T00:00:00.000Z' } },
+  });
+  const s = monitor.snapshot(planPath);
+  assert.equal(s.stages.find((x) => x.key === 'review').status, 'interrupted');
+  assert.equal(s.integrationRunning, false);
+});
+
+test('the run is over only when the integration finished', () => {
+  const over = (status, opts) => monitor.snapshot(integrationFixture({ status, mergedLanes: ['A'], suite: null, review: null }, opts)).runOver;
+  assert.equal(over('done'), true);
+  assert.equal(over('review-findings'), true);
+  assert.equal(over('barrier-failed', { t3: state.STATUS.FAILED }), true);
+  assert.equal(over('merged'), false);
+});
+
+test('taskDetail applies the same liveness', () => {
+  const { planPath } = fixture();
+  const st = state.load(planPath);
+  Object.assign(st.tasks['2'], { pid: process.pid, pidStartedAt: processStamp().startedAt });
+  state.save(planPath, st);
+  assert.equal(monitor.taskDetail(planPath, 2, { alive: () => false }).status, 'interrupted');
+});
+
+// ---------------------------------------------------------------- live suite and reviewer
+
+const liveIntegration = (stages, status) => ({
+  status, mergedLanes: ['A'], suite: null, review: null,
+  pid: process.pid, pidStartedAt: processStamp().startedAt,
+  stages: { merge: { startedAt: M0, endedAt: M1 }, ...stages },
+});
+
+const patchIntegration = (planPath, fn) => {
+  const st = state.load(planPath);
+  fn(st.integration);
+  state.save(planPath, st);
+};
+
+test('cleanTermLines strips colour, keeps the last segment of a rewritten line, drops the header', () => {
+  const raw = '# 2026-10-26T14:00:00.000Z $ npm test\n\x1b[32m✓\x1b[39m a.test.js\r\nprogress 10%\rprogress 100%\n\x1b[1mTests\x1b[22m 3 passed\n';
+  assert.deepEqual(monitor.cleanTermLines(raw), ['✓ a.test.js', 'progress 100%', 'Tests 3 passed']);
+});
+
+test('while the suite runs, the snapshot carries its last lines, and they move', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, `# ${R0} $ npm test\nline one\nline two\n`);
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ suite: { startedAt: R0, logFile, command: 'npm test', pid: process.pid } }, 'suite-running')));
+
+  const live = monitor.snapshot(planPath).suiteLive;
+  assert.equal(live.command, 'npm test');
+  assert.equal(live.startedAt, R0);
+  assert.equal(live.logFile, logFile);
+  assert.equal(live.lines.length, 2);
+
+  fs.appendFileSync(logFile, 'line three\n');
+  assert.equal(monitor.snapshot(planPath).suiteLive.lines.length, 3);
+});
+
+test('suiteLive is null once the suite ended, and has no lines while its log is missing', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'full-suite.log');
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ suite: { startedAt: R0, logFile, command: 'npm test' } }, 'suite-running')));
+  assert.deepEqual(monitor.snapshot(planPath).suiteLive.lines, []);
+
+  patchIntegration(planPath, (i) => { i.stages.suite.endedAt = R0; });
+  assert.equal(monitor.snapshot(planPath).suiteLive, null);
+});
+
+test('the reviewer is one more agent: running, with its subagents, its cost null until it ends', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'review.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(logFile, [
+    ev({ type: 'system', subtype: 'init', session_id: 'sess-rv', model: 'claude-opus-5' }),
+    assistantTool('Read', { file_path: '/repo/src/a.js' }, 'tu_r', R0),
+    assistantTool('Task', { subagent_type: 'code-reviewer', description: 'review the diff' }, 'tu_rv', R0),
+  ].join(''));
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ review: { startedAt: R0, logFile, sessionId: 'sess-rv' } }, 'reviewing')));
+
+  let r = monitor.snapshot(planPath).reviewer;
+  assert.equal(r.id, 'review');
+  assert.equal(r.kind, 'review');
+  assert.equal(r.n, null);
+  assert.equal(r.title, 'Cross-lane review');
+  assert.equal(r.status, 'running');
+  assert.equal(r.sessionId, 'sess-rv');
+  assert.equal(r.children[0].status, 'running');
+  assert.equal(r.costUsd, null);
+  assert.equal(r.outputTokens, null);
+
+  patchIntegration(planPath, (i) => { Object.assign(i.stages.review, { endedAt: R0, costUsd: 0.42 }); });
+  const s = monitor.snapshot(planPath);
+  r = s.reviewer;
+  assert.equal(r.status, 'done');
+  assert.equal(r.costUsd, 0.42);
+  assert.equal(r.children[0].status, 'interrupted');
+  assert.equal(s.totals.costUsd, 1.5 + 0.42);
+});
+
+test('a reviewer subagent that made more calls than the card shows keeps its type, title and verdict', () => {
+  const planPath = integrationFixture({});
+  const logFile = path.join(path.dirname(planPath), '.plo-logs', 'review.jsonl');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const sub = (o) => ev({ ...o, parent_tool_use_id: 'tu_sub' });
+  const calls = Array.from({ length: 9 }, (_, k) => [
+    sub({ type: 'assistant', timestamp: R0, message: { role: 'assistant', content: [{ type: 'tool_use', id: `tu_r${k}`, name: 'Read', input: { file_path: `/repo/src/f${k}.js` } }] } }),
+    sub({ type: 'user', timestamp: R0, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `tu_r${k}`, content: 'ok' }] } }),
+  ].join('')).join('');
+  fs.writeFileSync(logFile, [
+    ev({ type: 'system', subtype: 'init', session_id: 'sess-rv', model: 'claude-opus-5' }),
+    assistantTool('Agent', { subagent_type: 'code-reviewer', description: 'check lane seams' }, 'tu_sub', R0),
+    calls,
+    toolResult('tu_sub', 'no findings', false, R0),
+    ev({ type: 'result', subtype: 'success', result: 'CROSS-LANE VERDICT: CLEAN', usage: { output_tokens: 900 } }),
+  ].join(''));
+  patchIntegration(planPath, (i) => Object.assign(i, liveIntegration({ review: { startedAt: R0, endedAt: R0, logFile, sessionId: 'sess-rv' } }, 'done')));
+
+  const r = monitor.snapshot(planPath).reviewer;
+  assert.equal(r.children.length, 1);
+  assert.equal(r.children[0].agentType, 'code-reviewer');
+  assert.equal(r.children[0].title, 'check lane seams');
+  assert.equal(r.children[0].status, 'done');
+  assert.ok(r.children[0].activity.length <= 8, 'the card still shows only the last few calls');
+});
+
+test('the reviewer is null before the review starts', () => {
+  const { planPath } = fixture();
+  assert.equal(monitor.snapshot(planPath).reviewer, null);
 });
