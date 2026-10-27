@@ -163,6 +163,22 @@ body.frozen .vb .q1 { opacity:1 !important; }
 .rec .val { padding:3px 10px; background:var(--gf); overflow-wrap:anywhere; }
 .pn.bad h4 { color:var(--al); opacity:1; }
 
+/* data */
+.qt { font-size:22px; font-weight:700; margin:2px 0 4px; }
+.logbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:0 0 8px; padding:0 10px; }
+.logbar input { font:inherit; font-size:16px; color:inherit; text-shadow:inherit; background:var(--gf); border:1.5px solid var(--gd); border-radius:0;
+  padding:2px 8px; min-width:220px; -webkit-appearance:none; appearance:none; }
+.logbar input::placeholder { color:var(--gd); }
+.logbar input:focus-visible { outline:2px solid var(--g); outline-offset:2px; }
+.logbar .tg { border:1.5px solid var(--gd); padding:1px 8px; }
+.logbar .tg.on { background:var(--g); color:var(--ink); text-shadow:none; }
+.loglist { height:calc(100% - 64px); }
+.ac.lr { grid-template-columns: 76px 150px 96px 1fr; }
+.ac.lr > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ac.lr.err { color:var(--al); }
+/* wrapped: every cell breaks onto lines instead of clipping */
+.loglist.wrap .ac.lr > span { white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
+
 /* map and radio */
 .map { position:relative; border:2px solid var(--gd); aspect-ratio: 640 / 300; width:100%;
   background-image: linear-gradient(color-mix(in srgb, var(--g) 6%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--g) 6%, transparent) 1px, transparent 1px); background-size: 32px 32px; }
@@ -475,6 +491,7 @@ const BARRIER_TIP = 'Barrier task: it runs after every lane has merged, on the c
 // The run log's filters (DATA › LOG).
 let feedQuery = '';
 let feedKind = '';
+let feedWrap = false;
 const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Update']);
 /** Everything on a line a reader could plausibly be looking for. */
 const feedText = (a) => [a.name, a.target, a.text, a.preview, a.label, a.tag].filter(Boolean).join(' ').toLowerCase();
@@ -1366,14 +1383,15 @@ function invRow(a, queue) {
  * The record: `/api/task` for the selected task, fetched when it is selected
  * and again when its status, attempts or turns move in the snapshot. `key`
  * is the one wanted now; a response for any other key is dropped, so a newer
- * selection always wins over an older fetch.
+ * selection always wins over an older fetch. `slot` is the view's own copy:
+ * INV's is REC, and DATA › QUESTS keeps one of its own (QREC).
  */
 const REC = { key: null, n: null, task: null, error: null };
 
 const recKey = (a) => `${a.n}|${a.src.status}|${a.src.attempts}|${a.src.turns}`;
 
-async function loadRecord(n, key) {
-  REC.key = key;
+async function loadRecord(n, key, slot = REC) {
+  slot.key = key;
   let task = null;
   let error = null;
   try {
@@ -1384,8 +1402,8 @@ async function loadRecord(n, key) {
   } catch (e) {
     error = e.message;
   }
-  if (REC.key !== key) return;
-  Object.assign(REC, { n, task, error });
+  if (slot.key !== key) return;
+  Object.assign(slot, { n, task, error });
   render();
 }
 
@@ -1517,6 +1535,284 @@ VIEWS.INV.PROBLEMS = (el) => viewInv(el, 'PROBLEMS');
 VIEWS.INV.RUNNING = (el) => viewInv(el, 'RUNNING');
 VIEWS.INV.QUEUE = (el) => viewInv(el, 'QUEUE');
 VIEWS.INV.DONE = (el) => viewInv(el, 'DONE');
+
+// ------------------------------------------------------------------- DATA
+
+/** The quest groups (B §6.4): going or stopped, waiting, done. */
+const QUEST_GROUPS = [
+  ['IN PROGRESS', (a) => a.status === 'running' || a.status === 'nosignal' || STOPPED.has(a.status)],
+  ['QUEUED', (a) => a.status === 'pending'],
+  ['DONE', (a) => a.status === 'done'],
+];
+
+/** QUESTS' own record: its selection is not INV's, so neither is its fetch. */
+const QREC = { key: null, n: null, task: null, error: null };
+
+function questRow(a) {
+  return `<button type="button" class="li${a.status === 'running' ? ' run' : ''}" data-testid="quest-T${E(a.n)}" data-go="${E(`quest=${a.n}`)}">`
+    + `<span>T${E(a.n)} ${E(a.name)}</span>${a.status === 'done' ? '' : stateTag(a.status)}</button>`;
+}
+
+/** The plan's own steps, ticked or not (INV's PLAN STEPS markup). */
+function objectivesHtml(t, err) {
+  if (err) return `<div class="note bad">${E(err)}</div>`;
+  if (!t) return '<div class="kv dim"><span>loading the objectives…</span></div>';
+  if (!t.steps || !t.steps.length) return '<div class="kv dim"><span>the plan lists no steps for this task</span></div>';
+  return '<div class="md"><ul class="tick" data-testid="objectives">'
+    + t.steps.map((st) => `<li class="${st.checked ? 'on' : ''}">${checkbox(st.checked)}<span>${mdInline(E(st.text))}</span></li>`).join('')
+    + '</ul></div>';
+}
+
+/** The selected quest as [key, html]: the header and the reason it stopped
+ *  from the snapshot, the objectives from `/api/task` once it answered. */
+function questParts(a, t, err) {
+  const where = a.kind === 'barrier' ? 'QUEST · BARRIER' : `QUEST · LANE ${String(a.lane || '—').toUpperCase()}`;
+  const e = a.src.effort;
+  const parts = [
+    ['head', `<div class="pn"><h4>${E(where)}</h4><div class="qt">T${E(a.n)} ${E(a.name)}</div>`
+      + `<span class="dim">effort ${E(effortFigure(e))}${e && e.reason ? ` — ${E(e.reason)}` : ''}</span></div>`],
+    ['goals', `<div class="pn"><h4>OBJECTIVES</h4>${objectivesHtml(t, err)}</div>`],
+  ];
+  if (STOPPED.has(a.status)) {
+    const why = a.src.error || (whatToDo(a) || {}).text || 'no error recorded';
+    parts.push(['why', `<div class="pn bad"><div class="hrow"><h4>WHY IT STOPPED</h4>${copyBtn(why, 'copy-error')}</div>`
+      + `<div class="note bad md">${md(why)}</div></div>`]);
+  }
+  parts.push(['inv', `<button type="button" class="lnk" data-go="${E(`tab=INV&task=${a.n}`)}">details in INV ▸</button>`]);
+  return parts;
+}
+
+/** DATA › QUESTS (B §6.4): every task and barrier as a quest, and the
+ *  objectives of the selected one. The default pick is worked out on every
+ *  render and never written to the hash. */
+function viewQuests(view) {
+  const all = agents().filter((a) => a.kind === 'task' || a.kind === 'barrier').sort((x, y) => x.n - y.n);
+  const groups = QUEST_GROUPS.map(([head, test]) => [head, all.filter(test)]);
+  const picked = S.sel.quest == null ? null : all.find((a) => a.n === S.sel.quest);
+  const q = picked || groups.map(([, list]) => list[0]).find(Boolean) || null;
+  const cols = '<div class="cols" style="grid-template-columns: 1fr 380px; height:calc(100% - 24px)"><div class="col"></div><div class="col"></div></div>';
+  keyed(view, [{ key: 'title', sig: 'QUESTS', html: viewTitle('QUESTS') }, { key: 'cols', sig: cols, html: cols }]);
+  const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
+
+  // Signed without the selection, a class toggled below: the quest the reader
+  // just clicked keeps its node, and the focus with it.
+  const rows = [];
+  for (const [head, list] of groups) {
+    rows.push({ key: `gh:${head}`, sig: head, html: `<div class="gh">${E(head)}</div>` });
+    for (const a of list) {
+      const html = questRow(a);
+      rows.push({ key: `q:${a.id}`, sig: html, html });
+    }
+    if (!list.length) rows.push({ key: `none:${head}`, sig: 'none', html: '<div class="kv dim"><span>none</span></div>' });
+  }
+  keyed(left, rows);
+  for (const el of left.children) if (el.matches('button.li')) el.classList.toggle('sel', Boolean(q) && el.getAttribute('data-key') === `q:${q.id}`);
+
+  if (!q) {
+    QREC.key = null;
+    const html = '<div class="kv dim"><span>no task in this run</span></div>';
+    keyed(right, [{ key: 'hint', sig: html, html }]);
+    return;
+  }
+  const key = recKey(q);
+  if (QREC.key !== key) loadRecord(q.n, key, QREC);
+  const mine = QREC.n === q.n;
+  keyed(right, questParts(q, mine ? QREC.task : null, mine ? QREC.error : null).map(([k, html]) => ({ key: k, sig: html, html })));
+}
+
+const FEED_FILTERS = [['all', ''], ['errors', 'err'], ['bash', 'bash'], ['edits', 'edit']];
+
+/** Who did it: `T7` for a task's own event, `T7 › implementer` for one of its
+ *  subagents'. A done task keeps no children, so the type falls back to the
+ *  spawn call in the feed itself. */
+function feedWho(ev, all, feed) {
+  if (!ev.sub) return `T${ev.n}`;
+  const kid = all.find((a) => a.kind === 'sub' && a.n === ev.n && a.id === ev.parentId);
+  const spawn = kid ? null : feed.find((x) => x.id && x.id === ev.parentId);
+  return `T${ev.n} › ${(kid && kid.src.agentType) || (spawn && spawn.agentType) || 'subagent'}`;
+}
+
+/** The run feed and the reviewer's own events as one list, newest on top. An
+ *  event with no time takes the last one its own source had. */
+function logEvents(s, all) {
+  const feed = s.feed || [];
+  const last = new Map();
+  const timed = (ev, source, tag) => {
+    const at = ev.at || last.get(source) || null;
+    if (at) last.set(source, at);
+    return { ...ev, at, tag };
+  };
+  const out = [
+    ...feed.map((ev) => timed(ev, `T${ev.n}`, feedWho(ev, all, feed))),
+    ...((s.reviewer && s.reviewer.activity) || []).map((ev) => timed(ev, 'review', 'review')),
+  ];
+  const ms = (ev) => { const v = Date.parse(ev.at); return Number.isFinite(v) ? v : 0; };
+  return out.sort((x, y) => ms(x) - ms(y)).reverse();
+}
+
+/** One line of the log: time, who, tool, target (as actRow maps them). */
+function logRow(ev) {
+  const [what, obj] = ev.kind === 'text' ? ['think', ev.text]
+    : ev.kind === 'run' ? ['start', ev.label]
+      : ev.kind === 'result' ? ['result', ev.text]
+        : [ev.name, ev.target || ev.preview];
+  return `<div class="ac lr${ev.ok === false ? ' err' : ''}" data-testid="log-row"><span>${E(hms(ev.at))}</span>`
+    + `<span class="who" title="${E(ev.tag)}">${E(ev.tag)}</span><span>${E(what || '')}</span>`
+    + `<span class="o" title="${E(obj || '')}">${E(obj || '')}</span></div>`;
+}
+
+/** Built once per visit: the query rides in as the box's first value only. */
+const logBar = () => '<div class="logbar">'
+  + `<input type="search" data-testid="log-search" placeholder="search the log" aria-label="Search the log" autocomplete="off" spellcheck="false" value="${E(feedQuery)}">`
+  + FEED_FILTERS.map(([name, kind]) => `<button type="button" class="tg" data-testid="log-filter-${name}" data-feed="${kind}" aria-pressed="false">${name.toUpperCase()}</button>`).join('')
+  + '<button type="button" class="tg" data-testid="log-wrap" data-wrap aria-pressed="false">WRAP</button>'
+  + '</div>';
+
+/** DATA › LOG (B §6.4): the run feed plus the reviewer, with search, filter
+ *  and wrap. The suite's lines live in RADIO, not here. */
+function viewLog(view) {
+  const s = S.snap;
+  const events = logEvents(s, agents());
+  const shown = events.filter(feedMatch);
+  keyed(view, [
+    { key: 'title', sig: 'LOG', html: viewTitle('LOG') },
+    // A constant signature: the search box keeps its node, focus, caret and
+    // value through every repaint. What is pressed is toggled below.
+    { key: 'bar', sig: 'bar', html: logBar() },
+    { key: 'list', sig: 'list', html: '<div class="col loglist" data-testid="log-list"></div>' },
+  ]);
+  const bar = view.querySelector(':scope > [data-key="bar"]');
+  const list = view.querySelector(':scope > [data-key="list"]');
+  for (const b of bar.querySelectorAll('[data-feed]')) {
+    const on = b.getAttribute('data-feed') === feedKind;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  const wrap = bar.querySelector('[data-wrap]');
+  wrap.classList.toggle('on', feedWrap);
+  wrap.setAttribute('aria-pressed', String(feedWrap));
+  list.classList.toggle('wrap', feedWrap);
+
+  const seen = new Map();
+  const rows = shown.map((ev) => {
+    const base = `${ev.tag}|${ev.at || ''}|${ev.kind}|${ev.id || ev.name || ev.label || ''}|${keyHash(`${ev.text || ''}|${ev.target || ''}|${ev.preview || ''}`)}`;
+    const k = seen.get(base) || 0;
+    seen.set(base, k + 1);
+    const html = logRow(ev);
+    return { key: k ? `${base}#${k}` : base, sig: html, html };
+  });
+  if (!rows.length) {
+    const html = `<div class="kv dim"><span>${events.length ? 'no event matches' : 'no agent events yet'}</span></div>`;
+    rows.push({ key: 'empty', sig: html, html });
+  }
+  keyed(list, rows);
+}
+
+/** A stage's span, compact: `30s`, `1m`, `1m 30s`, `2h`, `2h 5m`. Clocks
+ *  keep `dur()`. */
+function compactDur(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}`;
+  const m = Math.floor((s % 3600) / 60);
+  return `${Math.floor(s / 3600)}h${m ? ` ${m}m` : ''}`;
+}
+
+function stageFigure(x, i) {
+  if (x.key === 'suite' && i.suite && i.suite.skipped) return 'not run — no test command';
+  if (x.status === 'running') return 'running';
+  if (x.startedAt && x.endedAt) return compactDur(Date.parse(x.endedAt) - Date.parse(x.startedAt));
+  if (x.status === 'interrupted') return 'interrupted';
+  return '—';
+}
+
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+// Label, bar and value sit apart in the markup, and so do the rows, so a row
+// reads "medium 4 tasks" and a panel never runs two rows into one word; the
+// layout hides the spaces.
+const barRow = (label, pct, value) => ` <div><span>${label}</span> <i style="width:${pct}%"></i> <span>${value}</span></div>`;
+const numKv = (k, v) => ` <div class="kv"><span>${E(k)}</span> <span>${v}</span></div>`;
+
+/** NUMBERS' four panels, as HTML: cost per lane, effort in the plan, the
+ *  stages, the run. */
+function numbersPanels(s) {
+  const i = s.integration || {};
+  const lanes = s.lanes || [];
+  const tasks = [...lanes.flatMap((l) => l.tasks || []), ...(s.barriers || [])];
+
+  const costs = lanes.map((l) => {
+    const ts = l.tasks || [];
+    const paid = ts.map((t) => t.costUsd).filter((c) => typeof c === 'number' && Number.isFinite(c));
+    return {
+      label: `LANE ${l.label || String(l.id).toUpperCase()} · ${ts.filter((t) => t.status === 'done').length}/${ts.length}`,
+      cost: paid.length ? paid.reduce((a, b) => a + b, 0) : null,
+    };
+  });
+  const dearest = Math.max(0, ...costs.map((c) => c.cost || 0));
+  const lanecost = '<div class="pn" data-testid="numbers-lanecost"><h4>COST PER LANE</h4><div class="bars">'
+    + costs.map((c) => barRow(E(c.label), dearest > 0 && c.cost ? Math.round((100 * c.cost) / dearest) : 0, E(money(c.cost)))).join('')
+    + '</div></div>';
+
+  const count = Object.fromEntries(EFFORT_LEVELS.map((k) => [k, 0]));
+  let inherited = 0;
+  for (const t of tasks) {
+    const p = t.effort && t.effort.planned;
+    if (!p) inherited += 1;
+    else if (p in count) count[p] += 1;
+  }
+  const share = (n) => Math.round((100 * n) / Math.max(1, tasks.length));
+  const raised = tasks.filter((t) => t.effort && t.effort.raised);
+  const effort = '<div class="pn" data-testid="numbers-effort"><h4>EFFORT IN PLAN</h4><div class="bars">'
+    + EFFORT_LEVELS.map((k) => barRow(k, share(count[k]), `${count[k]} tasks`)).join('')
+    + (inherited ? barRow('inherited', share(inherited), `${inherited} tasks`) : '')
+    + '</div>'
+    + numKv('raised', E(`${raised.length}${raised.length ? ` · ${raised.map((t) => `T${t.n}`).join(', ')}` : ''}`))
+    + '</div>';
+
+  const stages = '<div class="pn" data-testid="numbers-stages"><h4>STAGES</h4>'
+    + (s.stages || []).map((x) => numKv(x.label, E(stageFigure(x, i)))).join('')
+    + '</div>';
+
+  const o = outcomeOf(s, tasks);
+  const base = s.base || {};
+  const running = (key) => (s.stages || []).some((x) => x.key === key && x.status === 'running');
+  const suite = running('suite') ? 'running'
+    : i.suite ? (i.suite.skipped ? 'not run' : i.suite.ok ? 'pass' : 'fail') : '—';
+  const review = running('review') ? 'running'
+    : i.review ? (i.review.verdict ? mdInline(E(i.review.verdict)) : i.review.clean ? 'clean' : 'findings') : '—';
+  const run = '<div class="pn" data-testid="numbers-run"><h4>RUN</h4>'
+    + numKv('plan', E(s.title || '—'))
+    + numKv('base', E(base.branch ? `${base.branch} @ ${String(base.commit || '').slice(0, 7)}` : '—'))
+    + numKv('test command', E(s.testCommand || '—'))
+    + numKv('lanes', E(`${lanes.length} · max ${s.maxLanes ?? '—'}`))
+    + numKv('wall clock', E(o ? dur(o.wallSeconds * 1000) : '—'))
+    + numKv('agent time', E(o ? dur(o.agentSeconds * 1000) : '—'))
+    + numKv('gain', E(o ? `${(o.agentSeconds / o.wallSeconds).toFixed(1)}×` : '—'))
+    + numKv('tokens', E(tokens(s.totals.outputTokens)))
+    + numKv('commits', E(String(tasks.reduce((n, t) => n + (t.commits || []).length, 0))))
+    + numKv('full suite', E(suite))
+    + numKv('review', review)
+    + '</div>';
+  return { lanecost, effort, stages, run };
+}
+
+/** DATA › NUMBERS (B §6.4). No "time stopped waiting for people": nothing
+ *  in the run records it. */
+function viewNumbers(view) {
+  const p = numbersPanels(S.snap);
+  const cols = '<div class="cols" style="grid-template-columns: 1fr 1fr; height:calc(100% - 24px)"><div class="col"></div><div class="col"></div></div>';
+  keyed(view, [{ key: 'title', sig: 'NUMBERS', html: viewTitle('NUMBERS') }, { key: 'cols', sig: cols, html: cols }]);
+  const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
+  const items = (list) => list.map(([key, html]) => ({ key, sig: html, html }));
+  keyed(left, items([['lanecost', p.lanecost], ['effort', p.effort]]));
+  keyed(right, items([['stages', p.stages], ['run', p.run]]));
+}
+
+VIEWS.DATA.QUESTS = viewQuests;
+VIEWS.DATA.LOG = viewLog;
+VIEWS.DATA.NUMBERS = viewNumbers;
 
 // ------------------------------------------------------------------ frame
 
@@ -1731,6 +2027,19 @@ document.addEventListener('click', (e) => {
   if (cp) { handleCopy(cp); return; }
   const el = e.target.closest('[data-go]');
   if (el) go(Object.fromEntries(new URLSearchParams(el.getAttribute('data-go'))));
+});
+
+// DATA › LOG's search, filter and wrap: page state, never in the hash.
+document.addEventListener('input', (e) => {
+  if (!(e.target instanceof Element) || !e.target.matches('[data-testid=log-search]')) return;
+  feedQuery = e.target.value.trim().toLowerCase();
+  render();
+});
+
+document.addEventListener('click', (e) => {
+  const kind = e.target.closest('[data-feed]');
+  if (kind) { feedKind = kind.getAttribute('data-feed'); render(); return; }
+  if (e.target.closest('[data-wrap]')) { feedWrap = !feedWrap; render(); }
 });
 
 document.addEventListener('keydown', (e) => {
