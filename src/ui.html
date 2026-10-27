@@ -804,7 +804,8 @@ const TODO = {
   barrierStopped: { verb: 'integrate', text: (a) => a.src.error || 'the process that drove it stopped' },
   mergeFailed: { verb: 'integrate', text: ({ i, stage }) => i.mergeError || (stage && stage.detail) || 'the merge failed' },
   stageInterrupted: { verb: 'integrate', text: (stage) => (stage && stage.detail) || 'the process that drove it stopped' },
-  suiteFailed: { verb: 'integrate', text: (suite) => lastLines(suite.summary, 6) || 'the full suite failed' },
+  // The summary is the raw tail of the output: cleaned first, as RADIO does.
+  suiteFailed: { verb: 'integrate', text: (suite) => lastLines(cleanTermLines(suite.summary).join('\n'), 6) || 'the full suite failed' },
   // No command: the findings are a report to read, so COPY takes its path.
   reviewFindings: { verb: null, text: (review) => review.verdict || 'the review has findings', copy: (review) => review.reportFile || null },
   silent: { verb: null, text: (a) => `no event for ${a.silentMin} min — last: ${lastAction(a)}` },
@@ -1226,8 +1227,10 @@ function detailItems(a, all) {
   if (a.kind === 'suite') {
     const live = a.src.live;
     // As many as the box shows: it is repainted every snapshot, and the
-    // newest line must not sit below a scroll that resets to the top.
-    const lines = live ? (live.lines || []).slice(-8) : (a.src.result ? lastLines(a.src.result.summary, 8).split('\n') : []);
+    // newest line must not sit below a scroll that resets to the top. The
+    // live lines arrive clean; the finished summary is the raw tail.
+    const lines = live ? (live.lines || []).slice(-8)
+      : (a.src.result ? lastLines(cleanTermLines(a.src.result.summary).join('\n'), 8).split('\n') : []);
     out.push({
       key: 'live',
       html: `<div class="pn"><h4>${live ? 'LIVE OUTPUT' : 'OUTPUT'}</h4>`
@@ -2192,7 +2195,8 @@ function reviewStation(s) {
 function taskStation(t) {
   const lt = t.lastTest;
   const done = lt.ok === true || lt.ok === false;
-  const tail = lt.tail ? String(lt.tail).split('\n') : [];
+  // The tail is the runner's raw output, colour codes and `\r` included.
+  const tail = lt.tail ? cleanTermLines(lt.tail) : [];
   return {
     id: `T${t.n}`, label: `T${t.n} · LANE TESTS`, onAir: true, tag: '',
     lines: [`$ ${lt.command || ''}`, done ? (lt.ok ? 'pass' : 'fail') : 'running', ...(tail.length ? ['', ...tail] : [])],

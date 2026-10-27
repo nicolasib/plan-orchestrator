@@ -325,6 +325,20 @@ const pickedRv = await pick(p13, 'tu_rv');
 const hRv = await readHero(p13);
 check('S13-11', 'agent-tu_rv also uses #op-revisando-1', pickedRv && hRv.name === 'REVIEW · CODE-REVIEWER' && hRv.use === '#op-revisando-1',
   `clicked ${pickedRv}, hero-name ${JSON.stringify(hRv.name)}, use ${JSON.stringify(hRv.use)}`);
+
+// S13-18 — the finished suite's OUTPUT is cleaned as RADIO cleans it. The
+// fixture's summary carries colour codes and `progress 10%\rprogress 100%`;
+// the HTML parser turns a `\r` left in into a line break, so the segment it
+// overwrote would show as a line of its own.
+const pickedSuite13 = await pick(p13, 'suite');
+const out13 = await p13.evaluate(() => {
+  const el = document.querySelector('[data-testid=live-output]');
+  return el ? el.textContent : null;
+});
+check('S13-18', 'STAT suite OUTPUT has no \\u001b, no \\r and no overwritten progress segment',
+  pickedSuite13 && typeof out13 === 'string' && out13.trim().length > 0
+    && !out13.includes('\u001b') && !out13.includes('\r') && !out13.includes('progress 10%'),
+  `clicked ${pickedSuite13}, output ${JSON.stringify(out13)}`);
 await assertConsole(p13, 'S13-16', 'console 7413');
 
 // --------------------------------------------------------- 7414 (barrier)
