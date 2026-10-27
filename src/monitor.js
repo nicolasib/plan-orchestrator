@@ -268,7 +268,9 @@ function digestLog(text, { activityLimit = ACTIVITY_LIMIT, testCommand = null } 
           // dispatched is usually the one who ran the suite.
           if (block.name === 'Bash' && block.input && isTest(block.input.command)) {
             d.lastTest = { command: block.input.command, at, ok: null, tail: null };
-            testId = block.id || null;
+            // Sent to the background, the call answers at once with a job id:
+            // that reply is not the run's result, so nothing settles it here.
+            testId = block.input.run_in_background ? null : block.id || null;
           }
         } else if (block.type === 'text' && block.text && block.text.trim()) {
           const text2 = oneLine(block.text, TEXT_MAX);

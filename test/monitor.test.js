@@ -625,6 +625,14 @@ test('the test command of the plan counts, a test still running has ok null, and
   assert.equal(monitor.digestLog(plain, { testCommand: 'npm test' }).lastTest, null);
 });
 
+test('a test sent to the background has no verdict yet: its immediate reply is not the result', () => {
+  const T = '2026-08-19T12:02:00.000Z';
+  const log = SAMPLE_LOG
+    + assistantTool('Bash', { command: 'npm test', run_in_background: true }, 'tu_bg', T)
+    + toolResult('tu_bg', 'Command running in background with ID: bash_1', false, '2026-08-19T12:02:01.000Z');
+  assert.deepEqual(monitor.digestLog(log, { testCommand: 'npm test' }).lastTest, { command: 'npm test', at: T, ok: null, tail: null });
+});
+
 test("the view's lastTest outlives the task, and the plan's own test command counts", () => {
   const { planPath, logFile } = fixture();
   const st = state.load(planPath);
