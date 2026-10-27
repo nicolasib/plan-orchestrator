@@ -2264,6 +2264,10 @@ function tuneWave(cur, fresh) {
   if (restart) {
     Object.assign(w, { t: 0, burst: 0, spikes: [] });
     flatWave();
+    // With less motion no loop lifts it again: an on-air station would lie
+    // flat, the off-air look, until its next line. One still frame instead.
+    // (The gate cannot force reduced motion — smoke/PROJECT.md.)
+    if (cur.onAir && reduceMotion.matches && !S.frozen) waveFrame();
     return;
   }
   if (!fired) return;
