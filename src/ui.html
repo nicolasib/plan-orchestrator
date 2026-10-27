@@ -1719,11 +1719,14 @@ function compactDur(ms) {
   return `${Math.floor(s / 3600)}h${m ? ` ${m}m` : ''}`;
 }
 
+/** The stage's live state first: a re-run suite keeps its old skipped result
+ *  until it returns, and must not read as not run while it runs or after it
+ *  died. */
 function stageFigure(x, i) {
-  if (x.key === 'suite' && i.suite && i.suite.skipped) return 'not run — no test command';
   if (x.status === 'running') return 'running';
-  if (x.startedAt && x.endedAt) return compactDur(Date.parse(x.endedAt) - Date.parse(x.startedAt));
   if (x.status === 'interrupted') return 'interrupted';
+  if (x.key === 'suite' && i.suite && i.suite.skipped) return 'not run — no test command';
+  if (x.startedAt && x.endedAt) return compactDur(Date.parse(x.endedAt) - Date.parse(x.startedAt));
   return '—';
 }
 
