@@ -151,12 +151,17 @@ body.frozen .vb .q1 { opacity:1 !important; }
 .tbl { width:100%; border-collapse:collapse; font-size:17px; }
 .tbl th { text-align:left; font-weight:700; font-size:13px; opacity:.6; padding:2px 8px; letter-spacing:.8px; }
 .tbl td { padding:2px 8px; white-space:nowrap; }
-.tbl tr.r { cursor:pointer; } .tbl tr.r:hover td { background:var(--gf); }
+.tbl tr.r { cursor:pointer; } .tbl tr.r:not(.sel):hover td { background:var(--gf); }
 .tbl tr.sel td { background:var(--g); color:var(--ink); text-shadow:none; }
 .tbl tr.sel .tg.bad { background:var(--ink); color:var(--al); }
+.tbl tr.sel .tg.warn { outline-color:var(--ink); color:var(--ink); }
 .tries { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
 .tries span { background:var(--gf); padding:1px 8px; }
 .tries span.f { color:var(--al); outline:1.5px solid var(--al); outline-offset:-1.5px; }
+.rec .rt { font-size:22px; font-weight:700; margin:2px 0 4px; }
+.rec .kv > span:last-child { min-width:0; text-align:right; overflow-wrap:anywhere; }
+.rec .val { padding:3px 10px; background:var(--gf); overflow-wrap:anywhere; }
+.pn.bad h4 { color:var(--al); opacity:1; }
 
 /* map and radio */
 .map { position:relative; border:2px solid var(--gd); aspect-ratio: 640 / 300; width:100%;
@@ -1315,6 +1320,203 @@ function viewCondition(view) {
 
 VIEWS.STAT.AGENTS = viewAgents;
 VIEWS.STAT.CONDITION = viewCondition;
+
+// -------------------------------------------------------------------- INV
+
+/** Which tasks each INV sub-tab lists, by the derived state (B §6.3). */
+const INV_FILTER = {
+  ALL: () => true,
+  PROBLEMS: (a) => STOPPED.has(a.status) || a.status === 'nosignal',
+  RUNNING: (a) => a.status === 'running' || a.status === 'nosignal',
+  QUEUE: (a) => a.status === 'pending',
+  DONE: (a) => a.status === 'done',
+};
+
+const isLive = (a) => a.status === 'running' || a.status === 'nosignal';
+// The figures STAT's hero reads (heroNumbers), so a task says the same thing
+// in both places.
+const effortFigure = (e) => (e ? `${e.used ?? e.planned}${e.raised ? ' ↑' : ''}` : 'inherited');
+const triesFigure = (a, attempts) => (attempts ? (a.kind === 'task' ? `${attempts}/${MAX_TRIES}` : String(attempts)) : '—');
+
+/** A running clock is a `data-since` for paintTimes, never a number. */
+function taskTime(a) {
+  const t = a.src;
+  if (isLive(a) && t.startedAt) return `<span data-since="${E(t.startedAt)}"></span>`;
+  return t.startedAt && t.endedAt ? E(dur(Date.parse(t.endedAt) - Date.parse(t.startedAt))) : '—';
+}
+
+const laneCell = (a) => (a.kind === 'barrier'
+  ? `<td title="${E(BARRIER_TIP)}">BARRIER</td>`
+  : `<td>${E(String(a.lane || '—').toUpperCase())}</td>`);
+
+/** A row is a `<tr>` for the table and a `<button>` in its T cell for the
+ *  keyboard (B §6.8); both carry the same `data-go`. */
+function invRow(a, queue) {
+  const t = a.src;
+  const go = E(`task=${a.n}`);
+  return `<tr class="r" data-testid="row-T${E(a.n)}" data-go="${go}">`
+    + `<td><button type="button" data-go="${go}">T${E(a.n)}</button></td><td>${E(a.name)}</td>${laneCell(a)}`
+    + `<td>${E(effortFigure(t.effort))}</td><td>${E(triesFigure(a, t.attempts))}</td><td>${taskTime(a)}</td>`
+    + `<td>${E(money(t.costUsd))}</td><td>${stateTag(a.status)}</td>`
+    + (queue ? `<td>${E(queueAfter(t, S.snap))}</td>` : '')
+    + '</tr>';
+}
+
+/*
+ * The record: `/api/task` for the selected task, fetched when it is selected
+ * and again when its status, attempts or turns move in the snapshot. `key`
+ * is the one wanted now; a response for any other key is dropped, so a newer
+ * selection always wins over an older fetch.
+ */
+const REC = { key: null, n: null, task: null, error: null };
+
+const recKey = (a) => `${a.n}|${a.src.status}|${a.src.attempts}|${a.src.turns}`;
+
+async function loadRecord(n, key) {
+  REC.key = key;
+  let task = null;
+  let error = null;
+  try {
+    const r = await fetch(`/api/task?n=${encodeURIComponent(n)}`);
+    const body = await r.json().catch(() => ({}));
+    if (r.ok && body.task) task = body.task;
+    else error = body.error || `HTTP ${r.status}`;
+  } catch (e) {
+    error = e.message;
+  }
+  if (REC.key !== key) return;
+  Object.assign(REC, { n, task, error });
+  render();
+}
+
+const recKv = (k, v) => `<div class="kv"><span>${E(k)}</span><span>${v}</span></div>`;
+
+/** A value with its COPY in the block's header (B §6.7). */
+const copyBlock = (head, value, testid) => `<div class="pn"><div class="hrow"><h4>${E(head)}</h4>${copyBtn(value, testid)}</div>`
+  + `<div class="val">${E(value)}</div></div>`;
+
+/** The record's parts as [key, html]: the header from the snapshot, the rest
+ *  from `/api/task` once it answered. */
+function recordParts(a, t, err) {
+  const parts = [];
+  const where = a.kind === 'barrier' ? `<span title="${E(BARRIER_TIP)}">BARRIER</span>` : `LANE ${E(String(a.lane || '—').toUpperCase())}`;
+  parts.push(['head', `<div class="pn"><h4>${where}</h4><div class="rt">T${E(a.n)} · ${E(a.name)}</div>${stateTag(a.status)}</div>`]);
+  if (err) parts.push(['fail', `<div class="pn"><div class="note bad">${E(err)}</div></div>`]);
+  if (!t) {
+    if (!err) parts.push(['wait', '<div class="kv dim"><span>loading the record…</span></div>']);
+    return parts;
+  }
+
+  if (t.error) {
+    parts.push(['error', `<div class="pn bad" data-testid="error-block"><div class="hrow"><h4>${a.status === 'blocked' ? 'WHY IT STOPPED' : 'ERROR'}</h4>`
+      + `${copyBtn(t.error, 'copy-error')}</div><div class="note bad md">${md(t.error)}</div></div>`]);
+  }
+  const todo = whatToDo(a);
+  if (todo && todo.command) {
+    parts.push(['cmd', `<div class="pn"><h4>COMMAND</h4><div class="note"><div class="cmd" style="margin:0"><code>${E(todo.command)}</code>`
+      + `${copyBtn(todo.command, 'copy-cmd')}</div></div></div>`]);
+  }
+
+  const e = t.effort;
+  const source = e && (e.used ? `used${e.planned && e.planned !== e.used ? ` · planned ${e.planned}` : ''}` : 'planned');
+  parts.push(['effort', '<div class="pn" data-testid="record-effort"><h4>EFFORT</h4>'
+    + recKv('level', E(effortFigure(e)))
+    + (e ? recKv('source', E(source)) + recKv('why', E(e.reason || '—')) : '')
+    + '</div>']);
+
+  // One link per attempt, and the one in flight at the end.
+  const chain = (t.tries || []).map((x) => ({ text: `${x.effort || 'inherited'} ${x.status}`, bad: STOPPED.has(x.status) }));
+  if (isLive(a)) chain.push({ text: `${(e && (e.used || e.planned)) || 'inherited'} running`, bad: false });
+  parts.push(['tries', '<div class="pn"><h4>TRIES</h4><div class="tries" data-testid="record-tries">'
+    + (chain.length ? chain.map((x) => `<span${x.bad ? ' class="f"' : ''}>${E(x.text)}</span>`).join(' › ') : '<span class="dim">none yet</span>')
+    + '</div></div>']);
+
+  parts.push(['kv', '<div class="pn"><h4>RECORD</h4>'
+    + recKv('status', E(`${WORD[a.status] || a.status}${a.kind === 'barrier' ? ' · barrier' : ''}`))
+    + recKv('lane', a.lane ? E(String(a.lane).toUpperCase()) : '—')
+    + recKv('duration', taskTime(a))
+    + recKv('turns', E(String(t.turns || 0)))
+    + recKv('attempts', E(triesFigure(a, t.attempts)))
+    + recKv('output tokens', E(tokens(t.outputTokens)))
+    + recKv('cost', E(money(t.costUsd)))
+    + recKv('model', E(t.model || '—'))
+    + recKv('commits', (t.commits || []).length ? E(t.commits.map((c) => String(c).slice(0, 7)).join(' ')) : '—')
+    + '</div>']);
+  if (t.sessionId) parts.push(['session', copyBlock('SESSION', t.sessionId, 'copy-session')]);
+  if (t.logFile) parts.push(['log', copyBlock('LOG', t.logFile, 'copy-log')]);
+
+  // A blocked task's error IS its final message; printing both reads as two
+  // findings when there is one. The stored error keeps the report's line
+  // breaks and the digest collapses them, so compare on flattened text.
+  const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const resultText = t.result && (t.result.body || t.result.text);
+  const duplicated = resultText && t.error
+    && (flat(t.error).includes(flat(resultText).slice(0, 60)) || flat(resultText).includes(flat(t.error).slice(0, 60)));
+  if (resultText && !duplicated) {
+    parts.push(['result', `<div class="pn"><h4>AGENT RESULT${t.result.clipped ? ' · CLIPPED' : ''}</h4><div class="note md">${md(resultText)}</div></div>`]);
+  }
+  const files = (head, list) => `<div class="pn"><h4>${head}</h4>${list.map((f) => `<div class="val">${E(f)}</div>`).join('')}</div>`;
+  if (t.files && t.files.writes.length) parts.push(['writes', files('DECLARED WRITES', t.files.writes)]);
+  if (t.files && t.files.excluded.length) parts.push(['excluded', files('EXCLUDED BY NEGATION', t.files.excluded)]);
+  if (t.steps && t.steps.length) {
+    parts.push(['steps', '<div class="pn"><h4>PLAN STEPS</h4><div class="md"><ul class="tick">'
+      + t.steps.map((st) => `<li class="${st.checked ? 'on' : ''}">${checkbox(st.checked)}<span>${mdInline(E(st.text))}</span></li>`).join('')
+      + '</ul></div></div>']);
+  }
+  const acts = (t.activity || []).slice().reverse();
+  parts.push(['acts', `<div class="pn"><h4>ACTIVITY${t.truncated ? ' · TAIL' : ''}</h4>`
+    + (acts.length ? acts.map(actRow).join('') : '<div class="kv dim"><span>no agent events recorded</span></div>') + '</div>']);
+  parts.push(['agent', `<button type="button" class="lnk" data-go="${E(`tab=STAT&agent=${encodeURIComponent(a.id)}`)}">see the agent in STAT ▸</button>`]);
+  return parts;
+}
+
+/** INV (B §6.3): the tasks and barriers of the run, filtered by sub-tab, and
+ *  the record of the selected one. No selection, no record. */
+function viewInv(view, sub) {
+  const all = agents().filter((a) => a.kind === 'task' || a.kind === 'barrier').sort((x, y) => x.n - y.n);
+  const queue = sub === 'QUEUE';
+  const heads = ['T', 'NAME', 'LANE', 'EFFORT', 'TRIES', 'TIME', '$', 'STATE', ...(queue ? ['WAITING ON'] : [])];
+  const cols = '<div class="cols" style="grid-template-columns: 1fr 380px; height:calc(100% - 24px)">'
+    + `<div class="col"><table class="tbl"><thead><tr>${heads.map((h) => `<th>${E(h)}</th>`).join('')}</tr></thead><tbody></tbody></table></div>`
+    + '<div class="col"></div></div>';
+  keyed(view, [{ key: 'title', sig: sub, html: viewTitle(sub) }, { key: 'cols', sig: cols, html: cols }]);
+  const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
+  const body = left.querySelector('tbody');
+
+  // Signed without the selection, a class toggled below: the row the reader
+  // just clicked keeps its node, and the focus with it.
+  const rows = all.filter(INV_FILTER[sub]).map((a) => {
+    const html = invRow(a, queue);
+    return { key: a.id, sig: html, html };
+  });
+  if (!rows.length) {
+    const html = `<tr><td colspan="${heads.length}" class="dim">nothing here</td></tr>`;
+    rows.push({ key: 'none', sig: html, html });
+  }
+  keyed(body, rows);
+  const selKey = S.sel.task == null ? null : `T${S.sel.task}`;
+  for (const tr of body.children) tr.classList.toggle('sel', tr.getAttribute('data-key') === selKey);
+
+  const n = S.sel.task;
+  const a = n == null ? null : all.find((x) => x.n === n);
+  if (!a) {
+    REC.key = null;
+    const html = `<div class="kv dim"><span>${E(n == null ? 'select a task to open its record' : `no task ${n} in this run`)}</span></div>`;
+    keyed(right, [{ key: 'hint', sig: html, html }]);
+    return;
+  }
+  const key = recKey(a);
+  if (REC.key !== key) loadRecord(a.n, key);
+  keyed(right, [{ key: `rec:${a.n}`, sig: 'rec', html: '<div class="rec" data-testid="record"></div>' }]);
+  const mine = REC.n === a.n;
+  keyed(right.firstElementChild, recordParts(a, mine ? REC.task : null, mine ? REC.error : null).map(([k, html]) => ({ key: k, sig: html, html })));
+}
+
+VIEWS.INV.ALL = (el) => viewInv(el, 'ALL');
+VIEWS.INV.PROBLEMS = (el) => viewInv(el, 'PROBLEMS');
+VIEWS.INV.RUNNING = (el) => viewInv(el, 'RUNNING');
+VIEWS.INV.QUEUE = (el) => viewInv(el, 'QUEUE');
+VIEWS.INV.DONE = (el) => viewInv(el, 'DONE');
 
 // ------------------------------------------------------------------ frame
 
