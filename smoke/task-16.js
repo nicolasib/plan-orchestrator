@@ -83,6 +83,28 @@ check('S16-2', 'x(T1) < x(T2) < x(T3)', x('T1') < x('T2') && x('T2') < x('T3'), 
 check('S16-2', 'x(T4) === x(T1)', x('T4') === x('T1'), xs);
 check('S16-2', 'x(T5) === x(T2)', x('T5') === x('T2'), xs);
 
+// S16-2 — on the fixture the longest path and "index within the lane" give
+// the same columns, so the rule itself is checked on a synthetic graph through
+// the page's own `mapColumns`: lanes [1,2] and [3,4], and 2 → 3 pushes T3 to
+// column 2 and T4 to 3. With `edges` ignored they would sit at 0 and 1. The
+// same call locks ruling 6: 4 → 1 would close a cycle and is ignored, 9 is
+// outside the lanes and dropped, and the self-loop and the duplicate add
+// nothing.
+const cols2 = await page.evaluate(() => {
+  try {
+    const r = mapColumns([{ tasks: [{ n: 1 }, { n: 2 }] }, { tasks: [{ n: 3 }, { n: 4 }] }],
+      [{ from: 2, to: 3 }, { from: 4, to: 1 }, { from: 9, to: 1 }, { from: 3, to: 3 }, { from: 2, to: 3 }]);
+    return {
+      col: [...r.col.entries()].map(([n, c]) => `${n}:${c}`).join(' '),
+      cross: r.cross.map((e) => `${e.from}>${e.to}`).join(' ') || '(none)',
+    };
+  } catch (e) {
+    return { col: `threw ${e.message}`, cross: '—' };
+  }
+});
+check('S16-2', 'mapColumns on lanes [1,2] [3,4] with 2→3, 4→1, 9→1, 3→3, 2→3: columns 1:0 2:1 3:2 4:3, cross 2>3 only',
+  cols2.col === '1:0 2:1 3:2 4:3' && cols2.cross === '2>3', `columns ${cols2.col} · cross ${cols2.cross}`);
+
 // S16-3 — the node classes, and an operator over a node only while it runs or
 // has stopped.
 const cls = (id) => (m.nodes[id] ? m.nodes[id].cls : []);
