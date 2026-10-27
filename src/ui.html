@@ -83,7 +83,15 @@ body { margin: 0; background: var(--ink); }
   display:inline-flex; align-items:center; gap:5px; text-shadow:0 0 6px color-mix(in srgb, var(--al) 40%, transparent); }
 .screen .copy:hover, .screen .copy.ok { background:var(--al); color:var(--ink); text-shadow:none; }
 
-.cols { display:grid; gap:18px; height:100%; }
+/* Every view's columns sit under its title, which takes the other 24px. The
+   grids are classes, not inline styles, so the widths below can redraw them. */
+.cols { display:grid; gap:18px; height:calc(100% - 24px); }
+.cols.agents { grid-template-columns: 270px 1fr 300px; }
+.cols.inv, .cols.quests { grid-template-columns: 1fr 380px; }
+.cols.nums { grid-template-columns: 1fr 1fr; }
+.cols.lanes { grid-template-columns: 1fr 220px; }
+.cols.radio { grid-template-columns: 290px 1fr; }
+.cols.radio > .col:last-child { overflow:hidden; }
 .col { min-height:0; overflow:auto; }
 .gh { font-size:14px; opacity:.55; padding:8px 10px 2px; letter-spacing:.9px; font-weight:700; }
 .li { position:relative; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:2px 10px 2px 24px; cursor:pointer; white-space:nowrap; }
@@ -139,7 +147,7 @@ body.frozen .vb .q2 { opacity:0 !important; }
 body.frozen .vb .q1 { opacity:1 !important; }
 
 /* condition */
-.cond { position:relative; height:100%; display:flex; flex-direction:column; }
+.cond { position:relative; height:calc(100% - 24px); display:flex; flex-direction:column; }
 .cond .stage { position:relative; flex:1; min-height:0; }
 .cond .fig { position:absolute; left:50%; top:50%; transform:translate(-50%,-52%); }
 .dash { position:absolute; display:flex; flex-direction:column; gap:3px; cursor:pointer; font-size:15px; font-weight:700; letter-spacing:.5px; }
@@ -242,13 +250,52 @@ pre.out { margin:10px 0 0; font-family:'Roboto Condensed', sans-serif; font-size
   body.frozen .onair, body.frozen .vb svg { animation-play-state: paused !important; }
 }
 
-@media (max-width: 720px) {
+/* Widths (B §6.9). From 1100 px up, the prototype's layout above. Below it,
+   STAT keeps the crew beside the hero and puts the details under the hero,
+   and INV puts the record under the table; the body scrolls instead of each
+   column. */
+@media (width < 1100px) {
+  .tabs, .tabs .tablist { gap:24px; }
+  /* The run line is the one that grows, so on its own it would never wrap:
+     it keeps room to be read and the rest goes to a second row. */
+  .foot { flex-wrap:wrap; }
+  .foot .grow { min-width:180px; }
+  .cols.agents { grid-template-columns: 270px 1fr; grid-template-rows: auto 1fr; height:auto; }
+  .cols.agents > .col:first-child { grid-row: span 2; }
+  .icons { flex-wrap:wrap; }
+  .cols.inv { grid-template-columns: 1fr; height:auto; }
+  /* NAME takes what the other columns leave, and no more (columns: T, NAME,
+     LANE, EFFORT, TRIES, TIME, $, STATE, WAITING ON). */
+  .tbl td:nth-child(2) { max-width:0; width:100%; overflow:hidden; text-overflow:ellipsis; }
+}
+
+/* Below 700 px, one column: the tabs scroll sideways with the chip and the
+   stream kept in view, the footer takes two rows, the map scrolls without
+   shrinking, and INV's table keeps T, NAME, STATE (and WAITING ON) — the
+   record under it has the rest. */
+@media (width < 700px) {
   .screen { padding:8px 10px; }
   .tabs, .tabs .tablist { gap:16px; }
   .tabs { padding:0 6px; font-size:19px; }
   .tabs .plan { display:none; }
+  .tabs .tablist { flex:1 1 auto; min-width:0; overflow-x:auto; overflow-y:hidden; padding:0 6px; }
+  .tabs .tablist::-webkit-scrollbar { height:3px; }
+  .tabs .right { flex:none; gap:10px; }
   .subs { gap:14px; padding-left:10px; font-size:16px; overflow-x:auto; }
-  .foot { flex-wrap:wrap; font-size:15px; }
+  .foot { font-size:15px; }
+  .foot .seg { padding:3px 8px; }
+  .foot .grow { min-width:140px; }
+  .cols.agents, .cols.quests, .cols.nums, .cols.lanes, .cols.radio { grid-template-columns: 1fr; grid-template-rows: none; height:auto; }
+  .cols.agents > .col:first-child { grid-row: auto; }
+  .tbl th:nth-child(n+3):nth-child(-n+7), .tbl td:nth-child(n+3):nth-child(-n+7) { display:none; }
+  /* CONDITION stacks: the operator, then every dash in a column. The dashes
+     carry their place on the stage as inline styles, hence the !important. */
+  .cond { height:auto; }
+  .cond .stage { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .cond .fig { position:static; transform:none; order:-1; }
+  .cond .dash { position:static !important; transform:none !important; align-items:center !important; }
+  .ac.lr { grid-template-columns: 62px 96px 70px 1fr; }
+  .cols.radio pre.out { height:auto; max-height:45vh; }
 }
 </style>
 </head>
@@ -1195,8 +1242,8 @@ function crewRow(a, selId) {
     + ` data-testid="agent-${E(a.id)}" data-go="${E(`agent=${encodeURIComponent(a.id)}`)}"><span>${E(label)}</span>${stateTag(a.status)}</button>`;
 }
 
-const AGENT_COLS = '<div class="cols" style="grid-template-columns: 270px 1fr 300px; height:calc(100% - 24px)">'
-  + '<div class="col"></div><div class="hero"></div><div class="col"></div></div>';
+const AGENT_COLS = '<div class="cols agents">'
+  + '<div class="col"></div><div class="hero" data-testid="hero"></div><div class="col" data-testid="details"></div></div>';
 
 /** STAT › AGENTS (B §6.2): the crew, the selected agent, its details. */
 function viewAgents(view) {
@@ -1248,7 +1295,7 @@ function viewAgents(view) {
   keyed(details, detailItems(agent, all));
 }
 
-const COND_HTML = '<div class="cond" style="height:calc(100% - 24px)"><div class="stage"></div><div class="pn" style="margin:6px 0 0"></div></div>';
+const COND_HTML = '<div class="cond"><div class="stage"></div><div class="pn" style="margin:6px 0 0"></div></div>';
 
 /** The top of the stage: the end of the run, by the stage that is going. */
 function endOfRunDash(s) {
@@ -1515,8 +1562,8 @@ function viewInv(view, sub) {
   const all = agents().filter((a) => a.kind === 'task' || a.kind === 'barrier').sort((x, y) => x.n - y.n);
   const queue = sub === 'QUEUE';
   const heads = ['T', 'NAME', 'LANE', 'EFFORT', 'TRIES', 'TIME', '$', 'STATE', ...(queue ? ['WAITING ON'] : [])];
-  const cols = '<div class="cols" style="grid-template-columns: 1fr 380px; height:calc(100% - 24px)">'
-    + `<div class="col"><table class="tbl"><thead><tr>${heads.map((h) => `<th>${E(h)}</th>`).join('')}</tr></thead><tbody></tbody></table></div>`
+  const cols = '<div class="cols inv">'
+    + `<div class="col"><table class="tbl" data-testid="inv-table"><thead><tr>${heads.map((h) => `<th>${E(h)}</th>`).join('')}</tr></thead><tbody></tbody></table></div>`
     + '<div class="col"></div></div>';
   keyed(view, [{ key: 'title', sig: sub, html: viewTitle(sub) }, { key: 'cols', sig: cols, html: cols }]);
   const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
@@ -1611,7 +1658,7 @@ function viewQuests(view) {
   const groups = QUEST_GROUPS.map(([head, test]) => [head, all.filter(test)]);
   const picked = S.sel.quest == null ? null : all.find((a) => a.n === S.sel.quest);
   const q = picked || groups.map(([, list]) => list[0]).find(Boolean) || null;
-  const cols = '<div class="cols" style="grid-template-columns: 1fr 380px; height:calc(100% - 24px)"><div class="col"></div><div class="col"></div></div>';
+  const cols = '<div class="cols quests"><div class="col"></div><div class="col"></div></div>';
   keyed(view, [{ key: 'title', sig: 'QUESTS', html: viewTitle('QUESTS') }, { key: 'cols', sig: cols, html: cols }]);
   const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
 
@@ -1826,7 +1873,7 @@ function numbersPanels(s) {
  *  in the run records it. */
 function viewNumbers(view) {
   const p = numbersPanels(S.snap);
-  const cols = '<div class="cols" style="grid-template-columns: 1fr 1fr; height:calc(100% - 24px)"><div class="col"></div><div class="col"></div></div>';
+  const cols = '<div class="cols nums"><div class="col"></div><div class="col"></div></div>';
   keyed(view, [{ key: 'title', sig: 'NUMBERS', html: viewTitle('NUMBERS') }, { key: 'cols', sig: cols, html: cols }]);
   const [left, right] = view.querySelector(':scope > [data-key="cols"]').children;
   const items = (list) => list.map(([key, html]) => ({ key, sig: html, html }));
@@ -2024,7 +2071,7 @@ const MAP_LEGEND = '<div class="pn" data-testid="map-legend"><h4>LEGEND</h4>'
     .map(([pose, text, al]) => `<div class="lg"><span class="lgf">${fig(pose, 44, al, `legend-${pose}`)}</span><span>${text}</span></div>`).join('')
   + '</div><div class="note">Click a task to open it in INV; SUITE or REVIEW to listen on RADIO. A dashed line is a task waiting on one in another lane.</div>';
 
-const MAP_COLS = '<div class="cols" style="grid-template-columns: 1fr 220px; height:calc(100% - 24px)">'
+const MAP_COLS = '<div class="cols lanes">'
   + '<div class="col"><div class="map" data-testid="map"><div class="mapd"></div></div></div><div class="col"></div></div>';
 
 /** MAP › LANES (B §6.5): one track per lane, in the order of `lanes`, that
@@ -2249,8 +2296,7 @@ function stationRow(x, selId) {
     + `${x.onAir ? '<span class="tg">ON AIR</span>' : ''}</button>`;
 }
 
-const RADIO_COLS = '<div class="cols" style="grid-template-columns: 290px 1fr; height:calc(100% - 24px)">'
-  + '<div class="col"></div><div class="col" style="overflow:hidden"></div></div>';
+const RADIO_COLS = '<div class="cols radio"><div class="col"></div><div class="col"></div></div>';
 const RADIO_NOTE = '<div class="note" style="margin-top:14px">ON AIR = output arriving right now. The full suite is the one plo runs'
   + ' at the end of the run; a lane\'s is the last test its agents ran inside the task.</div>';
 
