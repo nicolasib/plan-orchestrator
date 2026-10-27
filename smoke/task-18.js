@@ -16,7 +16,18 @@
 // `.screen` clips (overflow:hidden), so `documentElement.scrollWidth` alone
 // can never see an overflow: S18-1 also reads the scroll boxes inside it, and
 // every ancestor of the tab strip and of the stream that is wider than its box
-// has to be one that scrolls.
+// has to be one that scrolls. Screens only other fixtures show get the same
+// 390 px checks, each in a frame under a top page on its own port, so the
+// frame stays same-origin.
+//
+// Aside's console buffer holds the top page's messages only, never a frame's.
+// So every frame is hooked once its window has loaded: its `error` events
+// (failed resources included, by capture), its `unhandledrejection` events and
+// its `console.error` land in the top page's `__s18log`, which the spec reads
+// as the frames' CONSOLE. The first frame proves the hook with a deliberate
+// message that is then left out. An error thrown while the frame's script is
+// first parsed comes before any hook and needs CDP to see; such a frame never
+// paints, and the wait for its view-title (or empty state) fails on that.
 //
 // The frame sweep pauses every animation on `.vb svg` and walks currentTime
 // from 0 to 3200 ms in steps of 97 (a prime, so the instants fall all over
@@ -79,30 +90,72 @@ async function goTo(page, hash, sub) {
 
 const FRAME = 'smoke-width';
 
-/** In the top page: the frame is live, shows `sub`, and its fonts are in. */
+/** In the top page: the frame is live, shows `sub` (or, with no sub, the
+ *  empty state), and its fonts are in. */
 const frameShows = ({ id, live, sub }) => {
   const f = document.getElementById(id);
   const d = f && f.contentDocument;
   if (!d || !d.fonts || d.fonts.status !== 'loaded') return false;
+  if (sub == null) return Boolean(d.querySelector('[data-testid=empty-state]'));
   const st = d.querySelector('[data-testid=stream]');
   const vt = d.querySelector('[data-testid=view-title]');
   return Boolean(st && vt) && st.textContent.trim() === live && vt.textContent.trim() === sub;
 };
 
-/** A fresh frame `width` px wide on `hash`, replacing any before it. */
-async function frameAt(page, width, hash, sub) {
-  await page.evaluate(({ id, width, url }) => {
+let framesOpened = 0;
+
+/** A fresh frame `width` px wide on `hash` of `port`, replacing any before it,
+ *  hooked into the top page's `__s18log` when its window loads. `sub` null
+ *  waits for the empty state instead of a view. */
+async function frameAt(page, width, hash, sub, port = 7411) {
+  framesOpened += 1;
+  const tag = `${width} px ${port}/${hash}`;
+  await page.evaluate(({ id, width, url, tag }) => {
+    window.__s18log = window.__s18log || [];
+    window.__s18hooked = window.__s18hooked || 0;
+    window.__s18hook = window.__s18hook || ((f, t) => {
+      const w = f && f.contentWindow;
+      if (!w || w.__s18hooked || w.location.href === 'about:blank') return false;
+      w.__s18hooked = true;
+      window.__s18hooked += 1;
+      const log = (kind, text) => window.__s18log.push(`${t} ${kind}: ${text}`);
+      w.addEventListener('error', (e) => {
+        const el = e.target && e.target !== w ? e.target : null;
+        log('error', e.message || `${el ? el.tagName.toLowerCase() : 'resource'} ${el ? el.currentSrc || el.src || el.href || '' : ''} failed to load`);
+      }, true);
+      w.addEventListener('unhandledrejection', (e) => log('unhandledrejection', String(e.reason && e.reason.message ? e.reason.message : e.reason)));
+      const orig = w.console.error;
+      w.console.error = function error(...args) { log('console.error', args.map(String).join(' ')); return orig.apply(this, args); };
+      return true;
+    });
     const old = document.getElementById(id);
     if (old) old.remove();
     const f = document.createElement('iframe');
     f.id = id;
     f.style.cssText = `position:fixed;left:0;top:0;width:${width}px;height:800px;border:0;z-index:2147483647;background:#06140b`;
+    f.addEventListener('load', () => window.__s18hook(f, tag));
     f.src = url;
     document.body.appendChild(f);
-  }, { id: FRAME, width, url: `${ORIGIN}${hash}` });
+  }, { id: FRAME, width, url: `${HOST}:${port}/${hash}`, tag });
   const ok = Boolean(await until(page, frameShows, { id: FRAME, live: LIVE, sub }, 10000));
-  if (!ok) note(`${width} px frame on ${hash} never showed ${sub} ${LIVE} within 10 s`);
+  if (!ok) note(`${tag} never showed ${sub == null ? 'the empty state' : `${sub} ${LIVE}`} within 10 s`);
+  // The load event hooks the frame; this only covers a frame whose load the
+  // listener missed, and says so.
+  const late = await page.evaluate(({ id, tag }) => {
+    const f = document.getElementById(id);
+    return Boolean(f && f.contentWindow && !f.contentWindow.__s18hooked) && window.__s18hook(f, tag);
+  }, { id: FRAME, tag });
+  if (late) note(`${tag}: hooked after it showed, not on load`);
   return ok;
+}
+
+/** What the frames under this top page captured, and how many were hooked. */
+const frameLog = [];
+let framesHooked = 0;
+async function collectFrames(page) {
+  const r = await page.evaluate(() => ({ log: window.__s18log || [], hooked: window.__s18hooked || 0 }));
+  frameLog.push(...r.log);
+  framesHooked += r.hooked;
 }
 
 /** Move the frame through its own hash, as a link in it would. */
@@ -143,6 +196,23 @@ const narrow = ({ id }) => {
   };
 };
 
+/** R3b: a screen only another fixture shows, at 390 px, in a frame under the
+ *  top page `page` on `port`. R3's checks without the footer rows and the
+ *  map; a screen that never showed is a red row. `sub` null is the empty state. */
+async function otherAt390(page, port, hash, sub) {
+  const shown = await frameAt(page, 390, hash, sub, port);
+  const what = sub == null ? 'the empty state' : sub;
+  const label = `390 px ${port}/${hash}`;
+  let m;
+  try { m = await page.evaluate(narrow, { id: FRAME }); } catch (e) { return check('S18-1', label, false, `measure failed: ${e.message}`); }
+  check('S18-1', `${label}: documentElement ≤ 390, .screen/#view/#foot/#view .col fit, the tabs and the stream never clip`,
+    shown && !m.absent.length && m.doc <= 390 && !m.over.length && !m.clipped.length,
+    `${shown ? `${what} shown` : `${what} never shown`} · documentElement.scrollWidth ${m.doc}`
+      + ` · wider than their box: ${m.over.length ? m.over.join(', ') : 'none'}`
+      + ` · clipping: ${m.clipped.length ? m.clipped.join(', ') : 'none'}`
+      + (m.absent.length ? ` · absent ${m.absent.join(', ')}` : ''));
+}
+
 /** Boxes of the frame's elements by selector, in the frame's px; null when absent. */
 const boxesOf = ({ id, sel }) => {
   const d = document.getElementById(id).contentDocument;
@@ -170,6 +240,26 @@ const { page } = await openLive(7411);
 // S18-1 — 390 px: every sub-tab fits, the tab strip scrolls, the footer is two
 // rows, the map scrolls sideways.
 await frameAt(page, 390, '#tab=STAT&sub=AGENTS', 'AGENTS');
+
+// S18-7 — the frame hook catches what the frame reports: a console.error, an
+// error event and an unhandled rejection, each deliberate and then left out.
+const CAPTURE = 's18-capture-check';
+let capture;
+try {
+  capture = await page.evaluate(({ id, mark }) => {
+    const w = document.getElementById(id).contentWindow;
+    w.console.error(mark);
+    w.dispatchEvent(new w.ErrorEvent('error', { message: `${mark} (error event)` }));
+    w.dispatchEvent(new w.PromiseRejectionEvent('unhandledrejection', { promise: w.Promise.resolve(), reason: `${mark} (rejection)` }));
+    return (window.__s18log || []).filter((m) => m.includes(mark));
+  }, { id: FRAME, mark: CAPTURE });
+} catch (e) {
+  capture = [`hook check failed: ${e.message}`];
+}
+check('S18-7', '390 px frame: the hook captures a deliberate console.error, error event and unhandled rejection',
+  ['console.error', 'error', 'unhandledrejection'].every((k) => capture.some((m) => m.includes(` ${k}: ${CAPTURE}`))),
+  JSON.stringify(capture));
+
 for (const { tab, sub, hash } of EVERY_SUB) {
   const shown = await frameTo(page, hash, sub);
   let m = null;
@@ -321,23 +411,54 @@ check('S18-5', 'no element carries an inline animation-name', !motion.inline.len
 check('S18-5', 'document.getAnimations() holds only CSSAnimation and CSSTransition', !motion.foreign.length,
   `${motion.kinds} animation(s) · other kinds: ${motion.foreign.length ? JSON.stringify([...new Set(motion.foreign)]) : 'none'}`);
 
-await assertConsole(page, 'S18-7', 'console 7411, with its 390, 900 and 1200 px frames');
+await collectFrames(page);
+await assertConsole(page, 'S18-7', 'console 7411 (the top page)');
+
+// -------------------------------------------------------------- 7412 (suite)
+
+const { page: p12 } = await openLive(7412, '#tab=RADIO');
+await otherAt390(p12, 7412, '#tab=RADIO', 'STATIONS');
+await collectFrames(p12);
+await assertConsole(p12, 'S18-7', 'console 7412 (the top page)');
 
 // ------------------------------------------------------------- 7413 (review)
 
 const { page: p13 } = await openLive(7413);
 if (!(await until(p13, titleIs, 'AGENTS', 4000))) note('7413 never showed AGENTS');
 await frames(p13, '7413 STAT › AGENTS');
-await assertConsole(p13, 'S18-7', 'console 7413');
+await otherAt390(p13, 7413, '#tab=RADIO&station=review', 'STATIONS');
+await otherAt390(p13, 7413, '#tab=STAT', 'AGENTS');
+await collectFrames(p13);
+await assertConsole(p13, 'S18-7', 'console 7413 (the top page)');
+
+// ------------------------------------------------------------ 7414 (barrier)
+
+const { page: p14 } = await openLive(7414, '#tab=STAT');
+await otherAt390(p14, 7414, '#tab=STAT', 'AGENTS');
+await collectFrames(p14);
+await assertConsole(p14, 'S18-7', 'console 7414 (the top page)');
 
 // -------------------------------------------------------------- 7415 (empty)
 
 const { page: p15 } = await openLive(7415);
 if (!(await until(p15, () => Boolean(document.querySelector('[data-testid=empty-state] .vb')), null, 4000))) note('7415 never showed its sleeping operator');
 await frames(p15, '7415 empty state');
-await assertConsole(p15, 'S18-7', 'console 7415');
+await otherAt390(p15, 7415, '', null);
+await collectFrames(p15);
+await assertConsole(p15, 'S18-7', 'console 7415 (the top page)');
+
+// --------------------------------------------------------------- 7417 (idle)
+
+const { page: p17 } = await openLive(7417, '#tab=STAT');
+await otherAt390(p17, 7417, '#tab=STAT', 'AGENTS');
+await collectFrames(p17);
+await assertConsole(p17, 'S18-7', 'console 7417 (the top page)');
 
 // ------------------------------------------------------------------- S18-7
+
+const heard = frameLog.filter((m) => !m.includes(CAPTURE));
+__rec('S18-7', 'CONSOLE', framesHooked === framesOpened && !heard.length,
+  `every frame the spec opened: ${framesHooked} of ${framesOpened} hooked · ${heard.length} message(s)${heard.length ? ` ${JSON.stringify(heard.slice(0, 4))}` : ''}`);
 
 const wanted = ['w390-stat', 'w390-map', 'w900-stat', 'w1200-stat'];
 const taken = __smoke.shots.map((s) => s.state);

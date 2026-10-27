@@ -234,6 +234,9 @@ pre.out { margin:10px 0 0; font-family:'Roboto Condensed', sans-serif; font-size
 .empty { min-height:100%; box-sizing:border-box; padding:20px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; }
 .empty .msg p { margin:0; font-size:20px; }
 .empty .cmdrow { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:10px; }
+/* The plan's path is one long token: it breaks anywhere rather than run off
+   both sides of a centred row. */
+.empty .cmdrow code { min-width:0; overflow-wrap:anywhere; }
 
 @media (prefers-reduced-motion: no-preference) {
   .screen::before { animation: roll 8s linear infinite; }
