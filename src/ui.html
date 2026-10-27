@@ -976,7 +976,7 @@ function paintTimes() {
   }
 }
 
-const derivedSig = (items) => `${items.map((x) => x.key).join(',')}|${agents().map((a) => `${a.id}:${a.status}`).join(',')}`;
+const derivedSig = (items) => `${items.map((x) => x.key).join(',')}|${agents().map((a) => `${a.id}:${a.status}:${a.silentMin ?? ''}`).join(',')}`;
 
 function render() {
   const s = S.snap;
@@ -999,8 +999,9 @@ function render() {
   if (!S.frozen) paintTimes();
 }
 
-/** Every second: clocks, the quiet signal, and a redraw only when a status
- *  changed on its own (a task crossing the silence thresholds). Nothing moves
+/** Every second: clocks, the quiet signal, and a redraw only when something
+ *  derived changed on its own: a status, or a silent agent's minute count, so
+ *  "no event for N min" keeps counting with no new snapshot. Nothing moves
  *  while the stream is down. */
 function tick() {
   if (S.frozen) return;
