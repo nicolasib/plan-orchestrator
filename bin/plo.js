@@ -126,7 +126,8 @@ function cmdInit(args) {
   const done = resolveDone(plan, existing, args);
   const { overrides } = loadOverrides(abs, args);
   const maxLanes = Number(args['max-lanes'] || 3);
-  const dag = buildDag(plan.tasks, { done, maxLanes, overrides });
+  const inferSemantic = args['no-infer'] !== true;
+  const dag = buildDag(plan.tasks, { done, maxLanes, overrides, inferSemantic });
   if (dag.cycle && dag.cycle.length) fail(`dependency cycle among tasks ${dag.cycle.join(', ')}.`, EXIT.ANALYSIS);
 
   const repoRoot = args.repo ? path.resolve(args.repo) : wt.repoRoot(path.dirname(abs));
@@ -143,6 +144,7 @@ function cmdInit(args) {
     lanes: dag.lanes,
     barriers: dag.barriers,
     testCommand: args['test-command'] || plan.constraints.testCommand,
+    inferSemantic,
   });
   const p = state.save(abs, st);
 
@@ -178,11 +180,13 @@ async function cmdRun(args, { resuming = false } = {}) {
 
   const done = resolveDone(plan, st, args);
   const { overrides } = loadOverrides(abs, args);
-  const dag = buildDag(plan.tasks, { done, maxLanes: st.maxLanes, overrides });
+  // State files from before the field infer, as they always did.
+  const inferSemantic = args['no-infer'] !== true && st.inferSemantic !== false;
+  const dag = buildDag(plan.tasks, { done, maxLanes: st.maxLanes, overrides, inferSemantic });
   // Readiness reads the live graph, where finished tasks have dropped out. The
   // cross-lane merge needs the whole one: a producer that finished in an
   // earlier run is exactly the one whose code the next task still lacks.
-  const dependencyEdges = buildDag(plan.tasks, { done: [], maxLanes: st.maxLanes, overrides }).edges;
+  const dependencyEdges = buildDag(plan.tasks, { done: [], maxLanes: st.maxLanes, overrides, inferSemantic }).edges;
 
   if (args['dry-run']) {
     out(render.dag(plan, dag, { planPath: abs, state: st, dryRun: true }));
@@ -350,7 +354,7 @@ OPTIONS
   --max-lanes <n>        concurrency ceiling (default 3)
   --done <1,2>           mark tasks complete on top of the plan's checkboxes
   --overrides <file>     lane corrections (default: .plan-lanes-<plan>.json beside the plan)
-  --no-infer             disable the docs/wrap-up barrier heuristics
+  --no-infer             disable the docs/wrap-up barrier heuristics (init keeps it for run/resume)
   --dry-run              with run/resume: show what would execute, spawn nothing
   --json                 machine-readable output (analyze, status)
   --model <name>         model for task processes
