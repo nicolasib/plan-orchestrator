@@ -72,6 +72,33 @@ test('a barrier that declares files and ends with no commit is not done', async 
   assert.equal(st.integration.status, 'barrier-failed');
 });
 
+test('a barrier retried after its work was committed by hand counts that commit', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    // Attempt 1 leaves the edit uncommitted; attempt 2 finds the work done.
+    3: [
+      { writes: { 'src/c.js': '3' }, commit: false, result: { text: 'aguardando o relatório' } },
+      { result: { text: 'STATUS: DONE — already in the tree' } },
+    ],
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+  await runLanesIn(repo, st, plan, dag);
+  assert.equal((await integrate(repo.planPath, st, plan, { log() {} })).ok, false, 'premise: attempt 1 fails');
+
+  execFileSync('git', ['add', '-A'], { cwd: repo.root });
+  execFileSync('git', ['commit', '-q', '-m', 'T3 finished by hand'], { cwd: repo.root });
+  const byHand = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.root, encoding: 'utf8' }).trim();
+
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+  assert.equal(st.tasks['3'].status, 'done');
+  assert.deepEqual(st.tasks['3'].commits, [byHand]);
+});
+
 // T3 declares no files: a wrap-up that may legitimately find nothing to commit.
 const WRAP_PLAN = [
   '# Wrap plan', '',

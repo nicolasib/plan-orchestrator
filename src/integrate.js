@@ -120,7 +120,13 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     // task from scratch — so the id is only a label for the log.
     const sessionId = newSessionId();
     const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
-    const baseBefore = wt.headCommit(st.repoRoot);
+    // A retry keeps the base where the work started, as a lane task does, so a
+    // commit an earlier attempt made — or a person made to finish what it left
+    // uncommitted — counts as this task's. From HEAD, the retry would find
+    // nothing new to commit and fail for ever.
+    const baseBefore = rec.baseBefore && wt.isAncestor(st.repoRoot, rec.baseBefore)
+      ? rec.baseBefore
+      : wt.headCommit(st.repoRoot);
     // A barrier obeys its own `**Effort:**` line and climbs like a lane task.
     // `integrate` never reconciles, so a raise stands until the next run/resume.
     const used = effortFor(plannedEffort(task), rec.raises || 0);
