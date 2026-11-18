@@ -70,7 +70,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxLanes, lanes, barriers, testCommand }) {
+function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxLanes, lanes, barriers, testCommand, inferSemantic = true }) {
   const tasks = {};
   for (const lane of lanes) {
     for (const n of lane.tasks) {
@@ -89,6 +89,9 @@ function create({ planPath, planContents, repoRoot, baseBranch, baseCommit, maxL
     testCommand: testCommand || null,
     base: { branch: baseBranch, commit: baseCommit },
     maxLanes,
+    // `--no-infer` given to init. run/resume read it back: the graph they run
+    // is the one init approved, flag repeated or not.
+    inferSemantic,
     createdAt: nowIso(),
     updatedAt: nowIso(),
     lanes: lanes.map((l) => ({ id: l.id, tasks: l.tasks, branch: null, worktree: null, weight: l.weight })),

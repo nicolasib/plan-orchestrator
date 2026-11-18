@@ -56,7 +56,13 @@ function mergeLanes(st, { log = () => {}, noFf = true } = {}) {
       merged,
     };
   }
-  if (wt.isDirty(root)) {
+  // plo's own files — the checkpoints and the logs it writes beside the plan —
+  // are not uncommitted work. With the plan inside the repo they refused every
+  // merge, unless the repo happened to ignore them.
+  const planDir = path.relative(fs.realpathSync(root), fs.realpathSync(path.dirname(st.plan)));
+  const insideRepo = planDir !== '..' && !planDir.startsWith(`..${path.sep}`) && !path.isAbsolute(planDir);
+  const own = insideRepo ? [path.join(planDir, '.plan-state*'), path.join(planDir, '.plo-logs')] : [];
+  if (wt.isDirty(root, { except: own })) {
     return { ok: false, stage: 'precondition', error: 'the feature checkout has uncommitted changes; commit or stash them first.', merged };
   }
 
@@ -114,7 +120,13 @@ async function runBarriers(planPath, st, plan, opts = {}) {
     // task from scratch — so the id is only a label for the log.
     const sessionId = newSessionId();
     const logFile = path.join(path.dirname(planPath), '.plo-logs', `task-${n}.jsonl`);
-    const baseBefore = wt.headCommit(st.repoRoot);
+    // A retry keeps the base where the work started, as a lane task does, so a
+    // commit an earlier attempt made — or a person made to finish what it left
+    // uncommitted — counts as this task's. From HEAD, the retry would find
+    // nothing new to commit and fail for ever.
+    const baseBefore = rec.baseBefore && wt.isAncestor(st.repoRoot, rec.baseBefore)
+      ? rec.baseBefore
+      : wt.headCommit(st.repoRoot);
     // A barrier obeys its own `**Effort:**` line and climbs like a lane task.
     // `integrate` never reconciles, so a raise stands until the next run/resume.
     const used = effortFor(plannedEffort(task), rec.raises || 0);
@@ -152,11 +164,19 @@ async function runBarriers(planPath, st, plan, opts = {}) {
 
     const commits = wt.laneCommits(st.repoRoot, baseBefore, 'HEAD').map((c) => c.sha);
     const blocked = /STATUS:\s*BLOCKED/i.test(outcome.result || '');
-    // A barrier legitimately may produce no commits (a suite-run task that finds
-    // nothing to change), so commits are not required here the way they are for
-    // an implementation task.
-    const ok = outcome.ok && !blocked;
+    // A barrier that declares no files (a suite-run task that finds nothing to
+    // change) may legitimately produce no commits. One that declares files owes
+    // them, like an implementation task: an agent that hands the work to a
+    // background helper and exits reports success with the edits uncommitted.
+    const missingCommits = Boolean(task && task.writes.length) && !commits.length;
+    const ok = outcome.ok && !blocked && !missingCommits;
     const status = ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
+    let error = null;
+    if (!ok) {
+      error = outcome.ok && !blocked
+        ? 'agent reported success but produced no commits'
+        : (outcome.result || outcome.stderr || '').slice(0, 500);
+    }
 
     const endedAt = new Date().toISOString();
     state.updateTask(planPath, st, n, {
@@ -176,7 +196,7 @@ async function runBarriers(planPath, st, plan, opts = {}) {
         ? rec.tries || []
         : [...(rec.tries || []), { effort: used, status, at: endedAt }],
       raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
-      error: ok ? null : (outcome.result || outcome.stderr || '').slice(0, 500),
+      error,
     });
 
     log(ok ? `T${n} (barrier): done — ${commits.length} commit(s)` : `T${n} (barrier): FAILED`);

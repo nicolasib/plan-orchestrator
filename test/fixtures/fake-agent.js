@@ -10,8 +10,8 @@
  * names — so a test can assert on the worktree as the agent found it.
  *
  *   PLO_FAKE_SPEC  JSON: { "<task>" | "review": step | [step for attempt 1, attempt 2, ...] }
- *                  step: { observe: [path], requires: [path], writes: {path: body}, exit: code,
- *                          sleepMs: ms, events: [object],
+ *                  step: { observe: [path], requires: [path], writes: {path: body}, commit: false,
+ *                          exit: code, sleepMs: ms, events: [object],
  *                          result: { is_error, subtype, text, total_cost_usd, output_tokens } }
  *   PLO_FAKE_SEEN  directory for task-<n>-<attempt>.json (review-<attempt>.json) observations
  *
@@ -83,7 +83,9 @@ for (const [p, body] of writes) {
   fs.mkdirSync(path.dirname(path.join(cwd, p)), { recursive: true });
   fs.writeFileSync(path.join(cwd, p), body);
 }
-if (writes.length) {
+// `commit: false` leaves the writes uncommitted, the way an agent that hands the
+// work to a background helper and exits leaves them.
+if (writes.length && step.commit !== false) {
   // `add -A`, the way a careless agent stages: whatever the worktree shows
   // as changed goes into the commit.
   execFileSync('git', ['add', '-A'], { cwd });

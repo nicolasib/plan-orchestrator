@@ -7,9 +7,9 @@ const { makeRepo, cleanup, initRun, useSpec, seen, runLanesIn } = require('./hel
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
 const state = require('../src/state');
-const { integrate, markInterrupted, fullSuite } = require('../src/integrate');
+const { integrate, markInterrupted, fullSuite, mergeLanes } = require('../src/integrate');
 const { processStamp, processAlive, killGroup } = require('../src/proc');
 
 const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
@@ -48,6 +48,106 @@ test('a barrier marked medium runs with --effort medium, the cross-lane review w
   assert.equal(effortIn(argvOf(repo, 'review', 1)), null);
   assert.equal(st.tasks['3'].effort, 'medium');
   assert.equal(st.integration.status, 'done');
+});
+
+test('a barrier that declares files and ends with no commit is not done', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  // The agent handed the work to a background helper and exited: the file is
+  // edited, nothing is committed, and the process still reports success.
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    3: { writes: { 'src/c.js': 'half' }, commit: false, result: { text: 'Implementador retomado em segundo plano; aguardando o relatório.' } },
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+
+  await runLanesIn(repo, st, plan, dag);
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.stage, 'barriers');
+  assert.equal(st.tasks['3'].status, 'failed');
+  assert.match(st.tasks['3'].error, /no commits/);
+  assert.equal(st.integration.status, 'barrier-failed');
+});
+
+test('a barrier retried after its work was committed by hand counts that commit', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    // Attempt 1 leaves the edit uncommitted; attempt 2 finds the work done.
+    3: [
+      { writes: { 'src/c.js': '3' }, commit: false, result: { text: 'aguardando o relatório' } },
+      { result: { text: 'STATUS: DONE — already in the tree' } },
+    ],
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+  await runLanesIn(repo, st, plan, dag);
+  assert.equal((await integrate(repo.planPath, st, plan, { log() {} })).ok, false, 'premise: attempt 1 fails');
+
+  execFileSync('git', ['add', '-A'], { cwd: repo.root });
+  execFileSync('git', ['commit', '-q', '-m', 'T3 finished by hand'], { cwd: repo.root });
+  const byHand = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.root, encoding: 'utf8' }).trim();
+
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+  assert.equal(st.tasks['3'].status, 'done');
+  assert.deepEqual(st.tasks['3'].commits, [byHand]);
+});
+
+// T3 declares no files: a wrap-up that may legitimately find nothing to commit.
+const WRAP_PLAN = [
+  '# Wrap plan', '',
+  '### Task 1: Alpha', '',
+  '**Files:**', '- Create: `src/a.js`', '', '- [ ] **Step 1: write a**', '',
+  '### Task 2: Beta', '',
+  '**Files:**', '- Create: `src/b.js`', '', '- [ ] **Step 1: write b**', '',
+  '### Task 3: Run the full suite', '', '- [ ] **Step 1: run it**', '',
+].join('\n');
+
+test('a barrier that declares no files may end with no commit', async (t) => {
+  const repo = makeRepo(WRAP_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  assert.deepEqual(st.barriers, [3], 'fixture premise: T3 is a barrier');
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+
+  await runLanesIn(repo, st, plan, dag);
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+  assert.equal(st.tasks['3'].status, 'done');
+  assert.deepEqual(st.tasks['3'].commits, []);
+});
+
+test("the merge ignores plo's own state and logs beside the plan, not the user's changes", async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  // A repo that does not ignore them, as a plan's repo usually does not.
+  execFileSync('git', ['rm', '-q', '.gitignore'], { cwd: repo.root });
+  execFileSync('git', ['commit', '-q', '-m', 'no ignore'], { cwd: repo.root });
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, { 1: { writes: { 'src/a.js': '1' } }, 2: { writes: { 'src/b.js': '2' } } });
+  await runLanesIn(repo, st, plan, dag);
+
+  const status = execFileSync('git', ['status', '--porcelain'], { cwd: repo.root, encoding: 'utf8' });
+  assert.match(status, /\.plan-state-plan\.json/, 'premise: the state file shows as untracked');
+  assert.match(status, /\.plo-logs\//, 'premise: the logs show as untracked');
+
+  const m = mergeLanes(st);
+  assert.equal(m.ok, true, m.error);
+  assert.deepEqual(m.merged.sort(), st.lanes.map((l) => l.id).sort());
+
+  fs.writeFileSync(path.join(repo.root, 'src', 'keep.js'), '// edited by hand\n');
+  const again = mergeLanes(st);
+  assert.equal(again.ok, false);
+  assert.match(again.error, /uncommitted changes/);
 });
 
 const CLEAN = 'CROSS-LANE VERDICT: CLEAN';
