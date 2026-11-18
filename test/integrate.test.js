@@ -50,6 +50,56 @@ test('a barrier marked medium runs with --effort medium, the cross-lane review w
   assert.equal(st.integration.status, 'done');
 });
 
+test('a barrier that declares files and ends with no commit is not done', async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  // The agent handed the work to a background helper and exited: the file is
+  // edited, nothing is committed, and the process still reports success.
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    3: { writes: { 'src/c.js': 'half' }, commit: false, result: { text: 'Implementador retomado em segundo plano; aguardando o relatório.' } },
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+
+  await runLanesIn(repo, st, plan, dag);
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.stage, 'barriers');
+  assert.equal(st.tasks['3'].status, 'failed');
+  assert.match(st.tasks['3'].error, /no commits/);
+  assert.equal(st.integration.status, 'barrier-failed');
+});
+
+// T3 declares no files: a wrap-up that may legitimately find nothing to commit.
+const WRAP_PLAN = [
+  '# Wrap plan', '',
+  '### Task 1: Alpha', '',
+  '**Files:**', '- Create: `src/a.js`', '', '- [ ] **Step 1: write a**', '',
+  '### Task 2: Beta', '',
+  '**Files:**', '- Create: `src/b.js`', '', '- [ ] **Step 1: write b**', '',
+  '### Task 3: Run the full suite', '', '- [ ] **Step 1: run it**', '',
+].join('\n');
+
+test('a barrier that declares no files may end with no commit', async (t) => {
+  const repo = makeRepo(WRAP_PLAN); t.after(() => cleanup(repo));
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  assert.deepEqual(st.barriers, [3], 'fixture premise: T3 is a barrier');
+  useSpec(repo, {
+    1: { writes: { 'src/a.js': '1' } },
+    2: { writes: { 'src/b.js': '2' } },
+    review: { result: { text: 'CROSS-LANE VERDICT: CLEAN' } },
+  });
+
+  await runLanesIn(repo, st, plan, dag);
+  const res = await integrate(repo.planPath, st, plan, { log() {} });
+
+  assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
+  assert.equal(st.tasks['3'].status, 'done');
+  assert.deepEqual(st.tasks['3'].commits, []);
+});
+
 const CLEAN = 'CROSS-LANE VERDICT: CLEAN';
 const LANE_SPEC = {
   1: { writes: { 'src/a.js': '1' } },

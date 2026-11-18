@@ -152,11 +152,19 @@ async function runBarriers(planPath, st, plan, opts = {}) {
 
     const commits = wt.laneCommits(st.repoRoot, baseBefore, 'HEAD').map((c) => c.sha);
     const blocked = /STATUS:\s*BLOCKED/i.test(outcome.result || '');
-    // A barrier legitimately may produce no commits (a suite-run task that finds
-    // nothing to change), so commits are not required here the way they are for
-    // an implementation task.
-    const ok = outcome.ok && !blocked;
+    // A barrier that declares no files (a suite-run task that finds nothing to
+    // change) may legitimately produce no commits. One that declares files owes
+    // them, like an implementation task: an agent that hands the work to a
+    // background helper and exits reports success with the edits uncommitted.
+    const missingCommits = Boolean(task && task.writes.length) && !commits.length;
+    const ok = outcome.ok && !blocked && !missingCommits;
     const status = ok ? state.STATUS.DONE : blocked ? state.STATUS.BLOCKED : state.STATUS.FAILED;
+    let error = null;
+    if (!ok) {
+      error = outcome.ok && !blocked
+        ? 'agent reported success but produced no commits'
+        : (outcome.result || outcome.stderr || '').slice(0, 500);
+    }
 
     const endedAt = new Date().toISOString();
     state.updateTask(planPath, st, n, {
@@ -176,7 +184,7 @@ async function runBarriers(planPath, st, plan, opts = {}) {
         ? rec.tries || []
         : [...(rec.tries || []), { effort: used, status, at: endedAt }],
       raises: (rec.raises || 0) + (shouldRaise(status, outcome, { aborted: Boolean(opts.signal && opts.signal.aborted) }) ? 1 : 0),
-      error: ok ? null : (outcome.result || outcome.stderr || '').slice(0, 500),
+      error,
     });
 
     log(ok ? `T${n} (barrier): done — ${commits.length} commit(s)` : `T${n} (barrier): FAILED`);
