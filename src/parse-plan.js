@@ -32,6 +32,9 @@ const KNOWN_EXTENSIONS = new Set([
   'css', 'scss', 'sass', 'less',
   'sql', 'py', 'rb', 'go', 'rs', 'sh', 'bash',
   'html', 'vue', 'svelte',
+  // Godot: scripts, scenes, resources, shaders, the project and export
+  // settings, and the CSV translation tables.
+  'gd', 'tscn', 'tres', 'gdshader', 'godot', 'cfg', 'csv',
 ]);
 
 const TASK_HEADING = /^#{2,4}\s+Task\s+(\d+)\s*[:—-]\s*(.*)$/;

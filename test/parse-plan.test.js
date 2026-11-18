@@ -18,6 +18,40 @@ test('looksLikePath: accepts sources, rejects symbols and route literals', () =>
   assert.equal(looksLikePath(''), false);
 });
 
+test('looksLikePath: accepts Godot project files', () => {
+  for (const p of [
+    'games/truco/truco_game.gd', 'app/main.tscn', 'world/monkey/styles/bolinha.tres',
+    'project.godot', 'export_presets.cfg', 'locale/truco.csv', 'shaders/water.gdshader',
+  ]) assert.equal(looksLikePath(p), true, p);
+});
+
+// Built as an array of lines so its headings never start a line in this file.
+const GODOT_PLAN = [
+  '# Godot plan', '',
+  '### Task 1: Cartas', '',
+  '**Files:**', '- Create: `games/truco/truco_card.gd`, `locale/truco.csv`', '- Test: `tests/truco/test_truco_card.gd`', '',
+  '- [ ] step', '',
+  '### Task 2: Perfil', '',
+  '**Files:**', '- Create: `core/profile/profile_store.gd`; Modify: `project.godot`', '',
+  '- [ ] step', '',
+  '### Task 3: Rede', '',
+  '**Files:**', '- Create: `core/net/network.gd`; Modify: `project.godot`, `app/main.tscn`', '',
+  '**Interfaces:**', '- Consumes: `Profile` (Task 2)', '',
+  '- [ ] step', '',
+].join('\n');
+
+test('a task that only touches Godot files has writes, so it is not read as a wrap-up', () => {
+  const { buildDag } = require('../src/build-dag');
+  const { tasks } = parsePlan(GODOT_PLAN);
+  assert.deepEqual(tasks[0].writes, ['games/truco/truco_card.gd', 'locale/truco.csv', 'tests/truco/test_truco_card.gd']);
+
+  // Unrecognised, every task had no writes and gated on every other: a cycle.
+  const dag = buildDag(tasks, { maxLanes: 3 });
+  assert.deepEqual(dag.cycle, []);
+  assert.ok(dag.edges.some((e) => e.from === 2 && e.to === 3 && e.kind === 'write-write'),
+    'both write project.godot');
+});
+
 test('extractPaths: one line can declare two real writes', () => {
   const line = '- Test: `tests/requestsRepo.searchScope.test.js` (novo) + 1 caso em `tests/external.requests.test.js`';
   const { paths, excluded } = extractPaths(line);
