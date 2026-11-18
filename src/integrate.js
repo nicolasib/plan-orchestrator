@@ -56,7 +56,13 @@ function mergeLanes(st, { log = () => {}, noFf = true } = {}) {
       merged,
     };
   }
-  if (wt.isDirty(root)) {
+  // plo's own files — the checkpoints and the logs it writes beside the plan —
+  // are not uncommitted work. With the plan inside the repo they refused every
+  // merge, unless the repo happened to ignore them.
+  const planDir = path.relative(fs.realpathSync(root), fs.realpathSync(path.dirname(st.plan)));
+  const insideRepo = planDir !== '..' && !planDir.startsWith(`..${path.sep}`) && !path.isAbsolute(planDir);
+  const own = insideRepo ? [path.join(planDir, '.plan-state*'), path.join(planDir, '.plo-logs')] : [];
+  if (wt.isDirty(root, { except: own })) {
     return { ok: false, stage: 'precondition', error: 'the feature checkout has uncommitted changes; commit or stash them first.', merged };
   }
 

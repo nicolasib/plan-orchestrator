@@ -223,8 +223,10 @@ function mergeCommit(cwd, commit, message) {
   }
 }
 
-function isDirty(cwd) {
-  return git(cwd, ['status', '--porcelain']).length > 0;
+/** `except`: git pathspecs, relative to `cwd`, whose changes do not count. */
+function isDirty(cwd, { except = [] } = {}) {
+  const pathspec = except.length ? ['--', '.', ...except.map((p) => `:(exclude)${p}`)] : [];
+  return git(cwd, ['status', '--porcelain', ...pathspec]).length > 0;
 }
 
 module.exports = {

@@ -7,9 +7,9 @@ const { makeRepo, cleanup, initRun, useSpec, seen, runLanesIn } = require('./hel
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
 const state = require('../src/state');
-const { integrate, markInterrupted, fullSuite } = require('../src/integrate');
+const { integrate, markInterrupted, fullSuite, mergeLanes } = require('../src/integrate');
 const { processStamp, processAlive, killGroup } = require('../src/proc');
 
 const PLO = path.join(__dirname, '..', 'bin', 'plo.js');
@@ -98,6 +98,29 @@ test('a barrier that declares no files may end with no commit', async (t) => {
   assert.equal(res.ok, true, JSON.stringify(res).slice(0, 600));
   assert.equal(st.tasks['3'].status, 'done');
   assert.deepEqual(st.tasks['3'].commits, []);
+});
+
+test("the merge ignores plo's own state and logs beside the plan, not the user's changes", async (t) => {
+  const repo = makeRepo(BARRIER_PLAN); t.after(() => cleanup(repo));
+  // A repo that does not ignore them, as a plan's repo usually does not.
+  execFileSync('git', ['rm', '-q', '.gitignore'], { cwd: repo.root });
+  execFileSync('git', ['commit', '-q', '-m', 'no ignore'], { cwd: repo.root });
+  const { st, plan, dag } = initRun(repo, { maxLanes: 2, testCommand: 'node -e ""' });
+  useSpec(repo, { 1: { writes: { 'src/a.js': '1' } }, 2: { writes: { 'src/b.js': '2' } } });
+  await runLanesIn(repo, st, plan, dag);
+
+  const status = execFileSync('git', ['status', '--porcelain'], { cwd: repo.root, encoding: 'utf8' });
+  assert.match(status, /\.plan-state-plan\.json/, 'premise: the state file shows as untracked');
+  assert.match(status, /\.plo-logs\//, 'premise: the logs show as untracked');
+
+  const m = mergeLanes(st);
+  assert.equal(m.ok, true, m.error);
+  assert.deepEqual(m.merged.sort(), st.lanes.map((l) => l.id).sort());
+
+  fs.writeFileSync(path.join(repo.root, 'src', 'keep.js'), '// edited by hand\n');
+  const again = mergeLanes(st);
+  assert.equal(again.ok, false);
+  assert.match(again.error, /uncommitted changes/);
 });
 
 const CLEAN = 'CROSS-LANE VERDICT: CLEAN';
